@@ -13,18 +13,14 @@ use super::{Plot, format_value, precision, units};
 /// (points).
 const SNAP_PX: f32 = 8.0;
 
-/// A vertical hairline at the pointer (snapped to a nearby sample), a dot
-/// on each trace where its line is, a time tag on the axis, and a floating
-/// card of the values the lines show there.
-pub fn crosshair(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>], dark: bool) {
-    let Some(mut p) = ui.input(|i| i.pointer.hover_pos()) else {
-        return;
-    };
+/// Where the crosshair goes: the pointer, snapped to a nearby sample of
+/// the first visible trace, and the time there. `None` when the pointer
+/// is not over the data.
+pub fn hairline(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>]) -> Option<(Pos2, f64)> {
+    let mut p = ui.input(|i| i.pointer.hover_pos())?;
     if !f.data.contains(p) || !ui.rect_contains_pointer(f.outer) {
-        return;
+        return None;
     }
-    let painter = ui.painter_at(f.outer);
-    let v = ui.visuals();
     let mut t = f.time_at(p.x);
     let first = plot
         .traces
@@ -37,6 +33,22 @@ pub fn crosshair(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>], dark: 
         t = i;
         p.x = f.xs.pos(i);
     }
+    Some((p, t))
+}
+
+/// A vertical hairline at `hair` (from [`hairline`]), a dot on each trace
+/// where its line is, a time tag on the axis, and a floating card of the
+/// values the lines show there ("—" for a trace with none).
+pub fn crosshair(
+    plot: &Plot,
+    ui: &egui::Ui,
+    f: &Frame,
+    data: &[Vec<Pt>],
+    dark: bool,
+    (p, t): (Pos2, f64),
+) {
+    let painter = ui.painter_at(f.outer);
+    let v = ui.visuals();
     painter.line_segment(
         [
             Pos2::new(p.x, f.data.top()),
@@ -53,19 +65,26 @@ pub fn crosshair(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>], dark: 
         range: Option<String>,
     }
     let mut rows = Vec::new();
-    for (trace, pts) in plot.traces.iter().zip(data) {
+    for (n, (trace, pts)) in plot.traces.iter().zip(data).enumerate() {
         if !trace.visible {
             continue;
         }
         let color = plot.color(trace, dark);
         let Some(i) = at_time(pts, t) else {
+            rows.push(Row {
+                color,
+                name: trace.label(),
+                value: "—".into(),
+                range: None,
+            });
             continue;
         };
         let pt = pts[i];
         // A held raw value is where the hairline crosses its step; a bin
         // mean at the bin's centre.
         let x = if pt.step { p.x } else { f.xs.pos(pt.t) };
-        let at = Pos2::new(x, f.ys.pos(pt.v));
+        let ys = f.scale(plot.axis_of.get(n).copied().unwrap_or(0));
+        let at = Pos2::new(x, ys.pos(pt.v));
         if pt.v.is_finite() && f.data.expand(4.0).contains(at) {
             painter.circle(at, 4.0, color, Stroke::new(1.5, v.extreme_bg_color));
         }
@@ -135,9 +154,11 @@ pub fn crosshair(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>], dark: 
     if x + width > f.outer.right() - 4.0 {
         x = p.x - 16.0 - width;
     }
+    // Above the time axis strip, so it never covers the crosshair's own
+    // time tag there.
     let y = (p.y - height / 2.0).clamp(
         f.outer.top() + 4.0,
-        (f.outer.bottom() - height - 4.0).max(f.outer.top()),
+        (f.data.bottom() - height - 4.0).max(f.outer.top()),
     );
     let card = Rect::from_min_size(
         Pos2::new(x.max(f.outer.left() + 4.0), y),
@@ -192,15 +213,31 @@ pub fn crosshair(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>], dark: 
     }
 }
 
-/// A small rounded tag on the time axis under the hairline, over the tick
-/// labels, with the time to the second (or millisecond when zoomed in).
-fn time_tag(painter: &egui::Painter, f: &Frame, x: f32, t: f64, v: &egui::Visuals) {
-    let font = FontId::proportional(11.5);
-    let text = super::timeaxis::tag_time(t, f.xs.hi - f.xs.lo);
-    let galley = painter.layout_no_wrap(text, font, v.strong_text_color());
-    let size = galley.size() + Vec2::new(12.0, 4.0);
+/// The time tag's text at `t`.
+fn tag_text(f: &Frame, t: f64) -> String {
+    super::timeaxis::tag_time(t, f.xs.hi - f.xs.lo)
+}
+
+fn tag_font() -> FontId {
+    FontId::proportional(11.5)
+}
+
+/// Where the time tag for a hairline at `x` (time `t`) goes: the tick
+/// labels it covers are left out.
+pub fn time_tag_rect(painter: &egui::Painter, f: &Frame, x: f32, t: f64) -> Rect {
+    let size =
+        super::render::text_size(painter, &tag_text(f, t), &tag_font()) + Vec2::new(12.0, 4.0);
     let left = (x - size.x / 2.0).clamp(f.outer.left() + 2.0, f.outer.right() - size.x - 2.0);
-    let tag = Rect::from_min_size(Pos2::new(left, f.data.bottom() + 4.0), size);
+    Rect::from_min_size(Pos2::new(left, f.data.bottom() + 4.0), size)
+}
+
+/// A small rounded tag on the time axis under the hairline, in place of
+/// the tick labels there, with the time to the second (or millisecond
+/// when zoomed in).
+fn time_tag(painter: &egui::Painter, f: &Frame, x: f32, t: f64, v: &egui::Visuals) {
+    let galley = painter.layout_no_wrap(tag_text(f, t), tag_font(), v.strong_text_color());
+    let tag = time_tag_rect(painter, f, x, t);
+    let size = tag.size();
     painter.rect(
         tag,
         size.y / 2.0,

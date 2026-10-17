@@ -220,10 +220,15 @@ impl Operator {
         }
     }
 
-    /// The operator to plot `width_px` device pixels: `optimized` with two
-    /// bins per pixel, at most [`MAX_BINS`].
+    /// The operator to fetch for a plot `width_px` device pixels wide:
+    /// `optimized` with one bin per pixel, at most [`MAX_BINS`]. Pass the
+    /// width of the whole window fetched: when it is padded beyond the
+    /// part shown, scale the plot width by the padding (`archiveview`
+    /// fetches 1.5 times the visible span, so 1.5 times the width). Finer
+    /// bins only alias: their means zig-zag into a solid block where the
+    /// min/max envelope already shows the extremes.
     pub fn for_width(width_px: f32) -> Self {
-        let n = (2.0 * width_px.max(1.0)).round() as u32;
+        let n = width_px.max(1.0).round() as u32;
         Operator::Optimized(n.clamp(1, MAX_BINS))
     }
 }
@@ -272,21 +277,36 @@ pub struct Search {
 }
 
 impl Search {
-    /// What the search box sends for `text`: a glob, wrapped as `*text*`
-    /// for a substring match when it has no `*` or `?`. Surrounding
-    /// whitespace is trimmed.
+    /// What the search box sends for `text` (surrounding whitespace
+    /// trimmed), always as a regex so that names holding regex
+    /// metacharacters (`XF:23ID1-ES{Dif-Ax:TH}Mtr`) match literally: the
+    /// appliance turns a `pv=` glob into a regex without escaping them.
+    ///
+    /// - Plain text matches anywhere in the name, ignoring case:
+    ///   `sine` finds `MOCK:SINE`.
+    /// - Text with `*` or `?` is a glob matching the whole name, with case:
+    ///   `*` any run of characters, `?` any one, everything else literal.
     pub fn from_user(text: &str, limit: i32) -> Self {
         let text = text.trim();
         let pattern = if text.contains(['*', '?']) {
-            text.to_string()
+            let mut re = String::new();
+            for c in text.chars() {
+                match c {
+                    '*' => re.push_str(".*"),
+                    '?' => re.push('.'),
+                    c => push_escaped(&mut re, c),
+                }
+            }
+            re
         } else {
-            format!("*{text}*")
+            format!("(?i).*{}.*", regex_escape(text))
         };
-        Self {
-            pattern,
-            mode: SearchMode::Glob,
-            limit,
-        }
+        Self::regex(pattern, limit)
+    }
+
+    /// A search for exactly the name `pv`.
+    pub fn exact(pv: &str, limit: i32) -> Self {
+        Self::regex(regex_escape(pv), limit)
     }
 
     pub fn regex(re: impl Into<String>, limit: i32) -> Self {
@@ -296,6 +316,26 @@ impl Search {
             limit,
         }
     }
+}
+
+/// `text` with every regex metacharacter backslash-escaped, so it matches
+/// itself (in Java's regex syntax, which the appliance uses, and in Rust's).
+pub fn regex_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        push_escaped(&mut out, c);
+    }
+    out
+}
+
+fn push_escaped(out: &mut String, c: char) {
+    if matches!(
+        c,
+        '\\' | '^' | '$' | '.' | '|' | '?' | '*' | '+' | '(' | ')' | '[' | ']' | '{' | '}'
+    ) {
+        out.push('\\');
+    }
+    out.push(c);
 }
 
 /// What `getMetadata` says about a PV (all optional: servers differ).

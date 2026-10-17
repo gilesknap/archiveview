@@ -30,7 +30,10 @@ value axes zoom to it.
 ## Zoom values
 
 The value axis scales itself to the visible data, including the min/max
-bands. To set it yourself:
+bands. Traces with different units each get their own axis (up to three: the
+first on the left, the others on the right, labelled in the trace's colour).
+The left axis is the one you can set yourself; the others always scale
+themselves:
 
 - **Drag** on the value axis (the labels on the left) to pan values, or
   shift- or ctrl-**scroll** over the plot to zoom them.

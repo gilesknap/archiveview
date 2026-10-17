@@ -28,6 +28,8 @@ struct Chip {
     /// Live and connected: the value is current.
     current: bool,
     severity: Option<Color32>,
+    /// A quiet word after the value: "live only", "no data".
+    mark: Option<&'static str>,
     note: String,
 }
 
@@ -43,6 +45,10 @@ impl Chip {
 
 fn font() -> FontId {
     FontId::proportional(13.0)
+}
+
+fn mark_font() -> FontId {
+    FontId::proportional(11.0)
 }
 
 pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
@@ -61,8 +67,15 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
                 .find(|s| s.val.is_finite())
                 .map(|s| s.val)
         });
-        let (value, current) = if state.connected && state.value.as_f64().is_some() {
-            (state.format(prec.map(|p| p as i32), true), true)
+        let (value, current) = if state.connected
+            && let Some(v) = state.value.as_f64()
+        {
+            // Large numbers as the axis has them, not in a dozen digits.
+            if v.abs() >= 1e6 && state.labels.is_empty() {
+                (format_value(v, prec, &egu), true)
+            } else {
+                (state.format(prec.map(|p| p as i32), true), true)
+            }
         } else if let Some(v) = archived_last {
             (format_value(v, prec, &egu), false)
         } else {
@@ -101,6 +114,26 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             });
         }
         note.push("Click to hide or show; ✕ to remove".into());
+        let mark = if plot.archiver.is_some() && t.fetch.not_archived {
+            Some("live only")
+        } else if value == "—" && t.history.as_ref().is_some_and(|h| h.samples.is_empty()) {
+            Some("no data")
+        } else if value == "—"
+            && let Some(h) = &t.history
+            && matches!(
+                h.kind,
+                archiver::ValueKind::Text | archiver::ValueKind::Other
+            )
+        {
+            // Archived, but nothing a plot can draw.
+            Some(if h.kind == archiver::ValueKind::Text {
+                "text"
+            } else {
+                "not plotted"
+            })
+        } else {
+            None
+        };
         let mut name = t.label();
         if name.chars().count() > 48 {
             name = format!("{}…", name.chars().take(47).collect::<String>());
@@ -111,6 +144,9 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             + super::render::text_size(painter, &name, &font).x
             + 8.0
             + super::render::text_size(painter, &value, &font).x
+            + mark.map_or(0.0, |m| {
+                6.0 + super::render::text_size(painter, m, &mark_font()).x
+            })
             + 6.0
             + CLOSE
             + PAD / 2.0;
@@ -130,6 +166,7 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             } else {
                 None
             },
+            mark,
             note: note.join("\n"),
         });
         x += w + GAP;
@@ -253,13 +290,22 @@ pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark:
         } else {
             v.weak_text_color()
         };
-        painter.text(
+        let value = painter.text(
             Pos2::new(name.right() + 8.0, rect.center().y),
             Align2::LEFT_CENTER,
             &c.value,
             font.clone(),
             value_color,
         );
+        if let Some(mark) = c.mark {
+            painter.text(
+                Pos2::new(value.right() + 6.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                mark,
+                mark_font(),
+                v.weak_text_color(),
+            );
+        }
         let close = c.close_rect(chips.origin);
         if hovered {
             let hot = pointer.is_some_and(|p| close.contains(p));

@@ -87,6 +87,25 @@ pub struct History {
     pub samples: Vec<Sample>,
 }
 
+impl History {
+    /// Take in a refreshed tail: `samples` replace the history from where
+    /// they start, the history before `keep_from` is dropped (all but the
+    /// sample holding there), and the window now ends at `to`.
+    pub fn append(&mut self, samples: Vec<Sample>, keep_from: f64, to: f64) {
+        if let Some(first) = samples.first() {
+            let cut = self.samples.partition_point(|s| s.t < first.t);
+            self.samples.truncate(cut);
+            self.samples.extend(samples);
+        }
+        let start = self
+            .samples
+            .partition_point(|s| s.t < keep_from)
+            .saturating_sub(1);
+        self.samples.drain(..start);
+        self.to = self.to.max(to);
+    }
+}
+
 /// Where a trace's archive fetching stands.
 #[derive(Clone, Debug, Default)]
 pub struct FetchState {
@@ -406,6 +425,28 @@ mod tests {
         // live value to `hold`.
         assert!(pts[5].step);
         assert_eq!(pts.last().unwrap().v, 101.0);
+    }
+
+    #[test]
+    fn a_refreshed_tail_is_added_and_the_old_head_dropped() {
+        let mut h = History {
+            to: 100.0,
+            samples: (0..10).map(|i| raw(i as f64 * 10.0, i as f64)).collect(),
+            ..History::default()
+        };
+        // The tail starts with the last sample again, as the archiver
+        // sends the one holding at `from`.
+        h.append(
+            vec![raw(90.0, 9.0), raw(95.0, 10.0), raw(120.0, 11.0)],
+            35.0,
+            150.0,
+        );
+        let ts: Vec<f64> = h.samples.iter().map(|s| s.t).collect();
+        assert_eq!(ts, [30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 95.0, 120.0]);
+        assert_eq!(h.to, 150.0);
+        // Nothing new: the window still moves on.
+        h.append(Vec::new(), 0.0, 180.0);
+        assert_eq!((h.samples.len(), h.to), (9, 180.0));
     }
 
     #[test]

@@ -19,10 +19,38 @@ pub struct Frame {
     /// Where data is drawn.
     pub data: Rect,
     pub xs: Scale,
+    /// The primary value axis, left of the data.
     pub ys: Scale,
     y_labels: Vec<(f64, String)>,
     title: String,
+    title_color: Option<Color32>,
+    /// More value axes, right of the data, nearest first: one per unit
+    /// beyond the primary's.
+    extra: Vec<Axis>,
     font: FontId,
+}
+
+/// A value axis right of the data.
+struct Axis {
+    scale: Scale,
+    labels: Vec<(f64, String)>,
+    title: String,
+    color: Option<Color32>,
+    /// Where its labels start.
+    left: f32,
+    label_w: f32,
+}
+
+/// A value axis to lay out: its range, its title (units) and the colour of
+/// its labels (`None`: muted text).
+pub struct AxisSpec {
+    pub lo: f64,
+    pub hi: f64,
+    pub title: String,
+    pub color: Option<Color32>,
+    /// Its traces hold whole numbers (enum states): ticks at whole
+    /// numbers only.
+    pub whole: bool,
 }
 
 impl Frame {
@@ -34,13 +62,22 @@ impl Frame {
         )
     }
 
+    /// The scale of value axis `axis` (0, the primary, for any past the
+    /// last).
+    pub fn scale(&self, axis: usize) -> &Scale {
+        match axis.checked_sub(1).and_then(|i| self.extra.get(i)) {
+            Some(a) => &a.scale,
+            None => &self.ys,
+        }
+    }
+
     /// The time at screen `x`.
     pub fn time_at(&self, x: f32) -> f64 {
         let f = ((x - self.xs.from) / (self.xs.to - self.xs.from)) as f64;
         self.xs.lo + f * (self.xs.hi - self.xs.lo)
     }
 
-    /// The value at screen `y`.
+    /// The value at screen `y` on the primary axis.
     pub fn value_at(&self, y: f32) -> f64 {
         let f = ((y - self.ys.from) / (self.ys.to - self.ys.from)) as f64;
         if self.ys.log && self.ys.lo > 0.0 {
@@ -55,47 +92,91 @@ impl Frame {
 const PAD: f32 = 8.0;
 const TICK_GAP: f32 = 6.0;
 
-/// Lay out the plot in `rect` for times `from..to` and values `lo..hi`,
-/// with `title` (units) up the value axis.
+/// Lay out the plot in `rect` for times `from..to` and the value `axes`:
+/// the first left of the data, any others right of it, each with its
+/// title (units) up the side.
 pub fn frame(
     painter: &egui::Painter,
     rect: Rect,
     (from, to): (f64, f64),
-    (lo, hi): (f64, f64),
+    axes: &[AxisSpec],
     log: bool,
-    title: &str,
     font: &FontId,
 ) -> Frame {
     let label_h = text_size(painter, "0", font).y;
     let bottom = rect.bottom() - PAD - label_h - TICK_GAP;
     let top = rect.top() + PAD + label_h / 2.0;
-    let ys = Scale {
+    let scale = |lo, hi| Scale {
         lo,
         hi,
         log,
         from: bottom,
         to: top,
     };
-    let (y_ticks, y_step) = ys.ticks(label_h * 3.0);
-    let y_labels: Vec<(f64, String)> = y_ticks
-        .iter()
-        .map(|v| (*v, axis::label(*v, y_step)))
-        .collect();
-    let label_w = y_labels
-        .iter()
-        .map(|(_, l)| text_size(painter, l, font).x)
-        .fold(text_size(painter, "0000", font).x, f32::max);
-    let title_w = if title.is_empty() {
-        0.0
-    } else {
-        label_h + PAD / 2.0
+    let labels = |s: &Scale, whole: bool| -> (Vec<(f64, String)>, f32) {
+        let (ticks, step) = if whole {
+            s.whole_ticks(label_h * 3.0)
+        } else {
+            s.ticks(label_h * 3.0)
+        };
+        let labels: Vec<(f64, String)> =
+            ticks.iter().map(|v| (*v, axis::label(*v, step))).collect();
+        let w = labels
+            .iter()
+            .map(|(_, l)| text_size(painter, l, font).x)
+            .fold(text_size(painter, "0000", font).x, f32::max);
+        (labels, w)
     };
-    let left = rect.left() + PAD + title_w + label_w + TICK_GAP;
-    let right = rect.right() - PAD * 2.0;
+    let title_w = |t: &str| {
+        if t.is_empty() {
+            0.0
+        } else {
+            label_h + PAD / 2.0
+        }
+    };
+    let (lo, hi, title, title_color, whole) = match axes.first() {
+        Some(a) => (a.lo, a.hi, a.title.clone(), a.color, a.whole),
+        None => (0.0, 1.0, String::new(), None, false),
+    };
+    let ys = scale(lo, hi);
+    let (y_labels, label_w) = labels(&ys, whole);
+    let left = rect.left() + PAD + title_w(&title) + label_w + TICK_GAP;
+
+    // The right axes, measured before the data rect is known.
+    let mut extra: Vec<Axis> = axes
+        .iter()
+        .skip(1)
+        .map(|a| {
+            let s = scale(a.lo, a.hi);
+            let (labels, label_w) = labels(&s, a.whole);
+            Axis {
+                scale: s,
+                labels,
+                title: a.title.clone(),
+                color: a.color,
+                left: 0.0,
+                label_w,
+            }
+        })
+        .collect();
+    let widths: Vec<f32> = extra
+        .iter()
+        .map(|a| TICK_GAP + a.label_w + title_w(&a.title) + PAD / 2.0)
+        .collect();
+    let right = if extra.is_empty() {
+        rect.right() - PAD * 2.0
+    } else {
+        rect.right() - PAD / 2.0 - widths.iter().sum::<f32>()
+    };
     let data = Rect::from_min_max(
         Pos2::new(left, top),
         Pos2::new(right.max(left + 1.0), bottom),
     );
+    let mut x = data.right();
+    for (a, w) in extra.iter_mut().zip(&widths) {
+        a.left = x + TICK_GAP;
+        x += w;
+    }
     let xs = Scale {
         lo: from,
         hi: to,
@@ -109,7 +190,9 @@ pub fn frame(
         xs,
         ys,
         y_labels,
-        title: title.to_string(),
+        title,
+        title_color,
+        extra,
         font: font.clone(),
     }
 }
@@ -119,10 +202,19 @@ pub struct Line<'a> {
     pub pts: &'a [Pt],
     pub color: Color32,
     pub width: f32,
+    /// Its value axis (an index into the frame's axes).
+    pub axis: usize,
 }
 
-/// Paint the background, grid, labels and `lines`.
-pub fn paint(painter: &egui::Painter, f: &Frame, lines: &[Line], visuals: &egui::Visuals) {
+/// Paint the background, grid, labels and `lines`, leaving out any time
+/// label under `cover` (the crosshair's time tag).
+pub fn paint(
+    painter: &egui::Painter,
+    f: &Frame,
+    lines: &[Line],
+    visuals: &egui::Visuals,
+    cover: Option<Rect>,
+) {
     let painter = &painter.with_clip_rect(painter.clip_rect().intersect(f.outer));
     painter.rect_filled(f.outer, 10.0, visuals.extreme_bg_color);
     let text = visuals.text_color();
@@ -174,6 +266,10 @@ pub fn paint(painter: &egui::Painter, f: &Frame, lines: &[Line], visuals: &egui:
             continue;
         }
         right_of = left + w;
+        let label = Rect::from_min_size(Pos2::new(left, data.bottom() + TICK_GAP), galley.size());
+        if cover.is_some_and(|c| c.expand2(Vec2::new(4.0, 0.0)).intersects(label)) {
+            continue;
+        }
         painter.galley(Pos2::new(left, data.bottom() + TICK_GAP), galley, weak);
     }
     for (v, label) in &f.y_labels {
@@ -193,8 +289,36 @@ pub fn paint(painter: &egui::Painter, f: &Frame, lines: &[Line], visuals: &egui:
             Pos2::new(f.outer.left() + PAD + h / 2.0, data.center().y),
             &f.title,
             f.font.clone(),
-            weak,
+            f.title_color.unwrap_or(weak),
         );
+    }
+    // The right axes: labels and title in their traces' colour.
+    for a in &f.extra {
+        let color = a.color.unwrap_or(weak);
+        for (v, label) in &a.labels {
+            let y = a.scale.pos(*v);
+            // The top one would sit under the "now" tag.
+            if y < data.top() + 4.0 {
+                continue;
+            }
+            painter.text(
+                Pos2::new(a.left, y),
+                Align2::LEFT_CENTER,
+                label,
+                f.font.clone(),
+                color,
+            );
+        }
+        if !a.title.is_empty() {
+            let h = text_size(painter, &a.title, &f.font).y;
+            vertical_text(
+                painter,
+                Pos2::new(a.left + a.label_w + PAD / 2.0 + h / 2.0, data.center().y),
+                &a.title,
+                f.font.clone(),
+                color,
+            );
+        }
     }
 }
 
@@ -234,14 +358,16 @@ pub fn now_marker(painter: &egui::Painter, f: &Frame, now: f64, v: &egui::Visual
 }
 
 fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line) {
-    let ok = |v: f64| v.is_finite() && (!f.ys.log || v > 0.0);
+    let ys = f.scale(line.axis);
+    let ok = |v: f64| v.is_finite() && (!ys.log || v > 0.0);
     // Far-off points are pulled in so the maths stays finite.
     let bounds = f.data.expand(f.data.width().max(f.data.height()) * 4.0);
     let x = |t: f64| f.xs.pos(t).clamp(bounds.left(), bounds.right());
-    let y = |v: f64| f.ys.pos(v).clamp(bounds.top(), bounds.bottom());
+    let y = |v: f64| ys.pos(v).clamp(bounds.top(), bounds.bottom());
 
-    // Runs between gaps.
-    for run in line.pts.split(|p| !ok(p.v)).filter(|r| !r.is_empty()) {
+    // Runs between gaps, each raw value held to the gap that ends it.
+    let pts = hold_to_gaps(line.pts, ok);
+    for run in pts.split(|p| !ok(p.v)).filter(|r| !r.is_empty()) {
         // The min..max envelope of bins, as quads between neighbours.
         if run.iter().any(Pt::is_bin) {
             let fill = line.color.gamma_multiply(0.22);
@@ -308,6 +434,25 @@ fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line) {
         };
         stroke_line(painter, pts, Stroke::new(line.width, line.color));
     }
+}
+
+/// `pts` with a corner added before each gap that follows a held (raw)
+/// value, so its step runs flat to where the gap starts: splitting at the
+/// gap would otherwise end the line at the value's own time. `ok` tells
+/// a value from a gap.
+fn hold_to_gaps(pts: &[Pt], ok: impl Fn(f64) -> bool) -> std::borrow::Cow<'_, [Pt]> {
+    let corner = |w: &[Pt]| ok(w[0].v) && w[0].step && !ok(w[1].v) && w[1].t > w[0].t;
+    if !pts.windows(2).any(corner) {
+        return pts.into();
+    }
+    let mut out = Vec::with_capacity(pts.len() + 8);
+    for (i, p) in pts.iter().enumerate() {
+        if i > 0 && corner(&pts[i - 1..=i]) {
+            out.push(Pt::raw(p.t, pts[i - 1].v));
+        }
+        out.push(*p);
+    }
+    out.into()
 }
 
 /// Average the bin means (`true`) in each pixel column, when there is more
@@ -438,6 +583,42 @@ mod tests {
         assert!((300.0..=325.0).contains(&hi), "{hi}");
         let (lo, hi) = autoscale(false, [-300.0, 0.0].into_iter()).unwrap();
         assert!(lo <= -300.0 && hi == 0.0);
+    }
+
+    #[test]
+    fn raw_values_hold_up_to_a_gap() {
+        let gap = Pt::raw(50.0, f64::NAN);
+        let pts = [
+            Pt::raw(0.0, 1.0),
+            Pt::raw(10.0, 2.0),
+            gap,
+            Pt::raw(60.0, 3.0),
+        ];
+        let held = hold_to_gaps(&pts, f64::is_finite);
+        let runs: Vec<Vec<(f64, f64)>> = held
+            .split(|p| !p.v.is_finite())
+            .map(|r| r.iter().map(|p| (p.t, p.v)).collect())
+            .collect();
+        // Flat from 10 to 50 at 2, then the gap, then 3.
+        assert_eq!(
+            runs,
+            [
+                vec![(0.0, 1.0), (10.0, 2.0), (50.0, 2.0)],
+                vec![(60.0, 3.0)]
+            ]
+        );
+        // A bin mean (sloped) is not held; nothing to add without gaps.
+        let bin = Pt {
+            lo: 0.0,
+            hi: 2.0,
+            step: false,
+            ..Pt::raw(10.0, 1.0)
+        };
+        assert_eq!(hold_to_gaps(&[bin, gap], f64::is_finite).len(), 2);
+        assert!(matches!(
+            hold_to_gaps(&pts[..2], f64::is_finite),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     #[test]

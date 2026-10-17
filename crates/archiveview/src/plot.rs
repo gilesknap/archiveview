@@ -27,6 +27,7 @@ use archiver::{ArchiverClient, Operator, ValueKind};
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
 use pv::PvManager;
 
+use crate::axis;
 use crate::view::{self, TraceView, View, YAxis};
 use fetch::Fetcher;
 pub use series::now;
@@ -38,7 +39,8 @@ pub use timeaxis::parse_span;
 /// Wait this long after the last pan or zoom before fetching (seconds).
 const DEBOUNCE: f64 = 0.3;
 
-/// While following now, refresh the archived data this often (seconds).
+/// While following now, refresh the archived data this often (seconds);
+/// binned history less often, at its bin pace (`fetch::refresh_after`).
 const LIVE_REFRESH: f64 = 30.0;
 
 /// After an error, ask again no sooner than this (seconds), doubling with
@@ -47,6 +49,9 @@ const RETRY: f64 = 10.0;
 
 /// The Live pill pulses this long after following now starts (seconds).
 const PULSE_SECS: f64 = 3.0;
+
+/// The most value axes: traces with yet more units share the last.
+const MAX_AXES: usize = 3;
 
 /// The smallest plot (top bar and chips aside), so one in an auto-sized
 /// window neither collapses nor grows without end.
@@ -75,6 +80,11 @@ pub struct Plot {
     /// The range drawn, easing toward `window`'s.
     shown: Option<(f64, f64)>,
     y: YState,
+    /// The ranges drawn on the value axes after the first, by units,
+    /// easing toward their targets (always autoscaled).
+    axis_shown: Vec<(String, (f64, f64))>,
+    /// Each trace's value axis this frame, in trace order.
+    axis_of: Vec<usize>,
     fetcher: Fetcher,
     /// When (seconds since 1970) the user last panned or zoomed, for the
     /// fetch debounce.
@@ -171,6 +181,8 @@ impl Plot {
             home_span: 3600.0,
             shown: None,
             y: YState::default(),
+            axis_shown: Vec::new(),
+            axis_of: Vec::new(),
             fetcher: Fetcher::default(),
             changed_at: f64::NEG_INFINITY,
             pending: false,
@@ -306,6 +318,7 @@ impl Plot {
             log: view.y.log,
             shown: None,
         };
+        self.fit_log_range();
         self.snap = true;
     }
 
@@ -406,19 +419,10 @@ impl Plot {
                 }
             })
             .collect();
-        let (lo, hi) = self.shown_values(&data, from, to, dt);
+        let axes = self.value_axes(&data, from, to, dt, dark);
 
         let font = egui::FontId::proportional(11.5);
-        let units = self.common_units();
-        let f = render::frame(
-            ui.painter(),
-            rect,
-            (from, to),
-            (lo, hi),
-            self.y.log,
-            &units,
-            &font,
-        );
+        let f = render::frame(ui.painter(), rect, (from, to), &axes, self.y.log, &font);
         self.interact(ui, &resp, &f, now);
         let ppp = ui.ctx().pixels_per_point();
         self.schedule_fetches(now, f.data.width() * ppp);
@@ -428,22 +432,33 @@ impl Plot {
             .traces
             .iter()
             .zip(&data)
-            .filter(|(t, _)| t.visible)
-            .map(|(t, pts)| {
+            .zip(&self.axis_of)
+            .filter(|((t, _), _)| t.visible)
+            .map(|((t, pts), &axis)| {
                 let color = self.color(t, dark);
                 let (color, width) = match self.highlight {
                     Some(h) if h == t.id => (color, 2.5),
                     Some(_) => (color.gamma_multiply(0.25), 1.5),
                     None => (color, 1.5),
                 };
-                render::Line { pts, color, width }
+                render::Line {
+                    pts,
+                    color,
+                    width,
+                    axis,
+                }
             })
             .collect();
         let painter = ui.painter_at(rect);
+        // The crosshair, first so its time tag can hide the label under it.
+        let hair = (!self.traces.is_empty() && !matches!(self.drag, Some(Drag::Pan | Drag::Axis)))
+            .then(|| hover::hairline(self, ui, &f, &data))
+            .flatten();
         if self.traces.is_empty() {
             painter.rect_filled(rect, 10.0, ui.visuals().extreme_bg_color);
         } else {
-            render::paint(&painter, &f, &lines, ui.visuals());
+            let cover = hair.map(|(p, t)| hover::time_tag_rect(&painter, &f, p.x, t));
+            render::paint(&painter, &f, &lines, ui.visuals(), cover);
             render::now_marker(&painter, &f, now, ui.visuals(), &font);
         }
         if let Some(Drag::Box(origin)) = self.drag
@@ -461,8 +476,8 @@ impl Plot {
         }
         if self.traces.is_empty() {
             hover::empty_state(&painter, &f, ui.visuals());
-        } else if !matches!(self.drag, Some(Drag::Pan | Drag::Axis)) {
-            hover::crosshair(self, ui, &f, &data, dark);
+        } else if let Some(hair) = hair {
+            hover::crosshair(self, ui, &f, &data, dark, hair);
         }
         hover::status(self, ui, &f);
         legend::paint(self, ui, &chips, &data, dark);
@@ -508,20 +523,6 @@ impl Plot {
             .unwrap_or_else(|| crate::style::palette(t.slot, dark))
     }
 
-    /// The units of the visible traces when they all have the same.
-    fn common_units(&self) -> String {
-        let units: Vec<String> = self
-            .traces
-            .iter()
-            .filter(|t| t.visible)
-            .map(units)
-            .collect();
-        match units.split_first() {
-            Some((first, rest)) if rest.iter().all(|u| u == first) => first.clone(),
-            _ => String::new(),
-        }
-    }
-
     /// The time range to draw this frame, easing toward the window.
     fn shown_range(&mut self, now: f64, dt: f64) -> (f64, f64) {
         let (from, to) = self.window.range(now);
@@ -536,32 +537,98 @@ impl Plot {
         (a, b)
     }
 
-    /// The value range to draw this frame: fitted to the visible data
-    /// (envelopes included) or fixed, easing toward it.
-    fn shown_values(&mut self, data: &[Vec<Pt>], from: f64, to: f64, dt: f64) -> (f64, f64) {
+    /// The value axes to draw this frame, one per distinct unit among the
+    /// visible traces with data (at most [`MAX_AXES`]), and `axis_of`, each trace's.
+    /// The first takes the fixed range, log scale and value zooming; the
+    /// others autoscale to their own traces.
+    fn value_axes(
+        &mut self,
+        data: &[Vec<Pt>],
+        from: f64,
+        to: f64,
+        dt: f64,
+        dark: bool,
+    ) -> Vec<render::AxisSpec> {
+        // Only traces with something to show claim an axis.
+        let trace_units: Vec<Option<String>> = self
+            .traces
+            .iter()
+            .zip(data)
+            .map(|(t, pts)| (t.visible && pts.iter().any(|p| p.v.is_finite())).then(|| units(t)))
+            .collect();
+        let (names, axis_of) = group_units(&trace_units);
+        self.axis_of = axis_of;
+        let several = names.len() > 1;
+        self.axis_shown.retain(|(u, _)| names[1..].contains(u));
+        let mut specs = Vec::new();
+        for (a, name) in names.iter().enumerate() {
+            let members: Vec<usize> = (0..self.traces.len())
+                .filter(|&i| trace_units[i].is_some() && self.axis_of[i] == a)
+                .collect();
+            let pts = members.iter().map(|&i| &data[i]);
+            let whole =
+                !members.is_empty() && members.iter().all(|&i| whole_valued(&self.traces[i]));
+            let (lo, hi) = if a == 0 {
+                self.shown_values(pts, (from, to), whole, dt)
+            } else {
+                let fit = fit_values(self.y.log, whole, pts, from, to);
+                let i = match self.axis_shown.iter().position(|(u, _)| u == name) {
+                    Some(i) => i,
+                    None => {
+                        let first = fit.unwrap_or((0.0, 1.0));
+                        self.axis_shown.push((name.clone(), first));
+                        self.axis_shown.len() - 1
+                    }
+                };
+                let shown = &mut self.axis_shown[i].1;
+                *shown = ease_values(*shown, fit.unwrap_or(*shown), dt);
+                *shown
+            };
+            let title = axis_title(members.iter().filter_map(|&i| trace_units[i].as_deref()));
+            let color = match members.as_slice() {
+                [one] if several => Some(self.color(&self.traces[*one], dark)),
+                _ => None,
+            };
+            specs.push(render::AxisSpec {
+                lo,
+                hi,
+                title,
+                color,
+                whole,
+            });
+        }
+        specs
+    }
+
+    /// The primary axis' value range to draw this frame: fitted to its
+    /// traces' visible data (envelopes included) or fixed, easing toward
+    /// it.
+    fn shown_values<'a>(
+        &mut self,
+        data: impl Iterator<Item = &'a Vec<Pt>>,
+        (from, to): (f64, f64),
+        whole: bool,
+        dt: f64,
+    ) -> (f64, f64) {
         let log = self.y.log;
         let target = if self.y.autoscale {
-            let values = data.iter().flat_map(|pts| {
-                let start = pts.partition_point(|p| p.t < from).saturating_sub(1);
-                pts[start..]
-                    .iter()
-                    .take_while(|p| p.t <= to)
-                    .flat_map(|p| [p.lo, p.hi, p.v])
-            });
-            render::autoscale(log, values).or(self.y.shown)
+            fit_values(log, whole, data, from, to).or(self.y.shown)
         } else {
             Some((self.y.lo, self.y.hi))
         };
-        let (lo, hi) = target.unwrap_or(if log { (1.0, 10.0) } else { (0.0, 1.0) });
-        let (mut a, mut b) = self.y.shown.unwrap_or((lo, hi));
-        let scale = hi - lo;
-        window::ease(&mut a, lo, dt, scale);
-        window::ease(&mut b, hi, dt, scale);
-        if a.partial_cmp(&b) != Some(std::cmp::Ordering::Less) {
-            (a, b) = (lo, hi);
+        let target = target.unwrap_or(if log { (1.0, 10.0) } else { (0.0, 1.0) });
+        let shown = ease_values(self.y.shown.unwrap_or(target), target, dt);
+        self.y.shown = Some(shown);
+        shown
+    }
+
+    /// On a log scale a fixed range must be above zero: back to
+    /// autoscaling if not.
+    fn fit_log_range(&mut self) {
+        if self.y.log && !self.y.autoscale && self.y.lo <= 0.0 {
+            self.y.autoscale = true;
+            self.y.shown = None;
         }
-        self.y.shown = Some((a, b));
-        (a, b)
     }
 
     /// Take in finished fetches and searches.
@@ -578,13 +645,32 @@ impl Plot {
                 t.fetch.failures = 0;
             }
             // The window really fetched: a raw-only trace's is shorter.
-            if let Some(r) = &mut t.fetch.requested {
+            if let Some(r) = &mut t.fetch.requested
+                && !done.append
+            {
                 r.from = r.from.max(done.from);
             }
             if let Some(info) = &done.info {
                 t.fetch.raw_only = Some(!info.binnable());
             }
             match done.result {
+                Ok(series) if done.append => {
+                    let series = series.unwrap_or_default();
+                    let keep_from = t.fetch.requested.map_or(f64::NEG_INFINITY, |r| r.from);
+                    match &mut t.history {
+                        Some(h) if !h.binned && !series.binned => {
+                            h.append(series.samples, keep_from, done.to);
+                            t.fetch.error = None;
+                            // Grown past what `optimized_N` returns raw:
+                            // fetch it whole again, binned.
+                            if fetch::outgrown(t.fetch.requested.map(|r| r.op), h.samples.len()) {
+                                t.fetch.requested = None;
+                            }
+                        }
+                        // Not what the history holds: fetch it all again.
+                        _ => t.fetch.requested = None,
+                    }
+                }
                 Ok(series) => {
                     let series = series.unwrap_or_default();
                     let scalar = series.kind == ValueKind::Scalar;
@@ -643,11 +729,15 @@ impl Plot {
             let Some(name) = t.archive_name() else {
                 continue;
             };
-            if t.fetch.not_archived {
+            // One request per trace at a time: when it is done, the next
+            // frame asks for wherever the window is then.
+            if t.fetch.not_archived || t.fetch.in_flight {
                 continue;
             }
             let raw = t.fetch.raw_only.unwrap_or(false);
             let from = fetch::needed_from(from, to, raw);
+            // A live refresh of raw history: only from its last sample on.
+            let mut tail = None;
             let need = match t.fetch.requested {
                 None => true,
                 Some(r) => {
@@ -662,9 +752,24 @@ impl Plot {
                         RETRY
                     };
                     if t.fetch.error.is_some() {
-                        !t.fetch.in_flight && now - r.at > wait
+                        now - r.at > wait
+                    } else if !covered {
+                        true
+                    } else if live
+                        && now - r.at
+                            > fetch::refresh_after(LIVE_REFRESH, (r.from, r.to), r.op, binned)
+                    {
+                        tail = t
+                            .history
+                            .as_ref()
+                            .filter(|h| !h.binned)
+                            .and_then(|h| h.samples.last())
+                            .map(|s| s.t)
+                            .filter(|t| *t > r.from)
+                            .map(|t| (t, r));
+                        true
                     } else {
-                        !covered || (live && !t.fetch.in_flight && now - r.at > LIVE_REFRESH)
+                        false
                     }
                 }
             };
@@ -680,21 +785,46 @@ impl Plot {
             let raw_from = fetch::padded(fetch::needed_from(from, to, true), to).0;
             t.fetch.generation += 1;
             t.fetch.in_flight = true;
-            t.fetch.requested = Some(series::Requested {
-                from: a,
-                to: b,
-                op,
-                at: now,
-            });
-            let job = fetch::Job {
-                trace: t.id,
-                generation: t.fetch.generation,
-                pv: name,
-                from: a,
-                to: b,
-                op,
-                raw_from,
-                probe: t.fetch.raw_only.is_none(),
+            let job = match tail {
+                // The history keeps what is still in the padded window.
+                Some((last, r)) => {
+                    t.fetch.requested = Some(series::Requested {
+                        from: r.from.max(a).min(last),
+                        to: b,
+                        op: r.op,
+                        at: now,
+                    });
+                    fetch::Job {
+                        trace: t.id,
+                        generation: t.fetch.generation,
+                        pv: name,
+                        from: last,
+                        to: b,
+                        op: Operator::Raw,
+                        raw_from: last,
+                        probe: false,
+                        append: true,
+                    }
+                }
+                None => {
+                    t.fetch.requested = Some(series::Requested {
+                        from: a,
+                        to: b,
+                        op,
+                        at: now,
+                    });
+                    fetch::Job {
+                        trace: t.id,
+                        generation: t.fetch.generation,
+                        pv: name,
+                        from: a,
+                        to: b,
+                        op,
+                        raw_from,
+                        probe: t.fetch.raw_only.is_none(),
+                        append: false,
+                    }
+                }
             };
             self.fetcher
                 .fetch(&self.pvs, &client, job, self.repaint.clone());
@@ -900,6 +1030,92 @@ impl Plot {
     }
 }
 
+/// Group traces by units (`None`: hidden) into value axes, in order of
+/// first appearance: the axes' units, and each trace's axis (0 when
+/// hidden). Units beyond [`MAX_AXES`] share the last axis. With no visible
+/// traces there is one axis, without units.
+fn group_units(units: &[Option<String>]) -> (Vec<String>, Vec<usize>) {
+    let mut names: Vec<String> = Vec::new();
+    let of = units
+        .iter()
+        .map(|u| {
+            let Some(u) = u else { return 0 };
+            match names.iter().position(|n| n == u) {
+                Some(i) => i,
+                None if names.len() < MAX_AXES => {
+                    names.push(u.clone());
+                    names.len() - 1
+                }
+                None => MAX_AXES - 1,
+            }
+        })
+        .collect();
+    if names.is_empty() {
+        names.push(String::new());
+    }
+    (names, of)
+}
+
+/// A value axis' title: its traces' units, distinct and in order, joined
+/// with " · " when the last axis is shared by several ("degC · V").
+/// Traces without units add nothing.
+fn axis_title<'a>(units: impl Iterator<Item = &'a str>) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    for u in units {
+        if !u.is_empty() && !seen.contains(&u) {
+            seen.push(u);
+        }
+    }
+    seen.join(" · ")
+}
+
+/// Whether trace `t` holds whole numbers: an enum (live with state
+/// labels, or archived scalar data fetched raw, as only enums are).
+fn whole_valued(t: &Trace) -> bool {
+    !t.pv.state().labels.is_empty()
+        || (t.fetch.raw_only == Some(true)
+            && t.history
+                .as_ref()
+                .is_some_and(|h| h.kind == ValueKind::Scalar && !h.samples.is_empty()))
+}
+
+/// The autoscaled range for `data` between `from` and `to` (at least two
+/// wide, for `whole` numbers on a linear scale).
+fn fit_values<'a>(
+    log: bool,
+    whole: bool,
+    data: impl Iterator<Item = &'a Vec<Pt>>,
+    from: f64,
+    to: f64,
+) -> Option<(f64, f64)> {
+    let values = data.flat_map(|pts| {
+        let start = pts.partition_point(|p| p.t < from).saturating_sub(1);
+        pts[start..]
+            .iter()
+            .take_while(|p| p.t <= to)
+            .flat_map(|p| [p.lo, p.hi, p.v])
+    });
+    let fit = render::autoscale(log, values);
+    if whole && !log {
+        fit.map(|(lo, hi)| axis::whole_range(lo, hi))
+    } else {
+        fit
+    }
+}
+
+/// A value range `shown` one frame (`dt`) closer to `target`.
+fn ease_values(shown: (f64, f64), target: (f64, f64), dt: f64) -> (f64, f64) {
+    let (lo, hi) = target;
+    let (mut a, mut b) = shown;
+    let scale = hi - lo;
+    window::ease(&mut a, lo, dt, scale);
+    window::ease(&mut b, hi, dt, scale);
+    if a.partial_cmp(&b) != Some(std::cmp::Ordering::Less) {
+        (a, b) = (lo, hi);
+    }
+    (a, b)
+}
+
 /// The units of trace `t`: the live PV's, else the archive's.
 fn units(t: &Trace) -> String {
     let live = t.pv.state().units;
@@ -926,12 +1142,15 @@ fn precision(t: &Trace, state: &pv::PvState) -> Option<usize> {
         })
 }
 
-/// A value for the readout and chips: at `prec` decimals, else compactly.
+/// A value for the readout and chips: at `prec` decimals (in exponent
+/// form from a million up), else compactly.
 fn format_value(v: f64, prec: Option<usize>, units: &str) -> String {
     if !v.is_finite() {
         return "—".into();
     }
     let text = match prec {
+        // Large values as the axis labels them: 1.469e9, not 1468514835.908.
+        Some(p) if v.abs() >= 1e6 => format!("{v:.*e}", p.min(12)),
         Some(p) => {
             let s = format!("{v:.*}", p.min(12));
             // -0.04 at one decimal reads "0.0", not "-0.0".
@@ -1224,6 +1443,209 @@ mod tests {
     }
 
     #[test]
+    fn a_name_with_regex_characters_is_not_archived_not_a_bad_url() {
+        // getData says 404 (or 400 where the name looks like an operator
+        // call); a naive glob search for the name would be a server error
+        // (an unbalanced `{`), but the exact search is not, so neither is
+        // taken for a wrong archiver URL.
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&[
+            "XF:23ID1-ES{Dif}Mtr",
+            "XF:23ID1-ES{Dif-Ax:TH(1)}+",
+        ]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        let t = &h.plot.traces;
+        assert!(t[0].fetch.not_archived, "{:?}", t[0].fetch.error);
+        assert_eq!(t[0].fetch.error, None);
+        let error = t[1].fetch.error.as_deref().unwrap_or("");
+        assert!(!error.contains("not an archiver"), "{error}");
+    }
+
+    /// A live plot of MOCK:SINE over two minutes: few enough samples that
+    /// `optimized_N` answers raw.
+    fn live_raw_sine() -> (mockarchiver::MockArchiver, Harness) {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.set_range(&view::Range::Relative { secs: 120.0 });
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        let t = &h.plot.traces[0];
+        assert!(matches!(
+            t.fetch.requested.map(|r| r.op),
+            Some(Operator::Optimized(_))
+        ));
+        assert!(!t.history.as_ref().expect("history").binned);
+        (mock, h)
+    }
+
+    /// Make trace 0's last request old enough for a live refresh.
+    fn age_request(h: &mut Harness) {
+        if let Some(r) = &mut h.plot.traces[0].fetch.requested {
+            r.at -= LIVE_REFRESH + 1.0;
+        }
+    }
+
+    #[test]
+    fn live_raw_history_is_refreshed_by_its_tail() {
+        let (_mock, mut h) = live_raw_sine();
+        let r0 = h.plot.traces[0].fetch.requested.unwrap();
+        let last = h.plot.traces[0]
+            .history
+            .as_ref()
+            .unwrap()
+            .samples
+            .last()
+            .unwrap()
+            .t;
+        // Let the archive move on a little.
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        h.plot.fetcher.sent.lock().clear();
+        age_request(&mut h);
+        h.frame(vec![]);
+        let sent = h.plot.fetcher.sent.lock().clone();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let (_, from, to, append) = sent[0];
+        assert!(append, "only the tail");
+        assert_eq!(from, last, "from the last sample on");
+        assert!(to > r0.to);
+        h.until(|p| !p.is_loading());
+
+        let t = &h.plot.traces[0];
+        let r = t.fetch.requested.unwrap();
+        assert_eq!(r.op, r0.op);
+        assert_eq!(r.to, to, "the window fetched now ends later");
+        assert!(r.from >= r0.from && r.from <= last);
+        let hist = t.history.as_ref().unwrap();
+        assert!(!hist.binned);
+        assert!(hist.samples.last().unwrap().t > last, "new samples added");
+        assert!(
+            hist.samples.windows(2).all(|w| w[0].t < w[1].t),
+            "no sample twice"
+        );
+        // The head is what holds at the window's start, and no older.
+        assert!(hist.samples[0].t <= r.from && hist.samples[1].t >= r.from);
+    }
+
+    #[test]
+    fn raw_history_grown_past_n_is_fetched_again_whole() {
+        let (_mock, mut h) = live_raw_sine();
+        // As if `optimized_10` had answered raw: the tail now outgrows it.
+        if let Some(r) = &mut h.plot.traces[0].fetch.requested {
+            r.op = Operator::Optimized(10);
+        }
+        h.plot.fetcher.sent.lock().clear();
+        age_request(&mut h);
+        h.until(|p| p.fetcher.sent.lock().len() >= 2 && !p.is_loading());
+        let sent = h.plot.fetcher.sent.lock().clone();
+        assert!(sent[0].3, "first the tail");
+        assert!(!sent[1].3, "then the whole window");
+        let r = h.plot.traces[0].fetch.requested.unwrap();
+        assert!(matches!(r.op, Operator::Optimized(n) if n > 10));
+    }
+
+    #[test]
+    fn binned_history_is_refetched_whole_at_its_own_pace() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.set_range(&view::Range::Relative { secs: 86_400.0 });
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        assert!(h.plot.traces[0].history.as_ref().unwrap().binned);
+        h.plot.fetcher.sent.lock().clear();
+        // 30 s on: a day's bins are a minute wide, so not yet.
+        age_request(&mut h);
+        h.frame(vec![]);
+        assert!(h.plot.fetcher.sent.lock().is_empty());
+        // Past three bin widths: the whole window again, binned.
+        if let Some(r) = &mut h.plot.traces[0].fetch.requested {
+            r.at -= 300.0;
+        }
+        h.frame(vec![]);
+        let sent = h.plot.fetcher.sent.lock().clone();
+        assert_eq!(sent.len(), 1);
+        assert!(!sent[0].3, "bins are never appended to");
+    }
+
+    #[test]
+    fn a_trace_has_one_request_in_flight() {
+        // An archiver that answers nothing for 1.5 s, then hangs up.
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", server.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for conn in server.incoming().flatten() {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    drop(conn);
+                });
+            }
+        });
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, Some(ArchiverClient::new(&url).unwrap()));
+        p.add_pvs(&names(&["A:B"]));
+        let mut h = Harness::new(p);
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.until(|p| p.fetcher.busy());
+        for _ in 0..3 {
+            // Out of the window fetched, and still past the debounce.
+            for _ in 0..4 {
+                h.key(egui::Key::ArrowLeft);
+            }
+            let start = std::time::Instant::now();
+            while start.elapsed().as_millis() < 350 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                h.frame(vec![]);
+                assert_eq!(h.plot.fetcher.in_flight(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn traces_get_an_axis_per_unit() {
+        let u = |s: &[Option<&str>]| -> Vec<Option<String>> {
+            s.iter().map(|u| u.map(str::to_string)).collect()
+        };
+        let (names, of) = group_units(&u(&[Some("mA"), Some("V"), None, Some("mA")]));
+        assert_eq!(names, ["mA", "V"]);
+        assert_eq!(of, [0, 1, 0, 0]);
+        // Past the last axis, units share it.
+        let (names, of) = group_units(&u(&[Some("a"), Some("b"), Some("c"), Some("d")]));
+        assert_eq!(names, ["a", "b", "c"]);
+        assert_eq!(of, [0, 1, 2, 2]);
+        assert_eq!(group_units(&u(&[None])).0, [""]);
+        // A shared axis is titled with all its units.
+        assert_eq!(
+            axis_title(["degC", "V", "", "degC"].into_iter()),
+            "degC · V"
+        );
+        assert_eq!(axis_title(["mA"].into_iter()), "mA");
+        assert_eq!(axis_title(["", ""].into_iter()), "");
+    }
+
+    #[test]
+    fn log_scale_leaves_a_fixed_range_through_zero() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.y.autoscale = false;
+        (p.y.lo, p.y.hi) = (0.0, 100.0);
+        p.y.log = true;
+        p.fit_log_range();
+        assert!(p.y.autoscale);
+        (p.y.autoscale, p.y.lo) = (false, 1.0);
+        p.fit_log_range();
+        assert!(!p.y.autoscale, "a positive range stays");
+    }
+
+    #[test]
     fn a_new_archiver_keeps_counting_generations() {
         let pvs = PvManager::new();
         let mut p = Plot::new(&pvs, None);
@@ -1243,5 +1665,7 @@ mod tests {
         assert_eq!(format_value(-0.04, Some(1), "counts"), "0.0 counts");
         assert_eq!(format_value(-0.4, Some(1), ""), "-0.4");
         assert_eq!(format_value(f64::NAN, None, "V"), "—");
+        assert_eq!(format_value(1468514835.908, Some(3), "Pa"), "1.469e9 Pa");
+        assert_eq!(format_value(-2.5e7, Some(1), ""), "-2.5e7");
     }
 }

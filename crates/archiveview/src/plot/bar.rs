@@ -73,7 +73,9 @@ pub fn top_bar(
                 }
                 ui.separator();
             }
-            ui.checkbox(&mut plot.y.log, "Log scale");
+            if ui.checkbox(&mut plot.y.log, "Log scale").changed() {
+                plot.fit_log_range();
+            }
             if let Some(menu) = menu {
                 ui.separator();
                 menu(ui);
@@ -454,23 +456,37 @@ impl Row {
     }
 }
 
-/// The popup's rows: archiver matches first, then the text as typed
-/// (unless it is a pattern, or exactly a match).
+/// The popup's rows, the first highlighted (what Enter adds): a match
+/// that is exactly the text typed, then the other archiver matches, then
+/// the text as typed (unless it is a pattern, or exactly a match). Text
+/// that can only be added as typed (a `pva://` or `sim://` name, or
+/// several names) comes first instead.
 fn rows(s: &SearchState, archiver: bool) -> Vec<Row> {
     let text = s.text.trim();
-    let mut rows: Vec<Row> = if s.searched == text {
-        s.results.iter().cloned().map(Row::Found).collect()
+    let mut found: Vec<&String> = if s.searched == text {
+        s.results.iter().collect()
     } else {
         Vec::new()
     };
+    if let Some(i) = found.iter().position(|r| *r == text) {
+        let exact = found.remove(i);
+        found.insert(0, exact);
+    }
     let typed: Vec<String> = text
         .split([' ', ',', '\t'])
         .filter(|n| !n.is_empty())
         .map(str::to_string)
         .collect();
     let pattern = archiver && (s.regex || text.contains(['*', '?']));
+    let mut rows: Vec<Row> = found.into_iter().cloned().map(Row::Found).collect();
     if !typed.is_empty() && !pattern && !s.results.iter().any(|r| r == text) {
-        rows.push(Row::Typed(typed));
+        let as_typed = typed.len() > 1 || text.contains("://");
+        let row = Row::Typed(typed);
+        if as_typed {
+            rows.insert(0, row);
+        } else {
+            rows.push(row);
+        }
     }
     rows
 }
@@ -833,5 +849,17 @@ mod tests {
             rows(&state("MOCK:SINE", "MOCK:SINE", &["MOCK:SINE"]), true).len(),
             1
         );
+    }
+
+    #[test]
+    fn enter_adds_an_exact_match_before_other_matches() {
+        // BL:M1:RBV sorts first, but M1:RBV is what was typed.
+        let s = state("M1:RBV", "M1:RBV", &["BL:M1:RBV", "M1:RBV", "M1:RBV2"]);
+        let r = rows(&s, true);
+        assert_eq!(r[0].names(), ["M1:RBV"]);
+        assert_eq!(r.len(), 3, "and not again as typed");
+        // A name only addable as typed comes first.
+        let s = state("pva://M1:RBV", "pva://M1:RBV", &["X:pva"]);
+        assert_eq!(rows(&s, true)[0].names(), ["pva://M1:RBV"]);
     }
 }

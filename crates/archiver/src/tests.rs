@@ -51,7 +51,7 @@ fn data_url_encodes_operator_and_times() {
 fn search_and_metadata_urls() {
     assert_eq!(
         client().search_url(&Search::from_user(" DCCT ", 50)),
-        "http://arch:17668/retrieval/bpl/getMatchingPVs?pv=%2ADCCT%2A&limit=50"
+        "http://arch:17668/retrieval/bpl/getMatchingPVs?regex=%28%3Fi%29.%2ADCCT.%2A&limit=50"
     );
     assert_eq!(
         client().search_url(&Search::regex("SR.*", -1)),
@@ -65,10 +65,22 @@ fn search_and_metadata_urls() {
 
 #[test]
 fn search_from_user() {
-    assert_eq!(Search::from_user("SR-DI", 5).pattern, "*SR-DI*");
-    assert_eq!(Search::from_user("SR-DI*", 5).pattern, "SR-DI*");
-    assert_eq!(Search::from_user("SR?DI", 5).pattern, "SR?DI");
-    assert_eq!(Search::from_user("", 5).pattern, "**");
+    let p = |t: &str| {
+        let s = Search::from_user(t, 5);
+        assert_eq!(s.mode, SearchMode::Regex);
+        s.pattern
+    };
+    // Plain text: anywhere, any case, metacharacters literal.
+    assert_eq!(p("SR-DI"), "(?i).*SR-DI.*");
+    assert_eq!(p("sr.di"), r"(?i).*sr\.di.*");
+    assert_eq!(p("ES{Dif}Mtr"), r"(?i).*ES\{Dif\}Mtr.*");
+    assert_eq!(p(""), "(?i).*.*");
+    // A glob: the whole name, with case; only `*` and `?` are wild.
+    assert_eq!(p("SR-DI*"), "SR-DI.*");
+    assert_eq!(p("SR?DI"), "SR.DI");
+    assert_eq!(p("XF:23ID1-ES{Dif-Ax:TH}*"), r"XF:23ID1-ES\{Dif-Ax:TH\}.*");
+    assert_eq!(Search::exact("a(b)+c", 1), Search::regex(r"a\(b\)\+c", 1));
+    assert_eq!(regex_escape(r"^a|b$[x]\"), r"\^a\|b\$\[x\]\\");
 }
 
 #[test]
@@ -76,9 +88,11 @@ fn operators() {
     assert_eq!(Operator::Raw.wrap("X"), "X");
     assert_eq!(Operator::Mean(600).wrap("X"), "mean_600(X)");
     assert_eq!(Operator::Nth(5).wrap("X"), "nth_5(X)");
-    assert_eq!(Operator::for_width(600.0), Operator::Optimized(1200));
+    // One bin per pixel of the window fetched.
+    assert_eq!(Operator::for_width(600.0), Operator::Optimized(600));
+    assert_eq!(Operator::for_width(1000.0 * 1.5), Operator::Optimized(1500));
     assert_eq!(Operator::for_width(5000.0), Operator::Optimized(MAX_BINS));
-    assert_eq!(Operator::for_width(0.0), Operator::Optimized(2));
+    assert_eq!(Operator::for_width(0.0), Operator::Optimized(1));
 }
 
 /// The spec's example, byte for byte as `JSONResponse` writes it.
@@ -286,4 +300,36 @@ fn error_display() {
     assert!(e.is_not_archived());
     assert_eq!(e.to_string(), "HTTP 404: HTTP Status 404 – Not Found");
     assert!(!Error::Transport("x".into()).is_not_archived());
+}
+
+#[test]
+fn long_waveforms_keep_element_zero_and_odd_items_are_skipped() {
+    // Only the first elements are kept; the rest are skipped unparsed.
+    let wave: Vec<String> = (0..10_000).map(|i| format!("{i}.5")).collect();
+    let body = format!(
+        r#"[{{"meta":{{"name":"W","waveform":"true"}},"data":[
+            {{"secs":1,"val":[{}],"nanos":0}},
+            {{"secs":2,"val":[[1,2],{{"a":1}},"3"],"nanos":0}},
+            {{"secs":3,"val":["7.5",true],"nanos":0}}]}}]"#,
+        wave.join(",")
+    );
+    let s = &parse_data(&body).unwrap()[0];
+    assert_eq!(s.kind, ValueKind::Waveform);
+    assert_eq!(s.samples[0].val, 0.5);
+    assert!(s.samples[1].is_gap(), "a nested array is not a number");
+    assert_eq!(s.samples[2].val, 7.5);
+
+    // Items and samples that are not objects are skipped, as is a `data`
+    // that is not an array.
+    let body = r#"[1, "x", null, {"meta":{"name":"A"},"data":[3, {"secs":5,"val":2}]},
+        {"meta":{"name":"B"},"data":"none"}]"#;
+    let s = parse_data(body).unwrap();
+    assert_eq!(s.len(), 2);
+    assert_eq!(s[0].samples.len(), 1);
+    assert_eq!(s[0].samples[0].val, 2.0);
+    assert!(s[1].samples.is_empty());
+    // A single object rather than an array.
+    let s = parse_data(r#"{"meta":{"name":"A"},"data":[{"secs":5,"val":2}]}"#).unwrap();
+    assert_eq!(s[0].meta.name, "A");
+    assert!(parse_data("null").unwrap().is_empty());
 }

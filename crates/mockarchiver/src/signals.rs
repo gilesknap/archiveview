@@ -208,15 +208,19 @@ fn normal(k: i64, salt: u64) -> f64 {
     (s - 2.0) * 3.0f64.sqrt()
 }
 
-/// A motor that moves to a new position every 15 minutes, taking 20 s.
+/// A motor parked at 0 (where bobview-testioc's motors rest, so archive
+/// and live join up) that every 15 minutes moves out to a new position
+/// for two minutes and back, taking 20 s each way.
 fn motor(t: f64, salt: u64) -> f64 {
     const MOVE: f64 = 900.0;
     const TRAVEL: f64 = 20.0;
+    const AWAY: f64 = 120.0;
     let n = (t / MOVE).floor() as i64;
-    let pos = |n: i64| ((unit(n, salt) * 16.0 - 8.0) * 100.0).round() / 100.0;
-    let (from, to) = (pos(n - 1), pos(n));
-    let f = ((t - n as f64 * MOVE) / TRAVEL).clamp(0.0, 1.0);
-    from + (to - from) * f
+    let pos = ((unit(n, salt) * 16.0 - 8.0) * 100.0).round() / 100.0;
+    let s = t - n as f64 * MOVE;
+    let out = (s / TRAVEL).clamp(0.0, 1.0);
+    let back = ((s - TRAVEL - AWAY) / TRAVEL).clamp(0.0, 1.0);
+    pos * (out - back)
 }
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -304,12 +308,14 @@ impl Signal {
     }
 }
 
+/// The beam inputs wander a little about bobview-testioc's values (2.54
+/// and 2.61), so archive and live join up.
 fn beam_a(t: f64) -> f64 {
-    2.54 + 0.4 * (TAU * t / 7200.0).sin()
+    2.54 + 0.02 * (TAU * t / 7200.0).sin()
 }
 
 fn beam_b(t: f64) -> f64 {
-    2.61 + 0.3 * (TAU * t / 10800.0).cos()
+    2.61 + 0.015 * (TAU * t / 10800.0).cos()
 }
 
 #[cfg(test)]
@@ -333,6 +339,15 @@ mod tests {
         for s in all() {
             assert_eq!(600_000_000_000 % s.period_ns(), 0, "{}", s.name);
         }
+    }
+
+    #[test]
+    fn testioc_pvs_rest_at_its_values() {
+        // Parked at 0 most of each 15 minutes; SUM near 2.54 + 2.61.
+        assert_eq!(motor(1_800_000_000.0 + 600.0, 1), 0.0);
+        assert_ne!(motor(1_800_000_000.0 + 60.0, 1), 0.0);
+        let sum = beam_a(1.7e9) + beam_b(1.7e9);
+        assert!((sum - 5.15).abs() < 0.05, "{sum}");
     }
 
     #[test]
