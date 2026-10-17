@@ -39,8 +39,8 @@ pub struct Pasted {
     pub too_many: usize,
 }
 
-/// The most PVs one paste adds. A paste naming more adds none, and says
-/// to paste it into the search box instead.
+/// The most PVs one paste adds. A paste naming more adds none (most
+/// likely a screenful selected by accident), and says so.
 pub const MAX_PASTE: usize = 20;
 
 impl Pasted {
@@ -48,8 +48,7 @@ impl Pasted {
     pub fn message(&self) -> String {
         if self.too_many > 0 {
             return format!(
-                "The selection names {} PVs (at most {MAX_PASTE}): \
-                 paste it into the search box to choose",
+                "The selection names {} PVs: select at most {MAX_PASTE}",
                 self.too_many
             );
         }
@@ -83,21 +82,39 @@ pub(super) struct PasteState {
     /// the host has not taken yet.
     pub selected: String,
     pub selection: Option<String>,
+    /// What the box selected by itself on focus (select-all): not the
+    /// user's selection, so not reported, until a press or key in the box.
+    pub auto: Option<String>,
+    /// Where the search box's ✕ was last drawn.
+    #[cfg(test)]
+    pub clear_rect: Option<egui::Rect>,
 }
 
-/// The PV names in `text`, in order and once each: words split on
-/// whitespace, commas and semicolons, with quotes and brackets around them
-/// dropped, that look like PV names. After an optional `ca://` or
-/// `pva://`, a name has only characters EPICS record names use (letters,
-/// digits, `_ - + : [ ] < > { } $` and `.` before a field), at least one
-/// letter, and no `.` or `:` at either end. So a plain word is a name
-/// (some sites' names have no colon), while numbers, times such as
-/// `12:30:00`, URLs and a sentence's last word ("down.") are not.
+/// The PV names in `text`, in order and once each. It is split into words
+/// on whitespace, commas and semicolons, and quotes and brackets around a
+/// word are dropped. A word can be a name if, after an optional `ca://` or
+/// `pva://`, it has only characters EPICS record names use (letters,
+/// digits, `_ - + : [ ] < > { } $`, and `.` before a field), at least one
+/// letter, and does not start with `-` or `+` (a command-line flag) or
+/// start or end with `.` or `:`. Shapes that are something else are
+/// left out: times and dates (`12:30:00`, `2026-10-17T13:41:52Z`),
+/// `host:port`, `a::b` paths and log prefixes (`INFO:root:…`).
+///
+/// A selection of one word is a name if it can be one, so names with no
+/// structure at all (`TEMP1`, `BEAMCURRENT`) work. In several words only
+/// those with a scheme or some structure are kept (a `:`, `-`, `_`,
+/// braces, a digit or a `.FIELD`), so prose, shell commands and code
+/// selected with them add nothing.
 pub fn pv_names(text: &str) -> Vec<String> {
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+        .map(unwrap)
+        .filter(|w| !w.is_empty())
+        .collect();
+    let one = words.len() == 1;
     let mut names: Vec<String> = Vec::new();
-    for word in text.split(|c: char| c.is_whitespace() || c == ',' || c == ';') {
-        let word = unwrap(word);
-        if looks_like_pv(word) && !names.iter().any(|n| n == word) {
+    for word in words {
+        if looks_like_pv(word, one) && !names.iter().any(|n| n == word) {
             names.push(word.to_string());
         }
     }
@@ -125,23 +142,68 @@ fn unwrap(mut word: &str) -> &str {
     }
 }
 
-fn looks_like_pv(word: &str) -> bool {
-    let body = match word.split_once("://") {
+/// Log levels, which start lines such as `INFO:root:Connected`.
+const LOG_LEVELS: [&str; 8] = [
+    "TRACE", "DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL", "FATAL",
+];
+
+/// Whether `word` can be a PV name; `alone` when it is the whole
+/// selection (see [`pv_names`]).
+fn looks_like_pv(word: &str, alone: bool) -> bool {
+    let (prefixed, body) = match word.split_once("://") {
         Some((scheme, body))
             if scheme.eq_ignore_ascii_case("ca") || scheme.eq_ignore_ascii_case("pva") =>
         {
-            body
+            (true, body)
         }
         Some(_) => return false,
-        None => word,
+        None => (false, word),
     };
     let chars_ok = body.chars().all(|c| {
         c.is_ascii_alphanumeric()
             || matches!(c, '_' | '-' | '+' | ':' | '[' | ']' | '<' | '>')
             || matches!(c, '.' | '{' | '}' | '$')
     });
-    let ends_ok = !body.starts_with(['.', ':']) && !body.ends_with(['.', ':']);
-    chars_ok && ends_ok && body.chars().any(|c| c.is_ascii_alphabetic())
+    let ends_ok = !body.starts_with(['.', ':', '-', '+']) && !body.ends_with(['.', ':']);
+    if !(chars_ok && ends_ok && body.chars().any(|c| c.is_ascii_alphabetic())) {
+        return false;
+    }
+    if something_else(body) {
+        return false;
+    }
+    alone || prefixed || structured(body)
+}
+
+/// A time, date, `host:port`, `a::b` path or log line, not a PV.
+fn something_else(body: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let parts: Vec<&str> = body.split(':').collect();
+    let b = body.as_bytes();
+    let date = b.len() >= 10
+        && digits(&body[..4])
+        && b[4] == b'-'
+        && digits(&body[5..7])
+        && b[7] == b'-'
+        && digits(&body[8..10]);
+    // 12:30, 13:41:52Z: digits before every colon.
+    let time = parts.len() > 1 && parts[..parts.len() - 1].iter().all(|p| digits(p));
+    let port = parts.len() > 1 && digits(parts[parts.len() - 1]);
+    let log = parts.len() > 1 && LOG_LEVELS.contains(&parts[0]);
+    date || time || port || log || body.contains("::")
+}
+
+/// Has some structure, as a PV name in running text would: a `:`, `-`,
+/// `_`, braces, a digit, or a `.FIELD` (upper case) at its end.
+fn structured(body: &str) -> bool {
+    let field = body.rsplit_once('.').is_some_and(|(_, f)| {
+        f.starts_with(|c: char| c.is_ascii_uppercase())
+            && f.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+    });
+    field
+        || body
+            .chars()
+            .any(|c| matches!(c, ':' | '-' | '_' | '{' | '}') || c.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -167,12 +229,19 @@ mod tests {
             pv_names("XF:23ID-CT{Bus}Sts A:B[1] A:B<x> $(P)M1"),
             ["XF:23ID-CT{Bus}Sts", "A:B[1]", "A:B<x>"]
         );
-        // Names without colons, as some sites have.
-        assert_eq!(pv_names("TEMP1 beam_current"), ["TEMP1", "beam_current"]);
+        // One word with no structure is a name (some sites' have none).
+        assert_eq!(pv_names(" TEMP1\n"), ["TEMP1"]);
+        assert_eq!(pv_names("BEAMCURRENT"), ["BEAMCURRENT"]);
+        assert_eq!(pv_names("'beamcurrent'"), ["beamcurrent"]);
+        // In several, words with some structure are.
+        assert_eq!(
+            pv_names("TEMP1 beam_current RING-CURRENT BEAM.VAL plain Word"),
+            ["TEMP1", "beam_current", "RING-CURRENT", "BEAM.VAL"]
+        );
         // Quotes and brackets around a name go.
         assert_eq!(
-            pv_names(r#"("A:B") ['C:D'] {E:F} <G> “H:I”"#),
-            ["A:B", "C:D", "E:F", "G", "H:I"]
+            pv_names(r#"("A:B") ['C:D'] {E:F} <G1> “H:I”"#),
+            ["A:B", "C:D", "E:F", "G1", "H:I"]
         );
         // Once each, in order.
         assert_eq!(pv_names("A:B C:D A:B"), ["A:B", "C:D"]);
@@ -194,9 +263,24 @@ mod tests {
             "A:B/C",
             "it's",
             "a=b",
+            // Prose, a shell command's flags, an `ls -l` line, code.
+            "the beam is down",
+            "$ caget -a",
+            "-rw-r--r-- 1 root root 0 Oct 17 12:00 file.txt",
+            "fn main() { let x = 1; }",
+            "-a",
+            "+x",
+            // Times, dates, ports, paths, log lines.
+            "2026-10-17T13:41:52Z",
+            "2026-10-17",
+            "13:41:52Z",
+            "localhost:5064",
+            "std::vec::Vec",
+            "INFO:root:Connected",
         ] {
             assert!(pv_names(text).is_empty(), "{text:?}: {:?}", pv_names(text));
         }
+        assert_eq!(pv_names("$ caget -a SR:X"), ["SR:X"]);
     }
 
     #[test]
@@ -226,7 +310,7 @@ mod tests {
         };
         assert_eq!(
             many.message(),
-            "The selection names 143 PVs (at most 20): paste it into the search box to choose"
+            "The selection names 143 PVs: select at most 20"
         );
     }
 }
