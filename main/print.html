@@ -265,7 +265,7 @@ time under the pointer.</li>
 As you zoom out, the archiver sends the data thinned to the plot's width;
 where a pixel holds many samples you see the line's mean with a shaded
 min-to-max band.</li>
-<li>Click <strong>7d</strong> in the time-range pill to see the whole week, then
+<li>Click <strong>1w</strong> in the time-range pill to see the whole week, then
 <strong>double-click</strong> the plot to return to where you started.</li>
 <li>The pill reading <strong>● 127.0.0.1:17668</strong> is the archiver: its dot is green
 while the archiver answers. Hover over it for details.</li>
@@ -533,13 +533,15 @@ the only row is <strong>Add "…" as typed</strong>, so type full names and pres
 <p>Everything happens on the plot itself; there are no axis dialogs. The full
 list is in <a href="how-to/../reference/controls.html">Gestures and keys</a>.</p>
 <h2 id="choose-a-time-range"><a class="header" href="#choose-a-time-range">Choose a time range</a></h2>
-<p>The pill in the bar holds the presets <strong>1h</strong>, <strong>8h</strong>, <strong>1d</strong> and <strong>7d</strong>. A
+<p>The pill in the bar holds the presets <strong>1h</strong>, <strong>8h</strong>, <strong>1d</strong> and <strong>1w</strong>. A
 preset shows that span ending now, following the current time.</p>
 <p>The <strong>⋯</strong> segment opens a small popover for anything else. Its <strong>Last</strong>
 field has the keyboard, with the current span selected: type a span such as
-<code>90m</code>, <code>2 days</code> or <code>1 hour 30 min</code> and press Enter to show it ending now,
-following the current time. The chips beside the label, <strong>2h</strong>, <strong>12h</strong>,
-<strong>3d</strong> and <strong>30d</strong>, show those spans in one click.</p>
+<code>90m</code>, <code>2 days</code>, <code>3w</code> or <code>1 hour 30 min</code> and press Enter to show it ending
+now, following the current time. The units are <code>s</code>, <code>m</code> (minutes), <code>h</code>,
+<code>d</code>, <code>w</code>, <code>mo</code> (30 days) and <code>y</code> (365 days), or their names (<code>min</code>, <code>hour</code>,
+<code>week</code>, <code>month</code>, <code>year</code>, ...). The chips beside the label, <strong>2h</strong>, <strong>12h</strong>,
+<strong>3d</strong>, <strong>4w</strong> and <strong>1y</strong>, show those spans in one click.</p>
 <p>For a fixed range, fill in <strong>From</strong> and <strong>To</strong> as <code>YYYY-MM-DD HH:MM</code> (local
 time, seconds optional) and press Enter in either. Tab moves from From to To.
 An empty To, or <code>now</code>, means now, and the range then follows the current
@@ -1140,7 +1142,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><code>-a</code>, <code>--archiver URL</code></td><td>the Archiver Appliance retrieval URL, e.g. <code>http://host:17668</code>. Phoebus's <code>pbraw://host:17668/retrieval</code> works too, as plain HTTP. <code>/retrieval</code> is added unless the URL ends with it. Overrides the opened view's archiver and <code>archiver_url</code> in <code>settings.json</code>, and is remembered there for later runs (not by <code>--snapshot</code>). With no archiver at all the plot is live only.</td></tr>
 <tr><td><code>--no-archiver</code></td><td>use no archiver, even if the view or <code>settings.json</code> names one: live values only.</td></tr>
 <tr><td><code>--view NAME</code></td><td>open the saved view <code>NAME</code> from <code>~/.config/archiveview/views/</code>. Giving PVs as well is a usage error.</td></tr>
-<tr><td><code>-r</code>, <code>--range SPAN</code></td><td>the time span to show, ending now: <code>1h</code>, <code>8h</code>, <code>7d</code>, <code>90m</code>, <code>2 days</code>, <code>1 hour 30 min</code>. Default <code>1h</code>.</td></tr>
+<tr><td><code>-r</code>, <code>--range SPAN</code></td><td>the time span to show, ending now: <code>1h</code>, <code>8h</code>, <code>7d</code>, <code>90m</code>, <code>2 days</code>, <code>1 hour 30 min</code>, <code>3w</code>, <code>6mo</code>, <code>1y</code>; units <code>s</code>, <code>m</code> (minutes), <code>h</code>, <code>d</code>, <code>w</code>, <code>mo</code> (30 days), <code>y</code> (365 days). Default <code>1h</code>.</td></tr>
 <tr><td><code>--theme system|light|dark</code></td><td>the colour theme. Default: <code>theme</code> in <code>settings.json</code>, else <code>system</code> (follow the OS).</td></tr>
 <tr><td><code>--ui-scale F</code></td><td>scale the whole interface by <code>F</code>, e.g. <code>1.25</code>. Default: <code>ARCHIVEVIEW_UI_SCALE</code>, else <code>1</code>.</td></tr>
 <tr><td><code>--version</code>, <code>--help</code></td><td></td></tr>
@@ -1182,8 +1184,8 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td>search box</td><td>find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. Middle-click pastes the primary selection. See <a href="reference/../how-to/search.html">Find and add PVs</a></td></tr>
 <tr><td><code>.*</code> (in the search box, shown while it has the focus)</td><td>search with a regular expression instead of a glob</td></tr>
 <tr><td>✕ (in the search box)</td><td>clear it</td></tr>
-<tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
-<tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>, or a 2h 12h 3d 30d chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See <a href="reference/../how-to/navigate.html#choose-a-time-range">Choose a time range</a></td></tr>
+<tr><td><strong>1h 8h 1d 1w</strong></td><td>show that span ending now, following live</td></tr>
+<tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>, <code>1y</code>, or a 2h 12h 3d 4w 1y chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See <a href="reference/../how-to/navigate.html#choose-a-time-range">Choose a time range</a></td></tr>
 <tr><td><strong>● Live</strong></td><td>red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow</td></tr>
 <tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="reference/../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
 <tr><td><strong>↶</strong> <strong>↷</strong></td><td>undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See <a href="reference/../how-to/navigate.html#undo-and-redo">Undo and redo</a></td></tr>
