@@ -48,6 +48,9 @@ pub struct AxisSpec {
     pub hi: f64,
     pub title: String,
     pub color: Option<Color32>,
+    /// Its traces hold whole numbers (enum states): ticks at whole
+    /// numbers only.
+    pub whole: bool,
 }
 
 impl Frame {
@@ -110,8 +113,12 @@ pub fn frame(
         from: bottom,
         to: top,
     };
-    let labels = |s: &Scale| -> (Vec<(f64, String)>, f32) {
-        let (ticks, step) = s.ticks(label_h * 3.0);
+    let labels = |s: &Scale, whole: bool| -> (Vec<(f64, String)>, f32) {
+        let (ticks, step) = if whole {
+            s.whole_ticks(label_h * 3.0)
+        } else {
+            s.ticks(label_h * 3.0)
+        };
         let labels: Vec<(f64, String)> =
             ticks.iter().map(|v| (*v, axis::label(*v, step))).collect();
         let w = labels
@@ -127,12 +134,12 @@ pub fn frame(
             label_h + PAD / 2.0
         }
     };
-    let (lo, hi, title, title_color) = match axes.first() {
-        Some(a) => (a.lo, a.hi, a.title.clone(), a.color),
-        None => (0.0, 1.0, String::new(), None),
+    let (lo, hi, title, title_color, whole) = match axes.first() {
+        Some(a) => (a.lo, a.hi, a.title.clone(), a.color, a.whole),
+        None => (0.0, 1.0, String::new(), None, false),
     };
     let ys = scale(lo, hi);
-    let (y_labels, label_w) = labels(&ys);
+    let (y_labels, label_w) = labels(&ys, whole);
     let left = rect.left() + PAD + title_w(&title) + label_w + TICK_GAP;
 
     // The right axes, measured before the data rect is known.
@@ -141,7 +148,7 @@ pub fn frame(
         .skip(1)
         .map(|a| {
             let s = scale(a.lo, a.hi);
-            let (labels, label_w) = labels(&s);
+            let (labels, label_w) = labels(&s, a.whole);
             Axis {
                 scale: s,
                 labels,

@@ -4,8 +4,15 @@
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 
-/// Steps for the time axis, in seconds: whole seconds, minutes, hours and
-/// days.
+const DAY: f64 = 86_400.0;
+const WEEK: f64 = 7.0 * DAY;
+/// A month as a step: nominal, for choosing it; its ticks are on the 1st.
+const MONTH: f64 = 30.0 * DAY;
+/// A year as a step: its ticks are on 1 January.
+const YEAR: f64 = 365.0 * DAY;
+
+/// Steps for the time axis, in seconds: whole seconds, minutes, hours,
+/// days, weeks (from Mondays), calendar months and years.
 const TIME_STEPS: &[f64] = &[
     1.0,
     2.0,
@@ -24,27 +31,33 @@ const TIME_STEPS: &[f64] = &[
     10_800.0,
     21_600.0,
     43_200.0,
-    86_400.0,
-    2.0 * 86_400.0,
-    7.0 * 86_400.0,
-    14.0 * 86_400.0,
-    30.0 * 86_400.0,
+    DAY,
+    2.0 * DAY,
+    WEEK,
+    2.0 * WEEK,
+    MONTH,
+    2.0 * MONTH,
+    3.0 * MONTH,
+    6.0 * MONTH,
+    YEAR,
 ];
 
 /// Ticks from `from` to `to` (seconds since 1970) at the smallest step
 /// giving at most `max_ticks`, on whole steps of wall-clock time in `tz`
 /// (each tick's own offset, so day lines stay at midnight across a
-/// daylight-saving change). Returns the ticks and the step.
+/// daylight-saving change). Week ticks are on Mondays, month ticks on the
+/// 1st and year ticks on 1 January. Returns the ticks and the step.
 pub fn time_ticks<Tz: TimeZone>(from: f64, to: f64, max_ticks: usize, tz: &Tz) -> (Vec<f64>, f64) {
     let span = to - from;
     if span <= 0.0 || !span.is_finite() {
         return (Vec::new(), 0.0);
     }
+    let max_ticks = max_ticks.max(1) as f64;
     let step = TIME_STEPS
         .iter()
         .copied()
-        .find(|s| span / s <= max_ticks.max(1) as f64)
-        .unwrap_or_else(|| 86_400.0 * (span / 86_400.0 / max_ticks.max(1) as f64).ceil());
+        .find(|s| span / s <= max_ticks)
+        .unwrap_or_else(|| YEAR * (span / YEAR / max_ticks).ceil());
     let Some(start) = DateTime::from_timestamp(from.floor() as i64, 0) else {
         return (Vec::new(), step);
     };
@@ -62,10 +75,44 @@ pub fn time_ticks<Tz: TimeZone>(from: f64, to: f64, max_ticks: usize, tz: &Tz) -
             ticks.push(t);
         }
     };
-    if step >= 86_400.0 {
-        // Local midnights, every `days` days counted from 1970-01-01.
-        let days = (step / 86_400.0).round() as i64;
-        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap_or_default();
+    if step >= MONTH {
+        // The 1st of every `months`th month (counted from January 1970),
+        // or 1 January of every `years`th year.
+        let months = if step >= YEAR {
+            12 * (step / YEAR).round() as i32
+        } else {
+            (step / MONTH).round() as i32
+        };
+        let (mut y, mut m) = (local.year(), local.month0() as i32);
+        for _ in 0..4000 {
+            if ticks.len() >= 1000 {
+                break;
+            }
+            let index = (y - 1970) * 12 + m;
+            if index.rem_euclid(months) == 0
+                && let Some(d) = NaiveDate::from_ymd_opt(y, m as u32 + 1, 1)
+                && let Some(t) = at(d.and_time(NaiveTime::MIN))
+            {
+                if t > to {
+                    break;
+                }
+                push(&mut ticks, t);
+            }
+            m += 1;
+            if m == 12 {
+                (y, m) = (y + 1, 0);
+            }
+        }
+    } else if step >= DAY {
+        // Local midnights: every `days`th day counted from 1970-01-01, or
+        // for weeks every `days`th day from Monday 1970-01-05.
+        let days = (step / DAY).round() as i64;
+        let epoch = if step >= WEEK {
+            NaiveDate::from_ymd_opt(1970, 1, 5)
+        } else {
+            NaiveDate::from_ymd_opt(1970, 1, 1)
+        }
+        .unwrap_or_default();
         let mut date = local.date();
         for _ in 0..4000 {
             let Some(t) = at(date.and_time(NaiveTime::MIN)) else {
@@ -104,7 +151,9 @@ pub fn time_ticks<Tz: TimeZone>(from: f64, to: f64, max_ticks: usize, tz: &Tz) -
 
 /// A time axis label in local time, as precise as the step: "14:30:15",
 /// "14:30", "Tue 17" at midnight or for day steps, "Oct" at the start of a
-/// month. The `first` tick carries its context ("Tue 17 14:00").
+/// month. Week ticks read "13 Oct" (with the year on the first of a
+/// year), month ticks "Oct" ("Jan 2027" in January) and year ticks "2027".
+/// The `first` tick carries its context ("Tue 17 14:00", "Oct 2026").
 pub fn time_label(t: f64, step: f64, first: bool) -> String {
     let Some(d) = Local.timestamp_opt(t.round() as i64, 0).single() else {
         return String::new();
@@ -112,7 +161,7 @@ pub fn time_label(t: f64, step: f64, first: bool) -> String {
     let midnight = d.hour() == 0 && d.minute() == 0 && d.second() == 0;
     let format = if step < 60.0 {
         if first { "%a %-d %H:%M:%S" } else { "%H:%M:%S" }
-    } else if step < 86_400.0 {
+    } else if step < DAY {
         if first {
             "%a %-d %H:%M"
         } else if midnight {
@@ -120,12 +169,26 @@ pub fn time_label(t: f64, step: f64, first: bool) -> String {
         } else {
             "%H:%M"
         }
-    } else if first {
-        "%-d %b"
-    } else if d.day() == 1 {
-        "%b"
+    } else if step < WEEK {
+        if first {
+            "%-d %b"
+        } else if d.day() == 1 {
+            "%b"
+        } else {
+            "%a %-d"
+        }
+    } else if step < MONTH {
+        // The first tick of a new year carries it.
+        let new_year = d.month() == 1 && f64::from(d.day() - 1) * DAY < step;
+        if new_year { "%-d %b %Y" } else { "%-d %b" }
+    } else if step < YEAR {
+        if first || d.month() == 1 {
+            "%b %Y"
+        } else {
+            "%b"
+        }
     } else {
-        "%a %-d"
+        "%Y"
     };
     d.format(format).to_string()
 }
@@ -299,10 +362,65 @@ mod tests {
             time_ticks(0.0, 60.0 * 86_400.0, 3, &utc()).1,
             30.0 * 86_400.0
         );
-        // Longer still: whole days.
+        // Longer still: calendar months, then years.
         let (_, step) = time_ticks(0.0, 400.0 * 86_400.0, 5, &utc());
-        assert_eq!(step, 80.0 * 86_400.0);
+        assert_eq!(step, 3.0 * MONTH);
+        let (t, step) = time_ticks(0.0, 20.0 * YEAR, 5, &utc());
+        assert_eq!(step, 4.0 * YEAR);
+        let years: Vec<i32> = t
+            .iter()
+            .map(|t| DateTime::from_timestamp(*t as i64, 0).unwrap().year())
+            .collect();
+        assert_eq!(years, [1970, 1974, 1978, 1982, 1986]);
         assert!(time_ticks(5.0, 5.0, 5, &utc()).0.is_empty());
+    }
+
+    /// The UTC dates of `ticks`, as `YYYY-MM-DD`.
+    fn dates(ticks: &[f64]) -> Vec<String> {
+        ticks
+            .iter()
+            .map(|t| {
+                DateTime::from_timestamp(*t as i64, 0)
+                    .unwrap()
+                    .format("%Y-%m-%d")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn utc_at(s: &str) -> f64 {
+        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M")
+            .unwrap()
+            .and_utc()
+            .timestamp() as f64
+    }
+
+    #[test]
+    fn week_month_and_year_ticks_are_on_calendar_boundaries() {
+        // 60 days from 20 Aug 2026 over 8 ticks: weekly, on Mondays.
+        let from = utc_at("2026-08-20 10:00");
+        let (t, step) = time_ticks(from, from + 60.0 * DAY, 9, &utc());
+        assert_eq!(step, WEEK);
+        assert_eq!(&dates(&t)[..3], ["2026-08-24", "2026-08-31", "2026-09-07"]);
+        // ... over 4: months, on the 1st.
+        let (t, step) = time_ticks(from, from + 60.0 * DAY, 4, &utc());
+        assert_eq!(step, MONTH);
+        assert_eq!(dates(&t), ["2026-09-01", "2026-10-01"]);
+        // A year over 8 ticks: every two months, from January.
+        let from = utc_at("2025-11-08 00:00");
+        let (t, step) = time_ticks(from, from + 365.0 * DAY, 8, &utc());
+        assert_eq!(step, 2.0 * MONTH);
+        assert_eq!(
+            dates(&t),
+            [
+                "2026-01-01",
+                "2026-03-01",
+                "2026-05-01",
+                "2026-07-01",
+                "2026-09-01",
+                "2026-11-01"
+            ]
+        );
     }
 
     #[test]
@@ -336,6 +454,28 @@ mod tests {
         let month = parse_local("2026-11-01").unwrap();
         assert_eq!(time_label(month, 86_400.0, false), "Nov");
         assert_eq!(time_label(month, 86_400.0, true), "1 Nov");
+    }
+
+    #[test]
+    fn long_spans_name_the_month() {
+        // A 60-day span with weekly ticks: "24 Aug", "7 Sep", never "Thu 3".
+        let monday = parse_local("2026-09-07").unwrap();
+        assert_eq!(time_label(monday, WEEK, false), "7 Sep");
+        assert_eq!(time_label(monday, 2.0 * WEEK, true), "7 Sep");
+        // The first week tick of a year carries it.
+        let jan = parse_local("2027-01-04").unwrap();
+        assert_eq!(time_label(jan, WEEK, false), "4 Jan 2027");
+        assert_eq!(time_label(jan + 7.0 * DAY, WEEK, false), "11 Jan");
+        // A 365-day span with month ticks: "Mar", "Jan 2027", first "Nov 2026".
+        let mar = parse_local("2026-03-01").unwrap();
+        assert_eq!(time_label(mar, 2.0 * MONTH, false), "Mar");
+        let jan = parse_local("2027-01-01").unwrap();
+        assert_eq!(time_label(jan, MONTH, false), "Jan 2027");
+        assert_eq!(
+            time_label(parse_local("2026-11-01").unwrap(), MONTH, true),
+            "Nov 2026"
+        );
+        assert_eq!(time_label(jan, 2.0 * YEAR, false), "2027");
     }
 
     #[test]

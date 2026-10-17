@@ -32,6 +32,10 @@ pub struct Job {
     pub append: bool,
 }
 
+/// A data job as sent: (trace, from, to, append).
+#[cfg(test)]
+pub type Sent = (u64, f64, f64, bool);
+
 /// A finished data request.
 pub struct Done {
     pub trace: u64,
@@ -71,6 +75,9 @@ pub struct Fetcher {
     inbox: Arc<Mutex<Vec<Done>>>,
     found: Arc<Mutex<Option<Found>>>,
     busy: Arc<AtomicUsize>,
+    /// Every data job sent, for tests.
+    #[cfg(test)]
+    pub sent: Arc<Mutex<Vec<Sent>>>,
 }
 
 impl Fetcher {
@@ -106,6 +113,10 @@ impl Fetcher {
         job: Job,
         repaint: Option<Repaint>,
     ) {
+        #[cfg(test)]
+        self.sent
+            .lock()
+            .push((job.trace, job.from, job.to, job.append));
         let client = client.clone();
         let inbox = self.inbox.clone();
         let (trace, generation, from, to, op, append) = (
@@ -256,23 +267,24 @@ impl Fetcher {
 
 /// A 404 means "not archived" only when the archiver itself said so. With
 /// a wrong `--archiver` base (port or context path) Tomcat answers 404 to
-/// every URL, so check with a search, which any archiver answers: if that
-/// fails too, the URL is wrong, and that is reported as an error.
+/// every URL, so check with a search for the exact name, which any
+/// archiver answers: only if that is a 404 too is the URL wrong, and that
+/// is reported as an error. Any other failure of the check (a timeout, a
+/// server error) proves nothing, so the PV stays "not archived".
 fn check_404(client: &ArchiverClient, pv: &str, e: archiver::Error) -> archiver::Error {
-    let probe = Search {
-        pattern: pv.to_string(),
-        mode: archiver::SearchMode::Glob,
-        limit: 1,
-    };
-    match client.search(&probe) {
-        Ok(_) => e,
-        Err(check) => {
+    match client.search(&Search::exact(pv, 1)) {
+        Err(check) if check.is_not_archived() => {
             log::debug!("{pv}: {e}; the PV search: {check}");
             archiver::Error::BadUrl(format!(
                 "{}: not an archiver (HTTP 404 for data and search)",
                 client.base()
             ))
         }
+        Err(check) => {
+            log::debug!("{pv}: {e}; the PV search failed too: {check}");
+            e
+        }
+        Ok(_) => e,
     }
 }
 
@@ -291,8 +303,7 @@ pub fn operator(width_px: f32, raw: bool) -> Operator {
     if raw {
         Operator::Raw
     } else {
-        let n = (width_px.max(1.0) * (1.0 + 2.0 * PAD as f32)).round() as u32;
-        Operator::Optimized(n.clamp(1, archiver::MAX_BINS))
+        Operator::for_width(width_px.max(1.0) * (1.0 + 2.0 * PAD as f32))
     }
 }
 
@@ -309,6 +320,34 @@ pub fn needed_from(from: f64, to: f64, raw: bool) -> f64 {
     } else {
         from
     }
+}
+
+/// Refresh binned history no more often than every this many bin widths
+/// while following now.
+const BINS_PER_REFRESH: f64 = 3.0;
+
+/// How long after fetching `got` with `op` to refresh it while following
+/// now: `base` for raw history (only its tail is fetched, which is
+/// cheap), but for bins no sooner than [`BINS_PER_REFRESH`] bin widths.
+/// Refetching a week of bins every 30 s would load the appliance for no
+/// visible change: a bin is minutes wide, and the right edge is drawn from
+/// live data anyway.
+pub fn refresh_after(base: f64, got: (f64, f64), op: Operator, binned: bool) -> f64 {
+    match op {
+        Operator::Optimized(n) if binned && n > 0 => {
+            let bin = (got.1 - got.0) / f64::from(n);
+            (BINS_PER_REFRESH * bin).max(base)
+        }
+        _ => base,
+    }
+}
+
+/// Whether raw history fetched as `optimized_N` (because there were at
+/// most N samples) has grown, through live tail refreshes, past N samples:
+/// then it should be fetched whole again, to come back binned, rather than
+/// grow without end.
+pub fn outgrown(op: Option<Operator>, len: usize) -> bool {
+    matches!(op, Some(Operator::Optimized(n)) if len > n as usize)
 }
 
 /// How long to wait before asking again after `failures` errors in a row:
@@ -362,5 +401,33 @@ mod tests {
         assert_eq!(backoff(10.0, 1), 10.0);
         assert_eq!(backoff(10.0, 3), 40.0);
         assert_eq!(backoff(10.0, 40), 300.0);
+    }
+
+    #[test]
+    fn binned_history_refreshes_at_the_bin_pace() {
+        let week = padded(0.0, 7.0 * 86_400.0);
+        // 1500 bins over 10.5 days: 605 s each, refreshed every 3 of them.
+        let every = refresh_after(30.0, week, Operator::Optimized(1500), true);
+        assert!((every - 1814.4).abs() < 1e-6, "{every}");
+        // Fine bins, raw history, and raw answers to `optimized`: 30 s.
+        let hour = padded(0.0, 3600.0);
+        assert_eq!(
+            refresh_after(30.0, hour, Operator::Optimized(1500), true),
+            30.0
+        );
+        assert_eq!(refresh_after(30.0, week, Operator::Raw, false), 30.0);
+        assert_eq!(
+            refresh_after(30.0, week, Operator::Optimized(1500), false),
+            30.0
+        );
+    }
+
+    #[test]
+    fn raw_history_past_n_samples_is_rebinned() {
+        let op = Some(Operator::Optimized(100));
+        assert!(!outgrown(op, 100));
+        assert!(outgrown(op, 101));
+        assert!(!outgrown(Some(Operator::Raw), 1_000_000));
+        assert!(!outgrown(None, 1_000_000));
     }
 }

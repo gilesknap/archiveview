@@ -108,11 +108,11 @@ Refetch rules:
 - Until the new data arrives, the previous history stays on screen, so there is no flicker.
 
 Errors:
-- A 404 means "not archived" only if the archiver answers a PV search (`getMatchingPVs`) for the name. The trace then still plots live data, and its legend chip shows a subtle "live only" mark. If the search fails too, the `--archiver` URL is wrong (Tomcat gives 404 for every URL under a wrong port or context path), and that is reported as an error.
+- A 404 means "not archived" only if the archiver answers a PV search (`getMatchingPVs`) for the name. The trace then still plots live data, and its legend chip shows a subtle "live only" mark. The search is for the exact name, sent as an escaped regex (`Search::exact`), so names with regex metacharacters work. Only if the search is a 404 too is the `--archiver` URL wrong (Tomcat gives 404 for every URL under a wrong port or context path), and that is reported as an error; any other failure of the search (a timeout, a server error) leaves the PV "live only".
 - Any other error shows on the chip as a tooltip and as one line in the status hint. It is retried after 10 s, doubling with each failure in a row up to 5 minutes (or after 10 s for a different window).
 
 Live-following:
-- While following now, the plot refreshes the history at most every 30 s, so it fills in behind the live data. Raw history fetches only the tail (`from` = its last sample's time) and appends it, dropping what has scrolled out of the padded window. Binned history is fetched whole again: it is at most `MAX_BINS` points, and bins of a shorter tail would not line up with the others.
+- While following now, the plot refreshes the history so it fills in behind the live data. Raw history fetches only the tail (`from` = its last sample's time) every 30 s and appends it, dropping what has scrolled out of the padded window. If appended raw history fetched as `optimized_N` grows past N samples (a PV that got busy), the next refresh fetches the whole window again so it comes back binned. Binned history is fetched whole again (bins of a shorter tail would not line up with the others), but no more often than every three bin widths (`fetch::refresh_after`): a week's bins are ten minutes wide, and refetching them every 30 s from every viewer would load the appliance for no visible change.
 
 ### Live merge
 
@@ -174,9 +174,9 @@ Value axes:
 
 Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
 
-- **Search box.** A rounded `TextEdit` with a search icon, filling the left of the bar. Typing debounces for 200 ms, then calls `archiver.search(Search::from_user(text, 50))`. The results show in a popup list under the box (`egui::Popup`).
-  - Arrow keys move through the list and Enter adds the selected result.
-  - Enter on free text adds the text as typed. That is how you add a non-archived PV or a `pva://` or `sim://` PV.
+- **Search box.** A rounded `TextEdit` with a search icon, filling the left of the bar. Typing debounces for 200 ms, then calls `archiver.search(Search::from_user(text, 50))` (case-insensitive substring, or a typed glob; see "Search" below). The results show in a popup list under the box (`egui::Popup`).
+  - The first row is highlighted; arrow keys move through the list and Enter adds the highlighted row. A result that is exactly the text typed is always first.
+  - The list ends with "Add … as typed", which adds the text as it is. That is how you add a non-archived PV. A `pva://` or `sim://` name, or several names, can only be added as typed, so that row comes first.
   - A small `.*` toggle inside the box switches to regex.
 - **Time-range pill.** A segmented control: 1h, 8h, 1d, 7d and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
 - **Live toggle.** A pill reading `● Live`. While following now its red dot shows; it pulses (a halo animated with `ctx.input(|i| i.time)`, repainting at about 15 fps) for 3 s after following starts and while the pointer is over the plot, and is still otherwise. When not following, it reads `○ Live` and clicking it jumps to now.
@@ -187,7 +187,7 @@ Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
 Plot area (fills the rest):
 
 - Background `extreme_bg_color` with subtle gridlines (about 6% contrast), no heavy frame, and axis labels in `weak_text_color`.
-- **Adaptive time labels.** The step comes from bobview's `TIME_STEPS`, extended with 2d, 7d, 14d and 30d. Labels read "14:30" within a day, "Tue 17" at midnights or for spans of days, and "Oct" at month starts. The first tick carries its context, e.g. "Tue 17 14:00". Ticks step through local wall-clock time (midnights by calendar date, sub-day steps by local time of day, each with its own UTC offset), so day lines stay at midnight across a daylight-saving change.
+- **Adaptive time labels.** The step comes from bobview's `TIME_STEPS`, extended with 2-day steps, weeks (1 and 2, on Mondays), calendar months (1, 2, 3 and 6, on the 1st) and years (on 1 January). Labels read "14:30" within a day, "Tue 17" at midnights or for day steps, "13 Oct" for week steps (with the year on the first tick of a year), "Oct" for month steps ("Jan 2027" in January) and "2027" for year steps. The first tick carries its context, e.g. "Tue 17 14:00" or "Oct 2026". Ticks step through local wall-clock time (midnights by calendar date, sub-day steps by local time of day, each with its own UTC offset), so day lines stay at midnight across a daylight-saving change.
 - **Autoscale** pads the data by 4% (not below a minimum of exactly 0, nor above a maximum of 0) and rounds out to half a tick step, so little height is wasted.
 - A **now marker**: a thin dashed vertical line with a small "now" tag at the top when now is in view, in neutral grey (red is a trace colour and an alarm colour; the Live dot alone is red).
 - The **crosshair** follows the pointer. It is a vertical hairline plus a floating rounded tooltip, with a shadow, which flips to the left near the right edge.
@@ -298,8 +298,8 @@ The client normalises the URL to `R = <url>/retrieval`, then uses these endpoint
 - `get_data` reads 5-element arrays as bins only for `Operator::Optimized` requests; the public `parse_data` uses a heuristic (every array has five elements with a whole count, and meta does not say `waveform: true`).
 
 **Search:** `R/bpl/getMatchingPVs?pv=<glob>&limit=N` (or `regex=`)
-- The glob is converted naively: `*` becomes `.*`, `?` becomes `.`, and the whole name must match.
-- The search box wraps text that has no wildcards as `*text*`.
+- The glob is converted naively: `*` becomes `.*`, `?` becomes `.`, and the whole name must match. Nothing else is escaped, so a name holding regex metacharacters (`XF:23ID1-ES{Dif-Ax:TH}Mtr`, common at NSLS-II) makes a `pv=` search fail with HTTP 500.
+- So the search box always sends `regex=`: text without wildcards as `(?i).*<escaped text>.*` (a substring, any case), and a typed glob converted with every other character escaped (whole name, with case). The "not archived" check searches for the exact name, escaped, the same way.
 
 **Metadata:** `R/bpl/getMetadata?pv=PV`
 - Every value comes back as a string: `DBRType`, `elementCount`, `units`, `precision`, and so on.

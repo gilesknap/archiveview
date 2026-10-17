@@ -154,9 +154,11 @@ pub fn crosshair(
     if x + width > f.outer.right() - 4.0 {
         x = p.x - 16.0 - width;
     }
+    // Above the time axis strip, so it never covers the crosshair's own
+    // time tag there.
     let y = (p.y - height / 2.0).clamp(
         f.outer.top() + 4.0,
-        (f.outer.bottom() - height - 4.0).max(f.outer.top()),
+        (f.data.bottom() - height - 4.0).max(f.outer.top()),
     );
     let card = Rect::from_min_size(
         Pos2::new(x.max(f.outer.left() + 4.0), y),

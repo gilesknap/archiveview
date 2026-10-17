@@ -58,7 +58,7 @@ fn latest_metadata() {
 fn optimized_bins_a_busy_pv() {
     let (_mock, c) = setup();
     let to = now();
-    let q = Query::new("MOCK:NOISE", to - 86400.0, to, Operator::for_width(600.0));
+    let q = Query::new("MOCK:NOISE", to - 86400.0, to, Operator::for_width(1200.0));
     let s = c.get_data(&q).unwrap().unwrap();
     assert!(s.binned);
     assert_eq!(s.kind, ValueKind::Scalar);
@@ -223,6 +223,26 @@ fn search_and_metadata() {
         vec!["bl01t:A", "bl01t:SUM"]
     );
     assert_eq!(c.search(&Search::from_user("MOCK:*", 3)).unwrap().len(), 3);
+    // Plain text ignores case; a glob keeps it.
+    assert!(
+        c.search(&Search::from_user("sine", 50))
+            .unwrap()
+            .contains(&"MOCK:SINE".to_string())
+    );
+    assert!(
+        c.search(&Search::from_user("mock:*", 50))
+            .unwrap()
+            .is_empty()
+    );
+    // Regex metacharacters are literal, not a server error.
+    for text in ["ES{Dif}Mtr", "a(b", "x+", "[", "XF:23ID1-ES{Dif}*"] {
+        assert_eq!(c.search(&Search::from_user(text, 50)), Ok(vec![]), "{text}");
+    }
+    assert_eq!(
+        c.search(&Search::exact("MOCK:SINE", 1)).unwrap(),
+        vec!["MOCK:SINE"]
+    );
+    assert!(c.search(&Search::exact("MOCK:SIN", 1)).unwrap().is_empty());
     assert!(
         c.search(&Search::from_user("nothing-here", 50))
             .unwrap()

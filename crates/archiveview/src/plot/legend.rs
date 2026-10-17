@@ -118,6 +118,19 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             Some("live only")
         } else if value == "—" && t.history.as_ref().is_some_and(|h| h.samples.is_empty()) {
             Some("no data")
+        } else if value == "—"
+            && let Some(h) = &t.history
+            && matches!(
+                h.kind,
+                archiver::ValueKind::Text | archiver::ValueKind::Other
+            )
+        {
+            // Archived, but nothing a plot can draw.
+            Some(if h.kind == archiver::ValueKind::Text {
+                "text"
+            } else {
+                "not plotted"
+            })
         } else {
             None
         };

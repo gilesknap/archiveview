@@ -27,6 +27,7 @@ use archiver::{ArchiverClient, Operator, ValueKind};
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
 use pv::PvManager;
 
+use crate::axis;
 use crate::view::{self, TraceView, View, YAxis};
 use fetch::Fetcher;
 pub use series::now;
@@ -38,7 +39,8 @@ pub use timeaxis::parse_span;
 /// Wait this long after the last pan or zoom before fetching (seconds).
 const DEBOUNCE: f64 = 0.3;
 
-/// While following now, refresh the archived data this often (seconds).
+/// While following now, refresh the archived data this often (seconds);
+/// binned history less often, at its bin pace (`fetch::refresh_after`).
 const LIVE_REFRESH: f64 = 30.0;
 
 /// After an error, ask again no sooner than this (seconds), doubling with
@@ -564,10 +566,12 @@ impl Plot {
                 .filter(|&i| trace_units[i].is_some() && self.axis_of[i] == a)
                 .collect();
             let pts = members.iter().map(|&i| &data[i]);
+            let whole =
+                !members.is_empty() && members.iter().all(|&i| whole_valued(&self.traces[i]));
             let (lo, hi) = if a == 0 {
-                self.shown_values(pts, from, to, dt)
+                self.shown_values(pts, (from, to), whole, dt)
             } else {
-                let fit = fit_values(self.y.log, pts, from, to);
+                let fit = fit_values(self.y.log, whole, pts, from, to);
                 let i = match self.axis_shown.iter().position(|(u, _)| u == name) {
                     Some(i) => i,
                     None => {
@@ -580,15 +584,7 @@ impl Plot {
                 *shown = ease_values(*shown, fit.unwrap_or(*shown), dt);
                 *shown
             };
-            // A shared last axis with mixed units has no title.
-            let title = if members
-                .iter()
-                .all(|&i| trace_units[i].as_ref() == Some(name))
-            {
-                name.clone()
-            } else {
-                String::new()
-            };
+            let title = axis_title(members.iter().filter_map(|&i| trace_units[i].as_deref()));
             let color = match members.as_slice() {
                 [one] if several => Some(self.color(&self.traces[*one], dark)),
                 _ => None,
@@ -598,6 +594,7 @@ impl Plot {
                 hi,
                 title,
                 color,
+                whole,
             });
         }
         specs
@@ -609,13 +606,13 @@ impl Plot {
     fn shown_values<'a>(
         &mut self,
         data: impl Iterator<Item = &'a Vec<Pt>>,
-        from: f64,
-        to: f64,
+        (from, to): (f64, f64),
+        whole: bool,
         dt: f64,
     ) -> (f64, f64) {
         let log = self.y.log;
         let target = if self.y.autoscale {
-            fit_values(log, data, from, to).or(self.y.shown)
+            fit_values(log, whole, data, from, to).or(self.y.shown)
         } else {
             Some((self.y.lo, self.y.hi))
         };
@@ -664,6 +661,11 @@ impl Plot {
                         Some(h) if !h.binned && !series.binned => {
                             h.append(series.samples, keep_from, done.to);
                             t.fetch.error = None;
+                            // Grown past what `optimized_N` returns raw:
+                            // fetch it whole again, binned.
+                            if fetch::outgrown(t.fetch.requested.map(|r| r.op), h.samples.len()) {
+                                t.fetch.requested = None;
+                            }
                         }
                         // Not what the history holds: fetch it all again.
                         _ => t.fetch.requested = None,
@@ -753,7 +755,10 @@ impl Plot {
                         now - r.at > wait
                     } else if !covered {
                         true
-                    } else if live && now - r.at > LIVE_REFRESH {
+                    } else if live
+                        && now - r.at
+                            > fetch::refresh_after(LIVE_REFRESH, (r.from, r.to), r.op, binned)
+                    {
                         tail = t
                             .history
                             .as_ref()
@@ -1051,9 +1056,34 @@ fn group_units(units: &[Option<String>]) -> (Vec<String>, Vec<usize>) {
     (names, of)
 }
 
-/// The autoscaled range for `data` between `from` and `to`.
+/// A value axis' title: its traces' units, distinct and in order, joined
+/// with " · " when the last axis is shared by several ("degC · V").
+/// Traces without units add nothing.
+fn axis_title<'a>(units: impl Iterator<Item = &'a str>) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    for u in units {
+        if !u.is_empty() && !seen.contains(&u) {
+            seen.push(u);
+        }
+    }
+    seen.join(" · ")
+}
+
+/// Whether trace `t` holds whole numbers: an enum (live with state
+/// labels, or archived scalar data fetched raw, as only enums are).
+fn whole_valued(t: &Trace) -> bool {
+    !t.pv.state().labels.is_empty()
+        || (t.fetch.raw_only == Some(true)
+            && t.history
+                .as_ref()
+                .is_some_and(|h| h.kind == ValueKind::Scalar && !h.samples.is_empty()))
+}
+
+/// The autoscaled range for `data` between `from` and `to` (at least two
+/// wide, for `whole` numbers on a linear scale).
 fn fit_values<'a>(
     log: bool,
+    whole: bool,
     data: impl Iterator<Item = &'a Vec<Pt>>,
     from: f64,
     to: f64,
@@ -1065,7 +1095,12 @@ fn fit_values<'a>(
             .take_while(|p| p.t <= to)
             .flat_map(|p| [p.lo, p.hi, p.v])
     });
-    render::autoscale(log, values)
+    let fit = render::autoscale(log, values);
+    if whole && !log {
+        fit.map(|(lo, hi)| axis::whole_range(lo, hi))
+    } else {
+        fit
+    }
 }
 
 /// A value range `shown` one frame (`dt`) closer to `target`.
@@ -1392,6 +1427,137 @@ mod tests {
     }
 
     #[test]
+    fn a_name_with_regex_characters_is_not_archived_not_a_bad_url() {
+        // getMetadata says 404; a naive glob search for the name would be
+        // a server error (an unbalanced `{`), but the exact search is not.
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&[
+            "XF:23ID1-ES{Dif}Mtr",
+            "XF:23ID1-ES{Dif-Ax:TH(1)}+",
+        ]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        for t in &h.plot.traces {
+            assert!(t.fetch.not_archived, "{}", t.name);
+            assert_eq!(t.fetch.error, None, "{}", t.name);
+        }
+    }
+
+    /// A live plot of MOCK:SINE over two minutes: few enough samples that
+    /// `optimized_N` answers raw.
+    fn live_raw_sine() -> (mockarchiver::MockArchiver, Harness) {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.set_range(&view::Range::Relative { secs: 120.0 });
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        let t = &h.plot.traces[0];
+        assert!(matches!(
+            t.fetch.requested.map(|r| r.op),
+            Some(Operator::Optimized(_))
+        ));
+        assert!(!t.history.as_ref().expect("history").binned);
+        (mock, h)
+    }
+
+    /// Make trace 0's last request old enough for a live refresh.
+    fn age_request(h: &mut Harness) {
+        if let Some(r) = &mut h.plot.traces[0].fetch.requested {
+            r.at -= LIVE_REFRESH + 1.0;
+        }
+    }
+
+    #[test]
+    fn live_raw_history_is_refreshed_by_its_tail() {
+        let (_mock, mut h) = live_raw_sine();
+        let r0 = h.plot.traces[0].fetch.requested.unwrap();
+        let last = h.plot.traces[0]
+            .history
+            .as_ref()
+            .unwrap()
+            .samples
+            .last()
+            .unwrap()
+            .t;
+        // Let the archive move on a little.
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        h.plot.fetcher.sent.lock().clear();
+        age_request(&mut h);
+        h.frame(vec![]);
+        let sent = h.plot.fetcher.sent.lock().clone();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let (_, from, to, append) = sent[0];
+        assert!(append, "only the tail");
+        assert_eq!(from, last, "from the last sample on");
+        assert!(to > r0.to);
+        h.until(|p| !p.is_loading());
+
+        let t = &h.plot.traces[0];
+        let r = t.fetch.requested.unwrap();
+        assert_eq!(r.op, r0.op);
+        assert_eq!(r.to, to, "the window fetched now ends later");
+        assert!(r.from >= r0.from && r.from <= last);
+        let hist = t.history.as_ref().unwrap();
+        assert!(!hist.binned);
+        assert!(hist.samples.last().unwrap().t > last, "new samples added");
+        assert!(
+            hist.samples.windows(2).all(|w| w[0].t < w[1].t),
+            "no sample twice"
+        );
+        // The head is what holds at the window's start, and no older.
+        assert!(hist.samples[0].t <= r.from && hist.samples[1].t >= r.from);
+    }
+
+    #[test]
+    fn raw_history_grown_past_n_is_fetched_again_whole() {
+        let (_mock, mut h) = live_raw_sine();
+        // As if `optimized_10` had answered raw: the tail now outgrows it.
+        if let Some(r) = &mut h.plot.traces[0].fetch.requested {
+            r.op = Operator::Optimized(10);
+        }
+        h.plot.fetcher.sent.lock().clear();
+        age_request(&mut h);
+        h.until(|p| p.fetcher.sent.lock().len() >= 2 && !p.is_loading());
+        let sent = h.plot.fetcher.sent.lock().clone();
+        assert!(sent[0].3, "first the tail");
+        assert!(!sent[1].3, "then the whole window");
+        let r = h.plot.traces[0].fetch.requested.unwrap();
+        assert!(matches!(r.op, Operator::Optimized(n) if n > 10));
+    }
+
+    #[test]
+    fn binned_history_is_refetched_whole_at_its_own_pace() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.set_range(&view::Range::Relative { secs: 86_400.0 });
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        assert!(h.plot.traces[0].history.as_ref().unwrap().binned);
+        h.plot.fetcher.sent.lock().clear();
+        // 30 s on: a day's bins are a minute wide, so not yet.
+        age_request(&mut h);
+        h.frame(vec![]);
+        assert!(h.plot.fetcher.sent.lock().is_empty());
+        // Past three bin widths: the whole window again, binned.
+        if let Some(r) = &mut h.plot.traces[0].fetch.requested {
+            r.at -= 300.0;
+        }
+        h.frame(vec![]);
+        let sent = h.plot.fetcher.sent.lock().clone();
+        assert_eq!(sent.len(), 1);
+        assert!(!sent[0].3, "bins are never appended to");
+    }
+
+    #[test]
     fn a_trace_has_one_request_in_flight() {
         // An archiver that answers nothing for 1.5 s, then hangs up.
         let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1437,6 +1603,13 @@ mod tests {
         assert_eq!(names, ["a", "b", "c"]);
         assert_eq!(of, [0, 1, 2, 2]);
         assert_eq!(group_units(&u(&[None])).0, [""]);
+        // A shared axis is titled with all its units.
+        assert_eq!(
+            axis_title(["degC", "V", "", "degC"].into_iter()),
+            "degC · V"
+        );
+        assert_eq!(axis_title(["mA"].into_iter()), "mA");
+        assert_eq!(axis_title(["", ""].into_iter()), "");
     }
 
     #[test]

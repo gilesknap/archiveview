@@ -66,9 +66,11 @@ clock the archiver stored, so the two line up. History is cut at the first
 live sample, so at the right edge the live values always win, and since both
 are drawn as steps the join is seamless. A disconnect records a gap.
 
-While the plot follows now, the history behind the live values is topped up
-every 30 seconds or so: raw history by fetching only what is new since its
-last sample, binned history by fetching the (bounded) window again. Each
+While the plot follows now, the history behind the live values is topped up:
+raw history every 30 seconds or so, by fetching only what is new since its
+last sample; binned history by fetching the (bounded) window again, but only
+once time has moved on by a few bins, so a week-long view asks the archiver
+for its week of bins every half hour, not every 30 seconds. Each
 trace has at most one request to the archiver at a time.
 
 ### Drawing

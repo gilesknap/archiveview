@@ -24,6 +24,33 @@ pub fn ticks(lo: f64, hi: f64, max_ticks: usize) -> (Vec<f64>, f64) {
     (values, step)
 }
 
+/// As [`ticks`], for whole-number values (enum states, counts): the step
+/// is never under 1, so no tick falls between two values.
+pub fn whole_ticks(lo: f64, hi: f64, max_ticks: usize) -> (Vec<f64>, f64) {
+    let (t, step) = ticks(lo, hi, max_ticks);
+    if step >= 1.0 || step == 0.0 {
+        return (t, step);
+    }
+    let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+    let values: Vec<f64> = (0..1000)
+        .map(|i| lo.ceil() + i as f64)
+        .take_while(|v| *v <= hi)
+        .collect();
+    (values, 1.0)
+}
+
+/// An autoscaled range for whole-number values: at least two wide, so a
+/// value that holds steady sits between whole ticks (0..2 for a constant
+/// 1), not on a fractional axis from 0.9 to 1.1.
+pub fn whole_range(lo: f64, hi: f64) -> (f64, f64) {
+    if hi - lo < 2.0 && lo.is_finite() && hi.is_finite() {
+        let mid = ((lo + hi) / 2.0).round();
+        (mid - 1.0, mid + 1.0)
+    } else {
+        (lo, hi)
+    }
+}
+
 /// The smallest 1/2/5 step that splits `span` into at most `max_ticks - 1` gaps.
 pub fn nice_step(span: f64, max_ticks: usize) -> f64 {
     let gaps = (max_ticks.max(2) - 1) as f64;
@@ -131,6 +158,16 @@ impl Scale {
         self.from + (self.to - self.from) * t as f32
     }
 
+    /// As [`Scale::ticks`], at whole numbers only on a linear scale.
+    pub fn whole_ticks(&self, label_len: f32) -> (Vec<f64>, f64) {
+        if self.log {
+            return self.ticks(label_len);
+        }
+        let length = (self.to - self.from).abs();
+        let n = (length / label_len.max(1.0)).floor().max(2.0) as usize;
+        whole_ticks(self.lo, self.hi, n)
+    }
+
     /// Ticks for a scale `length` pixels long with labels about `label_len` apart.
     pub fn ticks(&self, label_len: f32) -> (Vec<f64>, f64) {
         if self.log && self.lo > 0.0 {
@@ -189,6 +226,17 @@ mod tests {
         assert_eq!(label(1e-9, 0.0), "1e-9");
         assert_eq!(label(2.5e-7, 0.0), "2.5e-7");
         assert_eq!(label(100.0, 0.0), "100");
+    }
+
+    #[test]
+    fn whole_values_get_whole_ticks() {
+        // A steady enum: 0..2 with ticks on the states, not 0.92, 0.94, ...
+        assert_eq!(whole_range(0.9, 1.1), (0.0, 2.0));
+        assert_eq!(whole_range(0.0, 3.0), (0.0, 3.0));
+        assert_eq!(whole_ticks(0.0, 2.0, 10), (vec![0.0, 1.0, 2.0], 1.0));
+        assert_eq!(whole_ticks(-0.5, 3.5, 20).0, vec![0.0, 1.0, 2.0, 3.0]);
+        // Wide ranges keep their nice steps.
+        assert_eq!(whole_ticks(0.0, 100.0, 6).1, 20.0);
     }
 
     #[test]
