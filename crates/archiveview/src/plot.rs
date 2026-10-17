@@ -1614,10 +1614,11 @@ impl Plot {
         self.glide = 0.0;
     }
 
-    /// Show a preset span, following now.
-    fn preset(&mut self, span: f64) {
-        self.window = Window::live(span);
-        self.home_span = span;
+    /// Show a range picked in the bar: a preset, or one from the custom
+    /// popover. Its span becomes the one reset goes back to.
+    fn pick_range(&mut self, w: Window) {
+        self.window = w;
+        self.home_span = w.span;
         self.glide = 0.0;
     }
 
@@ -2196,6 +2197,103 @@ mod tests {
         // No recent searches: nothing is shown, so one Esc is enough.
         h.key(egui::Key::Escape);
         assert!(!search_focused(&h));
+    }
+
+    /// A harness with the custom range popover open (as a click on `⋯`).
+    fn custom_open() -> Harness {
+        let pvs = PvManager::new();
+        let mut h = Harness::new(Plot::new(&pvs, None));
+        super::bar::open_custom(&mut h.plot, now());
+        h.frame(vec![]);
+        h.frame(vec![]);
+        h
+    }
+
+    /// The custom popover's Last field has the keyboard.
+    fn span_focused(h: &Harness) -> bool {
+        h.ctx.memory(|m| m.has_focus(h.plot.id.with("custom-span")))
+    }
+
+    #[test]
+    fn enter_in_last_shows_that_span() {
+        let mut h = custom_open();
+        assert!(h.plot.custom.open);
+        // Focused, its text selected, so typing replaces it.
+        assert!(span_focused(&h));
+        assert_eq!(h.plot.custom.span, "1h");
+        h.frame(vec![egui::Event::Text("90m".into())]);
+        assert_eq!(h.plot.custom.span, "90m");
+        assert!(h.plot.custom.open, "nothing shown until Enter");
+        assert_eq!(h.plot.window.span, 3600.0);
+        h.key(egui::Key::Enter);
+        assert!(!h.plot.custom.open);
+        assert!(h.plot.window.live);
+        assert_eq!(h.plot.window.span, 5400.0);
+        assert_eq!(h.plot.home_span, 5400.0, "reset comes back to it");
+    }
+
+    #[test]
+    fn enter_in_to_shows_the_fixed_range() {
+        let mut h = custom_open();
+        h.plot.custom.from = "2026-10-01 09:00".into();
+        h.plot.custom.to = "2026-10-01 12:00".into();
+        // Tab: Last → From → To.
+        h.key(egui::Key::Tab);
+        h.key(egui::Key::Tab);
+        assert!(h.plot.custom.open);
+        h.key(egui::Key::Enter);
+        assert!(!h.plot.custom.open);
+        assert!(!h.plot.window.live);
+        assert_eq!(h.plot.window.span, 3.0 * 3600.0);
+        let (from, _) = h.plot.window.range(now());
+        assert_eq!(
+            from,
+            super::timeaxis::parse_local("2026-10-01 09:00").unwrap()
+        );
+    }
+
+    #[test]
+    fn bad_input_keeps_the_popover_open_with_the_error() {
+        let mut h = custom_open();
+        h.frame(vec![egui::Event::Text("soon".into())]);
+        h.key(egui::Key::Enter);
+        assert!(h.plot.custom.open);
+        assert_eq!(
+            h.plot.custom.span_error.as_deref(),
+            Some("Not a span: \"soon\"")
+        );
+        assert_eq!(h.plot.window.span, 3600.0);
+        // The field keeps the keyboard, to try again; editing clears it.
+        h.frame(vec![]);
+        assert!(span_focused(&h));
+        h.key(egui::Key::Backspace);
+        assert_eq!(h.plot.custom.span_error, None);
+        // A range ending before it starts.
+        h.plot.custom.from = "2026-10-01 12:00".into();
+        h.plot.custom.to = "2026-10-01 09:00".into();
+        h.key(egui::Key::Tab);
+        h.key(egui::Key::Enter);
+        assert!(h.plot.custom.open);
+        assert_eq!(
+            h.plot.custom.range_error.as_deref(),
+            Some("From must be before to")
+        );
+        assert_eq!(h.plot.window.span, 3600.0);
+    }
+
+    #[test]
+    fn esc_or_a_click_away_shows_nothing() {
+        let mut h = custom_open();
+        h.frame(vec![egui::Event::Text("5h".into())]);
+        h.key(egui::Key::Escape);
+        assert!(!h.plot.custom.open);
+        assert_eq!(h.plot.window.span, 3600.0);
+        let mut h = custom_open();
+        h.frame(vec![egui::Event::Text("5h".into())]);
+        h.button(MIDDLE, true);
+        h.button(MIDDLE, false);
+        assert!(!h.plot.custom.open);
+        assert_eq!(h.plot.window.span, 3600.0);
     }
 
     #[test]
