@@ -65,6 +65,34 @@ not archived; it plots live only. A PV Access or simulated name
 commas, can only be added as typed, so that row comes first and `Enter`
 adds it straight away.
 
+## Add PVs from another window
+
+Select a PV name anywhere, then **middle-click** the plot or its legend: the
+PV is added, and a note at the bottom says so. This is the X11 and Wayland
+primary selection, the way EDM and MEDM pass PV names around:
+
+- In bobview, middle-click a widget to select its PV name.
+- In a terminal, an editor or a web page, select the name with the mouse
+  (double-click selects a whole name in most terminals).
+
+Several names separated by spaces, commas or new lines add several PVs.
+Only words that look like PV names are used: a name with a colon in it
+(`SR-DI-DCCT-01:SIGNAL`), or one starting `ca://` or `pva://`. Anything else
+is left out, and if nothing is left the note says so.
+
+Middle-click in the search box pastes the selection there instead, at the
+cursor, so you can edit it or search with it. Text you select in the search
+box becomes the primary selection, so you can middle-click it into a
+terminal.
+
+`Ctrl+V` with the pointer over the plot (and the search box not focused)
+adds the PVs in the clipboard, on every platform. Where there is no primary
+selection (macOS, Windows, a Wayland desktop without it), or nothing is
+selected, middle-click uses the clipboard too.
+
+Over `ssh -X` the selection goes through your X server, so selecting a name
+in a local window and middle-clicking the remote archiveview works.
+
 ## Add PVs from the command line
 
 Name them after the options:

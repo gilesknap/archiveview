@@ -72,6 +72,17 @@ What the widget does, and doesn't, assume:
   last drawn in, so a plot in its own native window is repainted, not the
   root one) and, while following now, at the pace the time axis scrolls.
 
+- **It reads no clipboard.** Ctrl+V over the plot works on its own (egui
+  delivers the clipboard as a paste event). For middle-click, the host
+  reads the primary selection: `plot.take_middle_click()` says where a
+  middle-click landed, and the host answers with the selection's text,
+  `plot.paste_pvs(&text)` on the plot or `plot.paste_into_search(&text)` in
+  the search box. `plot.take_search_selection()` gives text the user
+  selected in the search box, for the host to make the primary selection,
+  and `plot.take_pasted()` says what a paste added (`.message()` for a
+  toast). The standalone app does all this in `app.rs`, with
+  `archiveview::selection`.
+
 To save a plot in the host's own layout files, store `plot.view()` (it is
 `serde`-serialisable) and restore it with `plot.set_view(&view)`. A view
 records the archiver in use; `set_view` switches to it only with archiver

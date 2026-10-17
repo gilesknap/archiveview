@@ -65,6 +65,12 @@ impl Plot {
     pub fn set_range(&mut self, range: &view::Range);
     // As ui, with the host's items (views, settings) added to the ≡ menu:
     pub fn ui_with_menu(&mut self, ui: &mut egui::Ui, menu: &mut dyn FnMut(&mut egui::Ui));
+    // Middle-click and paste: the host reads the selection (see "Selection").
+    pub fn take_middle_click(&mut self) -> Option<MiddleClick>;   // Plot or Search
+    pub fn paste_pvs(&mut self, text: &str) -> Pasted;
+    pub fn paste_into_search(&mut self, text: &str);
+    pub fn take_pasted(&mut self) -> Option<Pasted>;    // for a toast
+    pub fn take_search_selection(&mut self) -> Option<String>;
 }
 ```
 
@@ -244,9 +250,41 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 | shift- or ctrl-scroll, or drag on the value axis | zoom or pan values; turns autoscale off |
 | secondary-drag or shift-drag a box | zoom to the box (time and value) |
 | double-click | reset: autoscale on, back to the preset span (live if it was live) |
+| middle-click on the plot or legend | add the PVs in the primary selection (see "Selection") |
+| Ctrl+V with the pointer over the plot | add the PVs in the clipboard (egui's `Event::Paste`) |
 | hover | crosshair readout |
 
 Transitions animate over about 150 ms with ease-out.
+
+### Selection
+
+Cross-application drag and drop isn't possible (winit delivers only dropped
+files and can't start a drag), so PV names come in through the X11/Wayland
+primary selection, as in EDM and MEDM: middle-click a widget in bobview,
+then middle-click the plot.
+
+- **The widget reads no clipboard** (it has no clipboard dependency). A
+  middle-click (`button_clicked`, so never a middle drag, which still pans)
+  on the plot or legend, on the plot's own layer, is reported by
+  `take_middle_click()`; one in the search box (where egui has already put
+  the cursor) likewise. The host answers with `paste_pvs` or
+  `paste_into_search`. Ctrl+V needs no host: egui-winit turns it into
+  `Event::Paste` with the clipboard's text, which the plot takes when the
+  keyboard shortcuts apply.
+- **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace and
+  commas, drop quotes, keep words with a `ca://`/`pva://` prefix or an inner
+  colon, a letter, and only record-name characters (plus `{}`). Prose,
+  times and URLs are left out. `Pasted::message` words the toast.
+- **egui does not set the primary selection**, so the search box reports
+  newly selected text (once the pointer is up) and the app sets it.
+- **`ArchiveApp`** reads through a `selection::Selection` trait (tests
+  inject text). `SystemSelection`, behind the `app` feature, uses
+  smithay-clipboard on the app's own Wayland connection (as egui-winit
+  reads its clipboard; arboard alone would need the data-control protocol,
+  which GNOME lacks) and arboard on X11, including over `ssh -X`. Both are
+  already in the tree through egui-winit, at the same versions. With no
+  primary selection, or nothing in it, middle-click reads the clipboard.
+  The Wayland clipboard is dropped in `on_exit`, before the display goes.
 
 Keyboard (only when no text field has focus):
 - `/` focuses search and `Esc` closes popups or clears search.
