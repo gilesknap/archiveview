@@ -225,6 +225,41 @@ impl Trace {
         }
     }
 
+    /// Take it off the plot, keeping what it has fetched and learnt so
+    /// an undo can bring it back as it was: its subscription is dropped
+    /// (the channel disconnects), its archived history kept.
+    pub fn park(self) -> Parked {
+        Parked {
+            id: self.id,
+            name: self.name,
+            array: self.array.load(Ordering::Relaxed),
+            history: self.history,
+            fetch: self.fetch,
+            seen_at: self.seen_at,
+            data_since: self.data_since,
+        }
+    }
+
+    /// A parked trace back on the plot, subscribed again through `pv`,
+    /// with the history it had: no fetch unless the window has moved on.
+    /// Its live samples start again.
+    pub fn revive(p: Parked, pv: Pv) -> Self {
+        let mut t = Self::new(p.id, &p.name, pv);
+        t.array.store(p.array, Ordering::Relaxed);
+        t.history = p.history;
+        t.fetch = p.fetch;
+        if t.fetch.in_flight {
+            // Its answer came while it was parked, and was dropped: ask
+            // again, and drop it should it still come.
+            t.fetch.in_flight = false;
+            t.fetch.requested = None;
+            t.fetch.generation += 1;
+        }
+        t.seen_at = p.seen_at;
+        t.data_since = p.data_since;
+        t
+    }
+
     /// The name the archiver knows the PV by: without `ca://` or
     /// `pva://`; `None` for PVs no archiver has (`sim://`, `loc://`,
     /// formulas).
@@ -272,6 +307,30 @@ impl Trace {
             f64::NEG_INFINITY
         };
         merge(hist, binned, &live, from, to, hold)
+    }
+}
+
+/// A trace taken off the plot, kept for undo (see [`Trace::park`]): what
+/// it fetched and learnt, without its subscription.
+pub struct Parked {
+    pub id: u64,
+    pub name: String,
+    array: bool,
+    pub history: Option<History>,
+    pub fetch: FetchState,
+    seen_at: Option<f64>,
+    data_since: Option<f64>,
+}
+
+impl Parked {
+    /// Forget its history (to save memory, or for another archiver): it
+    /// is fetched again if it comes back.
+    pub fn forget_history(&mut self) {
+        self.history = None;
+        self.fetch = FetchState {
+            generation: self.fetch.generation + 1,
+            ..Default::default()
+        };
     }
 }
 

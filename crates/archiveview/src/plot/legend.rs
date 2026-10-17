@@ -286,7 +286,7 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         t.visible = !t.visible;
     }
     if let Some(id) = remove {
-        plot.traces.retain(|t| t.id != id);
+        plot.remove_trace(id);
         highlight = None;
     }
     // Only a drawn trace is picked out: visible, not an array, on an axis.

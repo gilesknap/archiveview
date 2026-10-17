@@ -23,7 +23,8 @@ is remembered there, so it is needed only once.
 In the window: type a PV name (or search the archiver) in the top bar; drag
 to pan, scroll to zoom time, shift+scroll or drag the value axis to zoom
 values, shift+drag to zoom to a box, double-click to reset. Keys: / search,
-arrows pan, +/- zoom, L live, A autoscale, Home reset.
+arrows pan, +/- zoom, L live, A autoscale, Home reset, Ctrl+Z undo,
+Ctrl+Shift+Z redo.
 
 Set ARCHIVEVIEW_LOG=debug for more output.";
 

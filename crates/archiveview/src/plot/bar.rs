@@ -98,6 +98,9 @@ pub fn top_bar(
         let menu_button = icons::button(ui, Icon::Menu, false).on_hover_text("More");
         egui::Popup::menu(&menu_button).show(|ui| {
             if compact {
+                if !plot.undo.hidden {
+                    undo_menu_items(plot, ui);
+                }
                 if ui.button("Autoscale values").clicked() {
                     plot.autoscale();
                 }
@@ -133,7 +136,8 @@ pub fn top_bar(
                      shift+drag: zoom to box · double-click: reset\n\
                      over an axis: drag or shift+wheel zooms it alone\n\
                      chip's dot or drag a chip onto an axis: move its trace\n\
-                     / search · ←→ pan · +/- zoom · L live · A autoscale",
+                     / search · ←→ pan · +/- zoom · L live · A autoscale\n\
+                     ctrl+Z undo · ctrl+shift+Z redo · the mouse's back and forward too",
                 )
                 .small()
                 .weak(),
@@ -154,6 +158,9 @@ pub fn top_bar(
             {
                 plot.autoscale();
             }
+            if !plot.undo.hidden {
+                undo_buttons(plot, ui);
+            }
         }
         archiver_pill(plot, ui, compact, now);
         live_pill(plot, ui, now);
@@ -169,6 +176,59 @@ pub fn top_bar(
             search_box(plot, ui, w, now);
         });
     });
+}
+
+// --- undo -------------------------------------------------------------------
+
+/// The shortcuts for undo and redo, as this platform writes them.
+fn undo_keys(ctx: &egui::Context) -> (String, String) {
+    use egui::{KeyboardShortcut, Modifiers};
+    let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
+    let redo = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    (ctx.format_shortcut(&undo), ctx.format_shortcut(&redo))
+}
+
+/// ↶ ↷, greyed out with nothing to undo or redo; the tooltip names the
+/// step. Right to left: redo first.
+fn undo_buttons(plot: &mut Plot, ui: &mut egui::Ui) {
+    let (undo_key, redo_key) = undo_keys(ui.ctx());
+    let redo = plot.redo_label().map(|l| format!("Redo {l} ({redo_key})"));
+    let r = ui
+        .add_enabled_ui(redo.is_some(), |ui| icons::button(ui, Icon::Redo, false))
+        .inner;
+    let r = match redo {
+        Some(text) => r.on_hover_text(text),
+        None => r.on_disabled_hover_text("Nothing to redo"),
+    };
+    if r.clicked() {
+        plot.redo();
+    }
+    let undo = plot.undo_label().map(|l| format!("Undo {l} ({undo_key})"));
+    let r = ui
+        .add_enabled_ui(undo.is_some(), |ui| icons::button(ui, Icon::Undo, false))
+        .inner;
+    let r = match undo {
+        Some(text) => r.on_hover_text(text),
+        None => r.on_disabled_hover_text("Nothing to undo"),
+    };
+    if r.clicked() {
+        plot.undo();
+    }
+}
+
+/// Undo and redo in the `≡` menu of a narrow bar.
+fn undo_menu_items(plot: &mut Plot, ui: &mut egui::Ui) {
+    let (undo_key, redo_key) = undo_keys(ui.ctx());
+    let undo = plot.undo_label().map(|l| format!("Undo {l}"));
+    let button = egui::Button::new(undo.as_deref().unwrap_or("Undo")).shortcut_text(undo_key);
+    if ui.add_enabled(undo.is_some(), button).clicked() {
+        plot.undo();
+    }
+    let redo = plot.redo_label().map(|l| format!("Redo {l}"));
+    let button = egui::Button::new(redo.as_deref().unwrap_or("Redo")).shortcut_text(redo_key);
+    if ui.add_enabled(redo.is_some(), button).clicked() {
+        plot.redo();
+    }
 }
 
 /// A pill-shaped frame, as the controls in the bar are.
@@ -1019,6 +1079,7 @@ fn custom_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect, now: f64) {
         plot.custom.open = false;
     }
     if let Some(w) = apply {
+        plot.name_step("show a custom range");
         plot.custom.open = false;
         plot.window = w;
         plot.home_span = w.span;
