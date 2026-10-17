@@ -213,7 +213,9 @@ jobs:
 
   publish:
     # publishes the crates to crates.io with the version from the tag, by
-    # trusted publishing: crates.io trusts this workflow, so no token is stored
+    # trusted publishing: crates.io trusts this workflow, so no token is stored.
+    # No rust-cache: it runs once per tag, and the cache's cleanup trips over
+    # the target/package tree that cargo publish leaves behind
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [check, build]
     runs-on: ubuntu-24.04
@@ -224,7 +226,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - name: Take the version from the release tag
         run: >-
           V=${GITHUB_REF_NAME#v} perl -0pi
