@@ -348,7 +348,17 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
     } else {
         "Add a PV…"
     };
-    if !focused && s.text.is_empty() {
+    // The hint's width, to leave the key cap out where it would overlap.
+    let hint_w = ui
+        .painter()
+        .layout_no_wrap(
+            hint.to_string(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            Color32::BLACK,
+        )
+        .size()
+        .x;
+    if !focused && s.text.is_empty() && inner.width() >= hint_w + 24.0 {
         // The shortcut, as a key cap.
         let cap = Rect::from_center_size(
             Pos2::new(inner.right() - 10.0, rect.center().y),
