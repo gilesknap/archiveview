@@ -8,9 +8,9 @@ A modern plotter for archived and live EPICS PVs, written in Rust with
 [egui](https://github.com/emilk/egui). History comes from an
 [EPICS Archiver Appliance](https://github.com/archiver-appliance/epicsarchiverap)
 and live values from Channel Access or PV Access, joined into one line per
-PV. It does what most people use the Phoebus Data Browser for, without the
-dialogs: the plot fills the window, you search for PVs as you type, drag to
-pan, scroll to zoom and hover to read values. The plot is also an egui
+PV 
+
+The plot is also an egui
 widget that other apps, such as [bobview](https://github.com/gilesknap/bobview),
 can embed.
 
