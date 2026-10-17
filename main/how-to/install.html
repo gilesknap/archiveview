@@ -208,6 +208,13 @@ machine.</p>
 Ubuntu 20.04+ and Debian 10+.</p>
 <p>Run from inside an unpacked release tarball, <code>install.sh</code> installs that
 tarball rather than downloading one.</p>
+<h2 id="or-install-with-cargo"><a class="header" href="#or-install-with-cargo">Or install with cargo</a></h2>
+<p>With a stable Rust toolchain (<a href="https://rustup.rs">rustup</a>), build the
+plotter and the mock archiver from crates.io into <code>~/.cargo/bin</code>:</p>
+<pre><code class="language-bash">cargo install --locked archiveview archiveview-mockarchiver
+</code></pre>
+<p>This builds for the machine it runs on, so it suits platforms with no
+release build; <code>--locked</code> builds with the dependency versions CI tested. <code>archiveview-ssh</code> comes only with the release tarball.</p>
 <h2 id="put-it-on-your-path"><a class="header" href="#put-it-on-your-path">Put it on your PATH</a></h2>
 <p>On macOS <code>~/.local/bin</code> is not on <code>PATH</code> by default; add this to <code>~/.zshrc</code>:</p>
 <pre><code class="language-bash">export PATH=$HOME/.local/bin:$PATH
