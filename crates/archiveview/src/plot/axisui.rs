@@ -9,6 +9,41 @@ use egui::{Color32, FontId, Key, Pos2, Sense, Stroke, Vec2};
 use super::render::Frame;
 use super::{Plot, Trace};
 
+/// What can be done on an axis, as its tooltip says.
+const HINT: &str = "Drag or shift+scroll: zoom this axis · click: pick out its traces\n\
+                    Double-click its name: rename · right-click: scale";
+
+/// What hovering an axis' name shows: its whole name (it may be cut off),
+/// its units and its traces, then what can be done on it.
+struct AxisCard {
+    name: String,
+    units: String,
+    traces: Vec<(Color32, String, bool)>,
+}
+
+impl AxisCard {
+    fn show(&self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(&self.name).strong());
+        if !self.units.is_empty() {
+            ui.label(format!("Units: {}", self.units));
+        }
+        for (color, name, visible) in &self.traces {
+            ui.horizontal(|ui| {
+                let (r, painter) = ui.allocate_painter(Vec2::splat(10.0), Sense::hover());
+                if *visible {
+                    painter.circle_filled(r.rect.center(), 4.0, *color);
+                } else {
+                    painter.circle_stroke(r.rect.center(), 3.5, Stroke::new(1.5, *color));
+                }
+                let text = egui::RichText::new(name);
+                ui.label(if *visible { text } else { text.weak() });
+            });
+        }
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new(HINT).small().weak());
+    }
+}
+
 /// An axis name being edited.
 pub struct Renaming {
     pub axis: u32,
@@ -48,16 +83,21 @@ impl Plot {
             let (Some(id), Some(rect)) = (self.drawn.get(k).copied(), f.axis_rect(k)) else {
                 continue;
             };
-            let r = ui
-                .interact(rect, self.id.with(("axis", id)), Sense::click())
-                .on_hover_text(
-                    "Drag or shift+scroll: zoom this axis · click: pick out its traces\n\
-                     Double-click its name: rename · right-click: scale",
-                );
+            let r = ui.interact(rect, self.id.with(("axis", id)), Sense::click());
             let on_name = f
                 .title_rect(k)
                 .zip(pointer)
                 .is_some_and(|(t, p)| t.expand2(Vec2::new(4.0, 0.0)).contains(p));
+            // No tooltip over the name editor or a menu.
+            let quiet = self.renaming.is_some() || egui::Popup::is_any_open(ui.ctx());
+            let r = if quiet {
+                r
+            } else if on_name {
+                let card = self.axis_card(id, ui.visuals().dark_mode);
+                r.on_hover_ui_at_pointer(|ui| card.show(ui))
+            } else {
+                r.on_hover_text_at_pointer(HINT)
+            };
             if r.double_clicked() && on_name {
                 // Its first click picked the axis out (or not): undone.
                 if let Some(before) = self.highlight_before.take() {
@@ -69,6 +109,30 @@ impl Plot {
                 self.axis_highlight = (self.axis_highlight != Some(id)).then_some(id);
             }
             egui::Popup::context_menu(&r).show(|ui| self.axis_scale_menu(ui, id));
+        }
+    }
+
+    /// What the tooltip on axis `id`'s name shows.
+    fn axis_card(&self, id: u32, dark: bool) -> AxisCard {
+        let on: Vec<&Trace> = self.traces.iter().filter(|t| t.axis == Some(id)).collect();
+        let mut units: Vec<String> = Vec::new();
+        for u in on.iter().map(|t| super::units(t)) {
+            if !u.is_empty() && !units.contains(&u) {
+                units.push(u);
+            }
+        }
+        AxisCard {
+            name: self
+                .axis_names
+                .iter()
+                .find(|(a, _)| *a == id)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_default(),
+            units: units.join(" · "),
+            traces: on
+                .iter()
+                .map(|t| (self.color(t, dark), t.label(), t.visible))
+                .collect(),
         }
     }
 

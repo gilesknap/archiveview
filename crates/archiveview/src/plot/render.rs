@@ -25,6 +25,8 @@ pub struct Frame {
     /// each pair further out than the one before.
     axes: Vec<Axis>,
     font: FontId,
+    /// The value axes' names: larger than the tick labels, to read.
+    title_font: FontId,
 }
 
 /// A value axis beside the data.
@@ -153,8 +155,11 @@ pub fn frame(
     (from, to): (f64, f64),
     axes: &[AxisSpec],
     font: &FontId,
+    title_font: &FontId,
 ) -> Frame {
     let label_h = text_size(painter, "0", font).y;
+    // An upright name takes its line height across.
+    let title_h = text_size(painter, "0", title_font).y;
     let bottom = rect.bottom() - PAD - label_h - TICK_GAP;
     let top = rect.top() + PAD + label_h / 2.0;
     let blank = [AxisSpec::default()];
@@ -202,7 +207,7 @@ pub fn frame(
         let title = if a.title.is_empty() {
             0.0
         } else {
-            label_h + PAD / 2.0
+            title_h + PAD / 2.0
         };
         PAD / 2.0 + title + a.label_w + TICK_GAP
     };
@@ -220,7 +225,7 @@ pub fn frame(
     let (mut l, mut r) = (data.left(), data.right());
     for a in &mut list {
         let w = width(a);
-        let title = if a.title.is_empty() { 0.0 } else { label_h };
+        let title = if a.title.is_empty() { 0.0 } else { title_h };
         (a.rect, a.title_rect) = if a.right {
             r += w;
             let t = r - PAD / 2.0;
@@ -251,6 +256,7 @@ pub fn frame(
         ys: list[0].scale,
         axes: list,
         font: font.clone(),
+        title_font: title_font.clone(),
     }
 }
 
@@ -363,7 +369,7 @@ fn paint_axis(painter: &egui::Painter, f: &Frame, a: &Axis, visuals: &egui::Visu
     if a.title.is_empty() {
         return;
     }
-    let size = text_size(painter, &a.title, &f.font);
+    let size = text_size(painter, &a.title, &f.title_font);
     let x = a.title_rect.center().x;
     let mid = f.data.center().y;
     let title_color = match a.color {
@@ -375,7 +381,7 @@ fn paint_axis(painter: &egui::Painter, f: &Frame, a: &Axis, visuals: &egui::Visu
         painter,
         Pos2::new(x, mid),
         &a.title,
-        f.font.clone(),
+        f.title_font.clone(),
         title_color,
     );
     // Its traces' colours, above the name (which reads upwards).

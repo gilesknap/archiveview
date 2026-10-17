@@ -68,6 +68,7 @@ An axis names itself from its traces:
 
 An axis of states is named after its PV, or **State** when several share it.
 
+**Hover a name** to read it in full, with its units and its traces.
 **Double-click a name** to type your own; Enter keeps it, Esc does not. Clear
 it to go back to the automatic name.
 

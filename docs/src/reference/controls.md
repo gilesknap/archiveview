@@ -29,6 +29,7 @@ the ≡ menu.
 | right-drag, or shift-drag | zoom to the box, time and values |
 | double-click | reset |
 | click a value axis | pick out its traces, dimming the others; again to undo |
+| hover a value axis' name | its full name, units and traces (with their colours), and the gestures |
 | double-click a value axis' name | rename it (Enter keeps, Esc cancels, empty is automatic) |
 | right-click a value axis | its menu: Log scale, Autoscale, Rename… |
 | hover | crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap) |

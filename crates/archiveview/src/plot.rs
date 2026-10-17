@@ -543,7 +543,8 @@ impl Plot {
         let axes = self.value_axes(&data, from, to, dt, dark);
 
         let font = egui::FontId::proportional(11.5);
-        let mut f = render::frame(ui.painter(), rect, (from, to), &axes, &font);
+        let title_font = egui::FontId::proportional(13.5);
+        let mut f = render::frame(ui.painter(), rect, (from, to), &axes, &font, &title_font);
         self.interact(ui, &resp, &f, now);
         self.axis_interact(ui, &mut f);
         #[cfg(test)]
