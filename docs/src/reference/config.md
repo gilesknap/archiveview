@@ -73,11 +73,13 @@ to forget them.
 {
   "version": 1,
   "pvs": [
-    { "name": "SR-DI-DCCT-01:SIGNAL" },
-    { "name": "pva://bl01t:SUM", "color": "#d62728", "visible": false }
+    { "name": "SR-DI-DCCT-01:SIGNAL", "axis": 0 },
+    { "name": "SR-DI-DCCT-01:LIFETIME", "axis": 1 },
+    { "name": "pva://bl01t:SUM", "color": "#d62728", "visible": false, "axis": 1 }
   ],
   "range": { "kind": "relative", "secs": 28800 },
   "y": { "autoscale": true },
+  "axes": [ { "autoscale": false, "min": 1, "max": 100, "log": true, "name": "Lifetime" } ],
   "archiver": "http://archiver.example.org:17668/retrieval"
 }
 ```
@@ -89,11 +91,20 @@ to forget them.
 | `pvs[].name` | the PV as typed: `NAME`, `ca://NAME`, `pva://NAME`, `sim://sine`, ... |
 | `pvs[].color` | `#rrggbb`; when absent, the palette colour for its position |
 | `pvs[].visible` | `false` for a hidden trace; default `true` |
+| `pvs[].axis` | its value axis: `0` for `y`, `1` for the first of `axes`, ... When absent (as in files from before there were several axes), the trace picks an axis when its data arrives |
 | `range` | `{"kind": "relative", "secs": S}`: the last `S` seconds, following now; or `{"kind": "absolute", "start": "...", "end": "..."}` with RFC 3339 UTC times such as `"2026-10-17T09:00:00Z"` |
-| `y.autoscale` | default `true` |
+| `y` | the first value axis |
+| `axes` | the value axes after the first, in order; omitted when there is one |
+| `y.autoscale`, `axes[].autoscale` | default `true` |
 | `y.min`, `y.max` | the value range when `autoscale` is `false` |
 | `archiver` | the retrieval URL in use when the view was saved; opening the view switches to it. Optional: older files lack it, and the format version is still `1`. |
 | `y.log` | `true` for a log value axis; default `false` |
+| `y.name` | the name typed for the axis; when absent it names itself |
+
+The value-axis fields were added without changing `version`: older files
+load (their traces pick axes as they are added; `y` stays with the first
+visible PV, and `y.log` applies to every axis), and an older archiveview
+reads newer files with every trace on its unit's axis.
 
 View names can't be empty, start with `.`, or contain `/` or `\`. The view
 called `default` opens at startup when no PVs and no `--view` are given.

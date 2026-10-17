@@ -12,6 +12,7 @@
 - [Connect to an archiver and IOCs](how-to/connect.md)
 - [Find and add PVs](how-to/search.md)
 - [Navigate the plot](how-to/navigate.md)
+- [Work with value axes](how-to/axes.md)
 - [Save and load views](how-to/views.md)
 - [Run over ssh](how-to/software-rendering.md)
 - [Take snapshots](how-to/snapshots.md)

@@ -599,6 +599,7 @@ mod tests {
                 name: "sim://sine".into(),
                 color: None,
                 visible: true,
+                axis: None,
             }],
             archiver: Some(view_url.into()),
             ..View::default()

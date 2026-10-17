@@ -417,6 +417,7 @@ mod tests {
                 name: "MOCK:SINE".into(),
                 color: None,
                 visible: true,
+                axis: Some(0),
             }],
             range: Range::Relative { secs: 86_400.0 },
             ..View::default()
@@ -439,7 +440,10 @@ mod tests {
             r#"{"version":1,"pvs":[{"name":"MOCK:SINE"}],"range":{"kind":"relative","secs":86400}}"#,
         )
         .unwrap();
-        assert_eq!(views.load("old").unwrap(), view);
+        // (Nor a trace axis: it picks one when its data comes.)
+        let mut old = view.clone();
+        old.pvs[0].axis = None;
+        assert_eq!(views.load("old").unwrap(), old);
         views.delete("with").unwrap();
         views.delete("old").unwrap();
         assert!(views.save("../x", &view).is_err());
