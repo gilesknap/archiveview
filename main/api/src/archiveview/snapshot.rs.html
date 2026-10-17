@@ -1,0 +1,349 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/archiveview/src/snapshot.rs`."><title>snapshot.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-0c87338a.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="archiveview" data-themes="" data-resource-suffix="" data-rustdoc-version="1.99.1 (58cf8f9c3 2026-10-13)" data-channel="1.99.1" data-search-js="search-cf4fc35e.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-417ebf0a.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">archiveview/</div>snapshot.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! `--snapshot OUT.png`: run the app headless and rasterise one frame in
+<a href=#2 id=2 data-nosnippet>2</a>//! software, so no GPU or display is needed (adapted from bobview's
+<a href=#3 id=3 data-nosnippet>3</a>//! `snapshot.rs`). Used by CI and the docs, and to check the UI.
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="kw">use </span>std::collections::HashMap;
+<a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>std::path::Path;
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>std::time::{Duration, Instant};
+<a href=#8 id=8 data-nosnippet>8</a>
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>egui::{ColorImage, Pos2, Rect, TextureId, Vec2, epaint};
+<a href=#10 id=10 data-nosnippet>10</a>
+<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span><span class="kw">crate</span>::app::{ArchiveApp, Options <span class="kw">as </span>AppOptions};
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span><span class="kw">crate</span>::config::Theme;
+<a href=#13 id=13 data-nosnippet>13</a>
+<a href=#14 id=14 data-nosnippet>14</a><span class="doccomment">/// Longest a snapshot waits, after `wait`, for fetches to finish; after
+<a href=#15 id=15 data-nosnippet>15</a>/// that it renders what it has.
+<a href=#16 id=16 data-nosnippet>16</a></span><span class="kw">const </span>DEADLINE: Duration = Duration::from_secs(<span class="number">60</span>);
+<a href=#17 id=17 data-nosnippet>17</a>
+<a href=#18 id=18 data-nosnippet>18</a><span class="doccomment">/// Snapshot settings.
+<a href=#19 id=19 data-nosnippet>19</a></span><span class="attr">#[derive(Clone, Debug)]
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">pub struct </span>Options {
+<a href=#21 id=21 data-nosnippet>21</a>    <span class="doccomment">/// Image size in pixels.
+<a href=#22 id=22 data-nosnippet>22</a>    </span><span class="kw">pub </span>size: [u32; <span class="number">2</span>],
+<a href=#23 id=23 data-nosnippet>23</a>    <span class="doccomment">/// Pixels per point.
+<a href=#24 id=24 data-nosnippet>24</a>    </span><span class="kw">pub </span>scale_factor: f32,
+<a href=#25 id=25 data-nosnippet>25</a>    <span class="doccomment">/// Seconds to run before capturing, at least; then also until no fetch
+<a href=#26 id=26 data-nosnippet>26</a>    /// is in flight (giving up after 60 s).
+<a href=#27 id=27 data-nosnippet>27</a>    </span><span class="kw">pub </span>wait: f64,
+<a href=#28 id=28 data-nosnippet>28</a>    <span class="doccomment">/// Render dark (else light, as headless has no OS theme).
+<a href=#29 id=29 data-nosnippet>29</a>    </span><span class="kw">pub </span>dark: bool,
+<a href=#30 id=30 data-nosnippet>30</a>    <span class="doccomment">/// Rest the pointer here (pixels) before capturing, to show the
+<a href=#31 id=31 data-nosnippet>31</a>    /// crosshair readout.
+<a href=#32 id=32 data-nosnippet>32</a>    </span><span class="kw">pub </span>hover: <span class="prelude-ty">Option</span>&lt;[f32; <span class="number">2</span>]&gt;,
+<a href=#33 id=33 data-nosnippet>33</a>    <span class="doccomment">/// Type this into the search box before capturing, to show its
+<a href=#34 id=34 data-nosnippet>34</a>    /// completions.
+<a href=#35 id=35 data-nosnippet>35</a>    </span><span class="kw">pub </span>search: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#36 id=36 data-nosnippet>36</a>}
+<a href=#37 id=37 data-nosnippet>37</a>
+<a href=#38 id=38 data-nosnippet>38</a><span class="kw">impl </span>Default <span class="kw">for </span>Options {
+<a href=#39 id=39 data-nosnippet>39</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#40 id=40 data-nosnippet>40</a>        <span class="self">Self </span>{
+<a href=#41 id=41 data-nosnippet>41</a>            size: [<span class="number">1280</span>, <span class="number">800</span>],
+<a href=#42 id=42 data-nosnippet>42</a>            scale_factor: <span class="number">1.0</span>,
+<a href=#43 id=43 data-nosnippet>43</a>            wait: <span class="number">2.0</span>,
+<a href=#44 id=44 data-nosnippet>44</a>            dark: <span class="bool-val">false</span>,
+<a href=#45 id=45 data-nosnippet>45</a>            hover: <span class="prelude-val">None</span>,
+<a href=#46 id=46 data-nosnippet>46</a>            search: <span class="prelude-val">None</span>,
+<a href=#47 id=47 data-nosnippet>47</a>        }
+<a href=#48 id=48 data-nosnippet>48</a>    }
+<a href=#49 id=49 data-nosnippet>49</a>}
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a><span class="doccomment">/// Render the app headless and write the PNG to `out`.
+<a href=#52 id=52 data-nosnippet>52</a></span><span class="kw">pub fn </span>run(app: AppOptions, opts: <span class="kw-2">&amp;</span>Options, out: <span class="kw-2">&amp;</span>Path) -&gt; <span class="prelude-ty">Result</span>&lt;(), String&gt; {
+<a href=#53 id=53 data-nosnippet>53</a>    <span class="kw">let </span>ctx = egui::Context::default();
+<a href=#54 id=54 data-nosnippet>54</a>    <span class="kw">let </span>app_opts = AppOptions {
+<a href=#55 id=55 data-nosnippet>55</a>        theme: <span class="prelude-val">Some</span>(<span class="kw">if </span>opts.dark { Theme::Dark } <span class="kw">else </span>{ Theme::Light }),
+<a href=#56 id=56 data-nosnippet>56</a>        ..app
+<a href=#57 id=57 data-nosnippet>57</a>    };
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="kw">let </span><span class="kw-2">mut </span>app = ArchiveApp::new(<span class="kw-2">&amp;</span>ctx, app_opts);
+<a href=#59 id=59 data-nosnippet>59</a>    <span class="kw">let </span><span class="kw-2">mut </span>textures: HashMap&lt;TextureId, ColorImage&gt; = HashMap::new();
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="kw">let </span>begin = Instant::now();
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">let </span>native = opts.scale_factor;
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">let </span>px = Vec2::new(opts.size[<span class="number">0</span>] <span class="kw">as </span>f32, opts.size[<span class="number">1</span>] <span class="kw">as </span>f32);
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="kw">let </span>wait = Duration::from_secs_f64(opts.wait);
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="comment">// Frames after loading: a few to settle animations, with the pointer
+<a href=#65 id=65 data-nosnippet>65</a>    // resting where asked.
+<a href=#66 id=66 data-nosnippet>66</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>settle = <span class="number">0</span>;
+<a href=#67 id=67 data-nosnippet>67</a>    <span class="comment">// Typing into the search box: `/`, then the text.
+<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="kw">let </span>key = |pressed| egui::Event::Key {
+<a href=#69 id=69 data-nosnippet>69</a>        key: egui::Key::Slash,
+<a href=#70 id=70 data-nosnippet>70</a>        physical_key: <span class="prelude-val">None</span>,
+<a href=#71 id=71 data-nosnippet>71</a>        pressed,
+<a href=#72 id=72 data-nosnippet>72</a>        repeat: <span class="bool-val">false</span>,
+<a href=#73 id=73 data-nosnippet>73</a>        modifiers: egui::Modifiers::NONE,
+<a href=#74 id=74 data-nosnippet>74</a>    };
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">let </span><span class="kw-2">mut </span>typing: std::collections::VecDeque&lt;Vec&lt;egui::Event&gt;&gt; = <span class="kw">match </span><span class="kw-2">&amp;</span>opts.search {
+<a href=#76 id=76 data-nosnippet>76</a>        <span class="prelude-val">Some</span>(text) =&gt; [
+<a href=#77 id=77 data-nosnippet>77</a>            <span class="macro">vec!</span>[key(<span class="bool-val">true</span>)],
+<a href=#78 id=78 data-nosnippet>78</a>            <span class="macro">vec!</span>[key(<span class="bool-val">false</span>)],
+<a href=#79 id=79 data-nosnippet>79</a>            <span class="macro">vec!</span>[],
+<a href=#80 id=80 data-nosnippet>80</a>            <span class="macro">vec!</span>[egui::Event::Text(text.clone())],
+<a href=#81 id=81 data-nosnippet>81</a>        ]
+<a href=#82 id=82 data-nosnippet>82</a>        .into_iter()
+<a href=#83 id=83 data-nosnippet>83</a>        .collect(),
+<a href=#84 id=84 data-nosnippet>84</a>        <span class="prelude-val">None </span>=&gt; Default::default(),
+<a href=#85 id=85 data-nosnippet>85</a>    };
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>output = <span class="kw">loop </span>{
+<a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span>ready = begin.elapsed() &gt;= wait &amp;&amp; !app.is_loading();
+<a href=#89 id=89 data-nosnippet>89</a>        <span class="kw">let </span>ppp = native * ctx.zoom_factor();
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw">let </span>screen = Rect::from_min_size(Pos2::ZERO, px / ppp);
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">let </span><span class="kw-2">mut </span>events = Vec::new();
+<a href=#92 id=92 data-nosnippet>92</a>        <span class="kw">if </span>ready {
+<a href=#93 id=93 data-nosnippet>93</a>            <span class="comment">// The pointer rests where asked, or on the plot to type (the
+<a href=#94 id=94 data-nosnippet>94</a>            // keys need it there).
+<a href=#95 id=95 data-nosnippet>95</a>            </span><span class="kw">let </span>at = opts
+<a href=#96 id=96 data-nosnippet>96</a>                .hover
+<a href=#97 id=97 data-nosnippet>97</a>                .or(opts.search.as_ref().map(|<span class="kw">_</span>| [px.x / <span class="number">2.0</span>, px.y / <span class="number">2.0</span>]));
+<a href=#98 id=98 data-nosnippet>98</a>            <span class="kw">match </span>at {
+<a href=#99 id=99 data-nosnippet>99</a>                <span class="comment">// Once typed, the pointer leaves unless asked to rest, so a
+<a href=#100 id=100 data-nosnippet>100</a>                // search snapshot has no stray crosshair.
+<a href=#101 id=101 data-nosnippet>101</a>                </span><span class="prelude-val">Some</span>(<span class="kw">_</span>) <span class="kw">if </span>opts.hover.is_none() &amp;&amp; typing.is_empty() =&gt; {
+<a href=#102 id=102 data-nosnippet>102</a>                    events.push(egui::Event::PointerGone);
+<a href=#103 id=103 data-nosnippet>103</a>                }
+<a href=#104 id=104 data-nosnippet>104</a>                <span class="prelude-val">Some</span>([x, y]) =&gt; events.push(egui::Event::PointerMoved(Pos2::new(x, y) / ppp)),
+<a href=#105 id=105 data-nosnippet>105</a>                <span class="prelude-val">None </span>=&gt; {}
+<a href=#106 id=106 data-nosnippet>106</a>            }
+<a href=#107 id=107 data-nosnippet>107</a>            events.extend(typing.pop_front().unwrap_or_default());
+<a href=#108 id=108 data-nosnippet>108</a>        }
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">let </span><span class="kw-2">mut </span>input = egui::RawInput {
+<a href=#110 id=110 data-nosnippet>110</a>            screen_rect: <span class="prelude-val">Some</span>(screen),
+<a href=#111 id=111 data-nosnippet>111</a>            time: <span class="prelude-val">Some</span>(begin.elapsed().as_secs_f64()),
+<a href=#112 id=112 data-nosnippet>112</a>            events,
+<a href=#113 id=113 data-nosnippet>113</a>            ..Default::default()
+<a href=#114 id=114 data-nosnippet>114</a>        };
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>info = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+<a href=#116 id=116 data-nosnippet>116</a>        info.native_pixels_per_point = <span class="prelude-val">Some</span>(native);
+<a href=#117 id=117 data-nosnippet>117</a>        info.inner_rect = <span class="prelude-val">Some</span>(screen);
+<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">let </span><span class="kw-2">mut </span>output = ctx.run_ui(input, |ui| app.draw(ui));
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">for </span>(id, deltas) <span class="kw">in </span><span class="kw-2">&amp;</span>output.textures_delta.set {
+<a href=#120 id=120 data-nosnippet>120</a>            <span class="kw">for </span>delta <span class="kw">in </span>deltas {
+<a href=#121 id=121 data-nosnippet>121</a>                apply_texture(<span class="kw-2">&amp;mut </span>textures, <span class="kw-2">*</span>id, delta);
+<a href=#122 id=122 data-nosnippet>122</a>            }
+<a href=#123 id=123 data-nosnippet>123</a>        }
+<a href=#124 id=124 data-nosnippet>124</a>        output.textures_delta.clear();
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">if </span>begin.elapsed() &gt; wait + DEADLINE {
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="macro">log::warn!</span>(<span class="string">"snapshot taken after {DEADLINE:?} with archive fetches still running"</span>);
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">break </span>output;
+<a href=#128 id=128 data-nosnippet>128</a>        }
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw">if </span>ready &amp;&amp; typing.is_empty() {
+<a href=#130 id=130 data-nosnippet>130</a>            settle += <span class="number">1</span>;
+<a href=#131 id=131 data-nosnippet>131</a>            <span class="comment">// Long enough for 150 ms easing to finish.
+<a href=#132 id=132 data-nosnippet>132</a>            </span><span class="kw">if </span>settle &gt; <span class="number">12 </span>{
+<a href=#133 id=133 data-nosnippet>133</a>                <span class="kw">break </span>output;
+<a href=#134 id=134 data-nosnippet>134</a>            }
+<a href=#135 id=135 data-nosnippet>135</a>        }
+<a href=#136 id=136 data-nosnippet>136</a>        std::thread::sleep(Duration::from_millis(<span class="kw">if </span>ready { <span class="number">30 </span>} <span class="kw">else </span>{ <span class="number">50 </span>}));
+<a href=#137 id=137 data-nosnippet>137</a>    };
+<a href=#138 id=138 data-nosnippet>138</a>
+<a href=#139 id=139 data-nosnippet>139</a>    <span class="kw">let </span>ppp = output.pixels_per_point;
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="kw">let </span>prims = ctx.tessellate(output.shapes, ppp);
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="kw">let </span><span class="kw-2">mut </span>canvas = Canvas::new(px.x <span class="kw">as </span>usize, px.y <span class="kw">as </span>usize);
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="kw">for </span>prim <span class="kw">in </span>prims {
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">if let </span>epaint::Primitive::Mesh(mesh) = <span class="kw-2">&amp;</span>prim.primitive {
+<a href=#144 id=144 data-nosnippet>144</a>            canvas.draw_mesh(mesh, prim.clip_rect, ppp, textures.get(<span class="kw-2">&amp;</span>mesh.texture_id));
+<a href=#145 id=145 data-nosnippet>145</a>        }
+<a href=#146 id=146 data-nosnippet>146</a>    }
+<a href=#147 id=147 data-nosnippet>147</a>    canvas.save(out)
+<a href=#148 id=148 data-nosnippet>148</a>}
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a><span class="kw">fn </span>apply_texture(
+<a href=#151 id=151 data-nosnippet>151</a>    textures: <span class="kw-2">&amp;mut </span>HashMap&lt;TextureId, ColorImage&gt;,
+<a href=#152 id=152 data-nosnippet>152</a>    id: TextureId,
+<a href=#153 id=153 data-nosnippet>153</a>    delta: <span class="kw-2">&amp;</span>epaint::ImageDelta,
+<a href=#154 id=154 data-nosnippet>154</a>) {
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">let </span>egui::ImageData::Color(image) = <span class="kw-2">&amp;</span>delta.image;
+<a href=#156 id=156 data-nosnippet>156</a>    <span class="kw">match </span>delta.pos {
+<a href=#157 id=157 data-nosnippet>157</a>        <span class="prelude-val">None </span>=&gt; {
+<a href=#158 id=158 data-nosnippet>158</a>            textures.insert(id, (<span class="kw-2">**</span>image).clone());
+<a href=#159 id=159 data-nosnippet>159</a>        }
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="prelude-val">Some</span>([x0, y0]) =&gt; {
+<a href=#161 id=161 data-nosnippet>161</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(tex) = textures.get_mut(<span class="kw-2">&amp;</span>id) {
+<a href=#162 id=162 data-nosnippet>162</a>                <span class="kw">let </span>[w, h] = image.size;
+<a href=#163 id=163 data-nosnippet>163</a>                <span class="kw">for </span>y <span class="kw">in </span><span class="number">0</span>..h {
+<a href=#164 id=164 data-nosnippet>164</a>                    <span class="kw">for </span>x <span class="kw">in </span><span class="number">0</span>..w {
+<a href=#165 id=165 data-nosnippet>165</a>                        <span class="kw">let </span>(tx, ty) = (x0 + x, y0 + y);
+<a href=#166 id=166 data-nosnippet>166</a>                        <span class="kw">if </span>tx &lt; tex.size[<span class="number">0</span>] &amp;&amp; ty &lt; tex.size[<span class="number">1</span>] {
+<a href=#167 id=167 data-nosnippet>167</a>                            tex.pixels[ty * tex.size[<span class="number">0</span>] + tx] = image.pixels[y * w + x];
+<a href=#168 id=168 data-nosnippet>168</a>                        }
+<a href=#169 id=169 data-nosnippet>169</a>                    }
+<a href=#170 id=170 data-nosnippet>170</a>                }
+<a href=#171 id=171 data-nosnippet>171</a>            }
+<a href=#172 id=172 data-nosnippet>172</a>        }
+<a href=#173 id=173 data-nosnippet>173</a>    }
+<a href=#174 id=174 data-nosnippet>174</a>}
+<a href=#175 id=175 data-nosnippet>175</a>
+<a href=#176 id=176 data-nosnippet>176</a><span class="doccomment">/// Premultiplied RGBA float framebuffer.
+<a href=#177 id=177 data-nosnippet>177</a></span><span class="kw">struct </span>Canvas {
+<a href=#178 id=178 data-nosnippet>178</a>    w: usize,
+<a href=#179 id=179 data-nosnippet>179</a>    h: usize,
+<a href=#180 id=180 data-nosnippet>180</a>    px: Vec&lt;[f32; <span class="number">4</span>]&gt;,
+<a href=#181 id=181 data-nosnippet>181</a>}
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a><span class="kw">impl </span>Canvas {
+<a href=#184 id=184 data-nosnippet>184</a>    <span class="kw">fn </span>new(w: usize, h: usize) -&gt; <span class="self">Self </span>{
+<a href=#185 id=185 data-nosnippet>185</a>        <span class="self">Self </span>{
+<a href=#186 id=186 data-nosnippet>186</a>            w,
+<a href=#187 id=187 data-nosnippet>187</a>            h,
+<a href=#188 id=188 data-nosnippet>188</a>            px: <span class="macro">vec!</span>[[<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>]; w * h],
+<a href=#189 id=189 data-nosnippet>189</a>        }
+<a href=#190 id=190 data-nosnippet>190</a>    }
+<a href=#191 id=191 data-nosnippet>191</a>
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="doccomment">/// Draw a mesh in points at `ppp` pixels per point.
+<a href=#193 id=193 data-nosnippet>193</a>    </span><span class="kw">fn </span>draw_mesh(<span class="kw-2">&amp;mut </span><span class="self">self</span>, mesh: <span class="kw-2">&amp;</span>epaint::Mesh, clip: Rect, ppp: f32, tex: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>ColorImage&gt;) {
+<a href=#194 id=194 data-nosnippet>194</a>        <span class="kw">let </span>clip = Rect::from_min_max(clip.min * ppp, clip.max * ppp);
+<a href=#195 id=195 data-nosnippet>195</a>        <span class="kw">let </span>clip = clip.intersect(Rect::from_min_size(
+<a href=#196 id=196 data-nosnippet>196</a>            Pos2::ZERO,
+<a href=#197 id=197 data-nosnippet>197</a>            Vec2::new(<span class="self">self</span>.w <span class="kw">as </span>f32, <span class="self">self</span>.h <span class="kw">as </span>f32),
+<a href=#198 id=198 data-nosnippet>198</a>        ));
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">if </span>clip.is_negative() {
+<a href=#200 id=200 data-nosnippet>200</a>            <span class="kw">return</span>;
+<a href=#201 id=201 data-nosnippet>201</a>        }
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw">for </span>tri <span class="kw">in </span>mesh.indices.as_chunks::&lt;<span class="number">3</span>&gt;().<span class="number">0 </span>{
+<a href=#203 id=203 data-nosnippet>203</a>            <span class="kw">let </span>v = tri.map(|i| {
+<a href=#204 id=204 data-nosnippet>204</a>                <span class="kw">let </span><span class="kw-2">mut </span>v = mesh.vertices[i <span class="kw">as </span>usize];
+<a href=#205 id=205 data-nosnippet>205</a>                v.pos = (v.pos.to_vec2() * ppp).to_pos2();
+<a href=#206 id=206 data-nosnippet>206</a>                v
+<a href=#207 id=207 data-nosnippet>207</a>            });
+<a href=#208 id=208 data-nosnippet>208</a>            <span class="self">self</span>.triangle([<span class="kw-2">&amp;</span>v[<span class="number">0</span>], <span class="kw-2">&amp;</span>v[<span class="number">1</span>], <span class="kw-2">&amp;</span>v[<span class="number">2</span>]], clip, tex);
+<a href=#209 id=209 data-nosnippet>209</a>        }
+<a href=#210 id=210 data-nosnippet>210</a>    }
+<a href=#211 id=211 data-nosnippet>211</a>
+<a href=#212 id=212 data-nosnippet>212</a>    <span class="kw">fn </span>triangle(<span class="kw-2">&amp;mut </span><span class="self">self</span>, v: [<span class="kw-2">&amp;</span>epaint::Vertex; <span class="number">3</span>], clip: Rect, tex: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>ColorImage&gt;) {
+<a href=#213 id=213 data-nosnippet>213</a>        <span class="kw">let </span>(p0, p1, p2) = (v[<span class="number">0</span>].pos, v[<span class="number">1</span>].pos, v[<span class="number">2</span>].pos);
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>area = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
+<a href=#215 id=215 data-nosnippet>215</a>        <span class="kw">if </span>area.abs() &lt; <span class="number">1e-6 </span>|| !area.is_finite() {
+<a href=#216 id=216 data-nosnippet>216</a>            <span class="kw">return</span>;
+<a href=#217 id=217 data-nosnippet>217</a>        }
+<a href=#218 id=218 data-nosnippet>218</a>        <span class="kw">let </span>min_x = p0.x.min(p1.x).min(p2.x).max(clip.min.x).floor() <span class="kw">as </span>i64;
+<a href=#219 id=219 data-nosnippet>219</a>        <span class="kw">let </span>max_x = p0.x.max(p1.x).max(p2.x).min(clip.max.x).ceil() <span class="kw">as </span>i64;
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">let </span>min_y = p0.y.min(p1.y).min(p2.y).max(clip.min.y).floor() <span class="kw">as </span>i64;
+<a href=#221 id=221 data-nosnippet>221</a>        <span class="kw">let </span>max_y = p0.y.max(p1.y).max(p2.y).min(clip.max.y).ceil() <span class="kw">as </span>i64;
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="kw">let </span>col = |c: egui::Color32| {
+<a href=#223 id=223 data-nosnippet>223</a>            [c.r() <span class="kw">as </span>f32, c.g() <span class="kw">as </span>f32, c.b() <span class="kw">as </span>f32, c.a() <span class="kw">as </span>f32].map(|x| x / <span class="number">255.0</span>)
+<a href=#224 id=224 data-nosnippet>224</a>        };
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">let </span>cs = [col(v[<span class="number">0</span>].color), col(v[<span class="number">1</span>].color), col(v[<span class="number">2</span>].color)];
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="kw">for </span>y <span class="kw">in </span>min_y.max(<span class="number">0</span>)..max_y.min(<span class="self">self</span>.h <span class="kw">as </span>i64) {
+<a href=#227 id=227 data-nosnippet>227</a>            <span class="kw">for </span>x <span class="kw">in </span>min_x.max(<span class="number">0</span>)..max_x.min(<span class="self">self</span>.w <span class="kw">as </span>i64) {
+<a href=#228 id=228 data-nosnippet>228</a>                <span class="kw">let </span>p = Pos2::new(x <span class="kw">as </span>f32 + <span class="number">0.5</span>, y <span class="kw">as </span>f32 + <span class="number">0.5</span>);
+<a href=#229 id=229 data-nosnippet>229</a>                <span class="kw">let </span>w0 = ((p1.x - p.x) * (p2.y - p.y) - (p2.x - p.x) * (p1.y - p.y)) / area;
+<a href=#230 id=230 data-nosnippet>230</a>                <span class="kw">let </span>w1 = ((p2.x - p.x) * (p0.y - p.y) - (p0.x - p.x) * (p2.y - p.y)) / area;
+<a href=#231 id=231 data-nosnippet>231</a>                <span class="kw">let </span>w2 = <span class="number">1.0 </span>- w0 - w1;
+<a href=#232 id=232 data-nosnippet>232</a>                <span class="kw">if </span>w0 &lt; -<span class="number">1e-4 </span>|| w1 &lt; -<span class="number">1e-4 </span>|| w2 &lt; -<span class="number">1e-4 </span>{
+<a href=#233 id=233 data-nosnippet>233</a>                    <span class="kw">continue</span>;
+<a href=#234 id=234 data-nosnippet>234</a>                }
+<a href=#235 id=235 data-nosnippet>235</a>                <span class="kw">let </span><span class="kw-2">mut </span>c = [<span class="number">0.0f32</span>; <span class="number">4</span>];
+<a href=#236 id=236 data-nosnippet>236</a>                <span class="kw">for </span>(i, ch) <span class="kw">in </span>c.iter_mut().enumerate() {
+<a href=#237 id=237 data-nosnippet>237</a>                    <span class="kw-2">*</span>ch = cs[<span class="number">0</span>][i] * w0 + cs[<span class="number">1</span>][i] * w1 + cs[<span class="number">2</span>][i] * w2;
+<a href=#238 id=238 data-nosnippet>238</a>                }
+<a href=#239 id=239 data-nosnippet>239</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = tex {
+<a href=#240 id=240 data-nosnippet>240</a>                    <span class="kw">let </span>u = v[<span class="number">0</span>].uv.x * w0 + v[<span class="number">1</span>].uv.x * w1 + v[<span class="number">2</span>].uv.x * w2;
+<a href=#241 id=241 data-nosnippet>241</a>                    <span class="kw">let </span>vv = v[<span class="number">0</span>].uv.y * w0 + v[<span class="number">1</span>].uv.y * w1 + v[<span class="number">2</span>].uv.y * w2;
+<a href=#242 id=242 data-nosnippet>242</a>                    <span class="kw">let </span>s = sample(t, u, vv);
+<a href=#243 id=243 data-nosnippet>243</a>                    <span class="kw">for </span>(i, ch) <span class="kw">in </span>c.iter_mut().enumerate() {
+<a href=#244 id=244 data-nosnippet>244</a>                        <span class="kw-2">*</span>ch <span class="kw-2">*</span>= s[i];
+<a href=#245 id=245 data-nosnippet>245</a>                    }
+<a href=#246 id=246 data-nosnippet>246</a>                }
+<a href=#247 id=247 data-nosnippet>247</a>                <span class="kw">let </span>d = <span class="kw-2">&amp;mut </span><span class="self">self</span>.px[y <span class="kw">as </span>usize * <span class="self">self</span>.w + x <span class="kw">as </span>usize];
+<a href=#248 id=248 data-nosnippet>248</a>                <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">4 </span>{
+<a href=#249 id=249 data-nosnippet>249</a>                    d[i] = c[i] + d[i] * (<span class="number">1.0 </span>- c[<span class="number">3</span>]);
+<a href=#250 id=250 data-nosnippet>250</a>                }
+<a href=#251 id=251 data-nosnippet>251</a>            }
+<a href=#252 id=252 data-nosnippet>252</a>        }
+<a href=#253 id=253 data-nosnippet>253</a>    }
+<a href=#254 id=254 data-nosnippet>254</a>
+<a href=#255 id=255 data-nosnippet>255</a>    <span class="kw">fn </span>save(<span class="kw-2">&amp;</span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>Path) -&gt; <span class="prelude-ty">Result</span>&lt;(), String&gt; {
+<a href=#256 id=256 data-nosnippet>256</a>        <span class="kw">let </span>file = std::fs::File::create(path).map_err(|e| <span class="macro">format!</span>(<span class="string">"{}: {e}"</span>, path.display()))<span class="question-mark">?</span>;
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span><span class="kw-2">mut </span>enc =
+<a href=#258 id=258 data-nosnippet>258</a>            png::Encoder::new(std::io::BufWriter::new(file), <span class="self">self</span>.w <span class="kw">as </span>u32, <span class="self">self</span>.h <span class="kw">as </span>u32);
+<a href=#259 id=259 data-nosnippet>259</a>        enc.set_color(png::ColorType::Rgb);
+<a href=#260 id=260 data-nosnippet>260</a>        enc.set_depth(png::BitDepth::Eight);
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">let </span><span class="kw-2">mut </span>writer = enc.write_header().map_err(|e| e.to_string())<span class="question-mark">?</span>;
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">let </span>data: Vec&lt;u8&gt; = <span class="self">self
+<a href=#263 id=263 data-nosnippet>263</a>            </span>.px
+<a href=#264 id=264 data-nosnippet>264</a>            .iter()
+<a href=#265 id=265 data-nosnippet>265</a>            .flat_map(|p| [p[<span class="number">0</span>], p[<span class="number">1</span>], p[<span class="number">2</span>]].map(|c| (c.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u8))
+<a href=#266 id=266 data-nosnippet>266</a>            .collect();
+<a href=#267 id=267 data-nosnippet>267</a>        writer.write_image_data(<span class="kw-2">&amp;</span>data).map_err(|e| e.to_string())
+<a href=#268 id=268 data-nosnippet>268</a>    }
+<a href=#269 id=269 data-nosnippet>269</a>}
+<a href=#270 id=270 data-nosnippet>270</a>
+<a href=#271 id=271 data-nosnippet>271</a><span class="doccomment">/// Bilinear sample of a premultiplied texture, as 0..1 floats.
+<a href=#272 id=272 data-nosnippet>272</a></span><span class="kw">fn </span>sample(t: <span class="kw-2">&amp;</span>ColorImage, u: f32, v: f32) -&gt; [f32; <span class="number">4</span>] {
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>[w, h] = t.size;
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>x = (u * w <span class="kw">as </span>f32 - <span class="number">0.5</span>).clamp(<span class="number">0.0</span>, (w - <span class="number">1</span>) <span class="kw">as </span>f32);
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span>y = (v * h <span class="kw">as </span>f32 - <span class="number">0.5</span>).clamp(<span class="number">0.0</span>, (h - <span class="number">1</span>) <span class="kw">as </span>f32);
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>(x0, y0) = (x.floor() <span class="kw">as </span>usize, y.floor() <span class="kw">as </span>usize);
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">let </span>(x1, y1) = ((x0 + <span class="number">1</span>).min(w - <span class="number">1</span>), (y0 + <span class="number">1</span>).min(h - <span class="number">1</span>));
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">let </span>(fx, fy) = (x - x0 <span class="kw">as </span>f32, y - y0 <span class="kw">as </span>f32);
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>px = |x: usize, y: usize| {
+<a href=#280 id=280 data-nosnippet>280</a>        <span class="kw">let </span>c = t.pixels[y * w + x];
+<a href=#281 id=281 data-nosnippet>281</a>        [c.r(), c.g(), c.b(), c.a()].map(|v| v <span class="kw">as </span>f32 / <span class="number">255.0</span>)
+<a href=#282 id=282 data-nosnippet>282</a>    };
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">let </span>(a, b, c, d) = (px(x0, y0), px(x1, y0), px(x0, y1), px(x1, y1));
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = [<span class="number">0.0</span>; <span class="number">4</span>];
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">4 </span>{
+<a href=#286 id=286 data-nosnippet>286</a>        out[i] =
+<a href=#287 id=287 data-nosnippet>287</a>            (a[i] * (<span class="number">1.0 </span>- fx) + b[i] * fx) * (<span class="number">1.0 </span>- fy) + (c[i] * (<span class="number">1.0 </span>- fx) + d[i] * fx) * fy;
+<a href=#288 id=288 data-nosnippet>288</a>    }
+<a href=#289 id=289 data-nosnippet>289</a>    out
+<a href=#290 id=290 data-nosnippet>290</a>}
+<a href=#291 id=291 data-nosnippet>291</a>
+<a href=#292 id=292 data-nosnippet>292</a><span class="attr">#[cfg(test)]
+<a href=#293 id=293 data-nosnippet>293</a></span><span class="kw">mod </span>tests {
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#295 id=295 data-nosnippet>295</a>
+<a href=#296 id=296 data-nosnippet>296</a>    <span class="kw">fn </span>png(path: <span class="kw-2">&amp;</span>Path) -&gt; (u32, u32, Vec&lt;u8&gt;) {
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">let </span>decoder =
+<a href=#298 id=298 data-nosnippet>298</a>            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span><span class="kw-2">mut </span>reader = decoder.read_info().unwrap();
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">let </span><span class="kw-2">mut </span>buf = <span class="macro">vec!</span>[<span class="number">0</span>; reader.output_buffer_size().unwrap()];
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw">let </span>info = reader.next_frame(<span class="kw-2">&amp;mut </span>buf).unwrap();
+<a href=#302 id=302 data-nosnippet>302</a>        buf.truncate(info.buffer_size());
+<a href=#303 id=303 data-nosnippet>303</a>        (info.width, info.height, buf)
+<a href=#304 id=304 data-nosnippet>304</a>    }
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a>    <span class="doccomment">/// How many pixels are near `rgb` (within a small tolerance).
+<a href=#307 id=307 data-nosnippet>307</a>    </span><span class="kw">fn </span>count_near(data: <span class="kw-2">&amp;</span>[u8], rgb: [u8; <span class="number">3</span>]) -&gt; usize {
+<a href=#308 id=308 data-nosnippet>308</a>        data.chunks(<span class="number">3</span>)
+<a href=#309 id=309 data-nosnippet>309</a>            .filter(|p| (<span class="number">0</span>..<span class="number">3</span>).all(|i| (p[i] <span class="kw">as </span>i32 - rgb[i] <span class="kw">as </span>i32).abs() &lt;= <span class="number">12</span>))
+<a href=#310 id=310 data-nosnippet>310</a>            .count()
+<a href=#311 id=311 data-nosnippet>311</a>    }
+<a href=#312 id=312 data-nosnippet>312</a>
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="attr">#[test]
+<a href=#314 id=314 data-nosnippet>314</a>    </span><span class="kw">fn </span>renders_against_the_mock_archiver() {
+<a href=#315 id=315 data-nosnippet>315</a>        <span class="kw">let </span>mock = mockarchiver::MockArchiver::start_local().unwrap();
+<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">let </span>dir = std::env::temp_dir().join(<span class="macro">format!</span>(<span class="string">"archiveview-snap-{}"</span>, std::process::id()));
+<a href=#317 id=317 data-nosnippet>317</a>        std::fs::create_dir_all(<span class="kw-2">&amp;</span>dir).unwrap();
+<a href=#318 id=318 data-nosnippet>318</a>        <span class="kw">let </span>out = dir.join(<span class="string">"mock.png"</span>);
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">let </span>app = AppOptions {
+<a href=#320 id=320 data-nosnippet>320</a>            archiver: <span class="prelude-val">Some</span>(archiver::ArchiverClient::new(<span class="kw-2">&amp;</span>mock.url()).unwrap()),
+<a href=#321 id=321 data-nosnippet>321</a>            pvs: <span class="macro">vec!</span>[<span class="string">"MOCK:SINE"</span>.into(), <span class="string">"MOCK:NAN"</span>.into()],
+<a href=#322 id=322 data-nosnippet>322</a>            ..Default::default()
+<a href=#323 id=323 data-nosnippet>323</a>        };
+<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">let </span>opts = Options {
+<a href=#325 id=325 data-nosnippet>325</a>            size: [<span class="number">800</span>, <span class="number">500</span>],
+<a href=#326 id=326 data-nosnippet>326</a>            wait: <span class="number">0.2</span>,
+<a href=#327 id=327 data-nosnippet>327</a>            ..Default::default()
+<a href=#328 id=328 data-nosnippet>328</a>        };
+<a href=#329 id=329 data-nosnippet>329</a>        run(app, <span class="kw-2">&amp;</span>opts, <span class="kw-2">&amp;</span>out).unwrap();
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span>(w, h, data) = png(<span class="kw-2">&amp;</span>out);
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="macro">assert_eq!</span>((w, h), (<span class="number">800</span>, <span class="number">500</span>));
+<a href=#332 id=332 data-nosnippet>332</a>        <span class="comment">// The first two palette colours were drawn (the traces).
+<a href=#333 id=333 data-nosnippet>333</a>        </span><span class="macro">assert!</span>(count_near(<span class="kw-2">&amp;</span>data, [<span class="number">31</span>, <span class="number">119</span>, <span class="number">180</span>]) &gt; <span class="number">200</span>, <span class="string">"a blue trace"</span>);
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="macro">assert!</span>(count_near(<span class="kw-2">&amp;</span>data, [<span class="number">214</span>, <span class="number">39</span>, <span class="number">40</span>]) &gt; <span class="number">200</span>, <span class="string">"a red trace"</span>);
+<a href=#335 id=335 data-nosnippet>335</a>
+<a href=#336 id=336 data-nosnippet>336</a>        <span class="comment">// The empty state renders too, dark.
+<a href=#337 id=337 data-nosnippet>337</a>        </span><span class="kw">let </span>empty = dir.join(<span class="string">"empty.png"</span>);
+<a href=#338 id=338 data-nosnippet>338</a>        <span class="kw">let </span>opts = Options {
+<a href=#339 id=339 data-nosnippet>339</a>            size: [<span class="number">640</span>, <span class="number">400</span>],
+<a href=#340 id=340 data-nosnippet>340</a>            wait: <span class="number">0.0</span>,
+<a href=#341 id=341 data-nosnippet>341</a>            dark: <span class="bool-val">true</span>,
+<a href=#342 id=342 data-nosnippet>342</a>            ..Default::default()
+<a href=#343 id=343 data-nosnippet>343</a>        };
+<a href=#344 id=344 data-nosnippet>344</a>        run(AppOptions::default(), <span class="kw-2">&amp;</span>opts, <span class="kw-2">&amp;</span>empty).unwrap();
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="macro">assert!</span>(std::fs::metadata(<span class="kw-2">&amp;</span>empty).unwrap().len() &gt; <span class="number">1000</span>);
+<a href=#346 id=346 data-nosnippet>346</a>        std::fs::remove_dir_all(<span class="kw-2">&amp;</span>dir).ok();
+<a href=#347 id=347 data-nosnippet>347</a>    }
+<a href=#348 id=348 data-nosnippet>348</a>}
+</code></pre></div></section></main></body></html>
