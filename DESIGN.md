@@ -28,10 +28,10 @@ External dependencies:
 
 The code stays wasm-friendly where that is cheap:
 - time comes from `web_time`;
-- HTTP sits behind `cfg(not(wasm32))`;
+- HTTP sits behind `cfg(not(wasm32))`, and in a browser every request fails at once, so traces are live only;
 - the `archiver` URL builders and `parse_*` functions are pure.
 
-There is no wasm build in v1.
+There is no wasm app, but CI clippies the embeddable library for wasm32, because bobview's browser build embeds the plot.
 
 ## Embedding: `archiveview::Plot`
 

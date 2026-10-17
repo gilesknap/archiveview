@@ -17,11 +17,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Check the embeddable library alone (no eframe, png or clap)
         run: cargo clippy -p archiveview --no-default-features --lib -- -D warnings
+      - name: Check the embeddable library in a browser build, as bobview's is
+        run: cargo clippy -p archiveview --no-default-features --lib --target wasm32-unknown-unknown -- -D warnings
       - run: cargo test --workspace
       - name: Check the crates package for crates.io
         # the manifests and contents only; the publish job verifies the build

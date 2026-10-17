@@ -2,8 +2,9 @@
 //!
 //! The pieces are split so that a browser build could reuse everything but
 //! the HTTP: [`ArchiverClient`] builds the request URLs (`*_url`), the
-//! `parse_*` functions decode the bodies, and on native targets the
-//! blocking `get_data`/`search`/`metadata` methods do both over `ureq`.
+//! `parse_*` functions decode the bodies, and the blocking
+//! `get_data`/`search`/`metadata` methods do both over `ureq` on native
+//! targets. In a browser those methods fail at once.
 //!
 //! Times are UTC seconds since the Unix epoch as `f64` (sub-microsecond
 //! resolution for current dates), the same as bobview's trend and
@@ -19,6 +20,18 @@ use std::fmt;
 mod decode;
 #[cfg(not(target_arch = "wasm32"))]
 mod http;
+
+/// No blocking HTTP in a browser: every request fails at once.
+#[cfg(target_arch = "wasm32")]
+impl ArchiverClient {
+    fn get(&self, _url: &str) -> Result<String> {
+        let _ = self.timeout_secs;
+        Err(Error::Transport(format!(
+            "{}: no blocking HTTP in a browser",
+            self.base()
+        )))
+    }
+}
 mod json;
 mod time;
 
@@ -476,7 +489,10 @@ impl ArchiverClient {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+// The requests block, so call them from a worker thread. In a browser
+// (wasm32) there is no blocking HTTP: they fail at once with
+// `Error::Transport`, and a browser build would fetch the `*_url` URLs
+// itself and hand the bodies to `parse_*`.
 impl ArchiverClient {
     /// Fetch and decode one PV's data. `Ok(None)` when the archiver has no
     /// data in the range (a `[ ]` response); `Err(Http{404})` when the PV is
