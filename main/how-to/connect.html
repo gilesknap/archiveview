@@ -213,7 +213,8 @@ trying the plot out; the archiver is asked only about plain names.</p>
 <h2 id="check-what-is-happening"><a class="header" href="#check-what-is-happening">Check what is happening</a></h2>
 <p>The plot's chips show a PV's state: a spinner while its history loads, a
 grey "—" when it is disconnected (hover for the reason), and a "live only"
-mark when the archiver has no record of it (HTTP 404). For more detail run
+mark when the archiver has no record of it (HTTP 404). A <code>!</code> on a chip
+means its last archive request failed; hover the chip for the error. For more detail run
 with <code>ARCHIVEVIEW_LOG=debug</code>, which logs every archiver request.</p>
 
                     </main>

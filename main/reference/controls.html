@@ -212,13 +212,16 @@ the ≡ menu.</p>
 <h2 id="legend-chips"><a class="header" href="#legend-chips">Legend chips</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
 <tr><td>click</td><td>hide or show the trace</td></tr>
-<tr><td>hover</td><td>highlight the trace and dim the others</td></tr>
+<tr><td>hover</td><td>highlight the trace (bolder, drawn on top, with its band) and dim the others</td></tr>
 <tr><td>click ✕</td><td>remove the PV</td></tr>
 </tbody></table>
 </div>
 <p>A chip shows the latest value and units, a spinner while history loads, a
 grey "—" while disconnected, and a "live only" mark when the archiver has no
-history of the PV. Hover it for details.</p>
+history of the PV. A long value is cut short with "…", and an array shows
+its length and first elements, e.g. <code>[936] 0, 0, 0, …</code>. Arrays are not
+plotted, and their chip says "not plotted". A <code>!</code> in place of the ✕ means
+the last archive request failed. Hover a chip for details.</p>
 <h2 id="keys"><a class="header" href="#keys">Keys</a></h2>
 <p>These work whenever no text box has the focus.</p>
 <div class="table-wrapper"><table><thead><tr><th>key</th><th>effect</th></tr></thead><tbody>

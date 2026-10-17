@@ -367,7 +367,8 @@ trying the plot out; the archiver is asked only about plain names.</p>
 <h2 id="check-what-is-happening"><a class="header" href="#check-what-is-happening">Check what is happening</a></h2>
 <p>The plot's chips show a PV's state: a spinner while its history loads, a
 grey "—" when it is disconnected (hover for the reason), and a "live only"
-mark when the archiver has no record of it (HTTP 404). For more detail run
+mark when the archiver has no record of it (HTTP 404). A <code>!</code> on a chip
+means its last archive request failed; hover the chip for the error. For more detail run
 with <code>ARCHIVEVIEW_LOG=debug</code>, which logs every archiver request.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="find-and-add-pvs"><a class="header" href="#find-and-add-pvs">Find and add PVs</a></h1>
 <h2 id="search-the-archiver"><a class="header" href="#search-the-archiver">Search the archiver</a></h2>
@@ -411,7 +412,9 @@ adds it straight away.</p>
 <h2 id="remove-or-hide-a-pv"><a class="header" href="#remove-or-hide-a-pv">Remove or hide a PV</a></h2>
 <p>Each PV has a chip along the bottom of the plot. Click a chip to hide its
 trace (the dot turns hollow) and again to show it. Hover a chip to highlight
-its trace, and click its <code>✕</code> to remove it.</p>
+its trace: it is drawn bolder and on top, with its min/max band, while the
+others dim. That finds a trace hidden under another with the same values,
+or under the bands of busy PVs. Click its <code>✕</code> to remove it.</p>
 <h2 id="with-no-archiver"><a class="header" href="#with-no-archiver">With no archiver</a></h2>
 <p>Without <code>--archiver</code> or a saved <code>archiver_url</code>, there is nothing to search:
 the only row is <strong>Add "…" as typed</strong>, so type full names and press <code>Enter</code>.</p>
@@ -790,9 +793,13 @@ drawn as the mean line over a translucent min..max band.</li>
 </ul>
 <p>So the amount of data sent is bounded by the plot's width, not the time
 range: a week of a 10 Hz PV costs the same as an hour.</p>
-<p>Waveforms, strings and enums are fetched raw (the first element of a
-waveform, an enum's index). The plot asks the archiver's <code>getMetadata</code> once
-per PV to learn its type, and falls back to the shape of the first response.</p>
+<p>Strings and enums are fetched raw (an enum's index). The plot asks the
+archiver's <code>getMetadata</code> once per PV to learn its type, and falls back to
+the shape of the first response.</p>
+<p>Array (waveform) PVs are not plotted: a line of one element over time says
+little about a waveform, so their chip shows the latest array instead. When
+the metadata says a PV is an array, no data is fetched at all; without
+metadata, the first response tells, and its samples are dropped.</p>
 <h3 id="joining-live-values"><a class="header" href="#joining-live-values">Joining live values</a></h3>
 <p>Each trace subscribes to its PV through the <code>pv</code> crate and records every
 update into a ring buffer, stamped with the <strong>IOC's timestamp</strong>, the same
@@ -902,13 +909,16 @@ the ≡ menu.</p>
 <h2 id="legend-chips"><a class="header" href="#legend-chips">Legend chips</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
 <tr><td>click</td><td>hide or show the trace</td></tr>
-<tr><td>hover</td><td>highlight the trace and dim the others</td></tr>
+<tr><td>hover</td><td>highlight the trace (bolder, drawn on top, with its band) and dim the others</td></tr>
 <tr><td>click ✕</td><td>remove the PV</td></tr>
 </tbody></table>
 </div>
 <p>A chip shows the latest value and units, a spinner while history loads, a
 grey "—" while disconnected, and a "live only" mark when the archiver has no
-history of the PV. Hover it for details.</p>
+history of the PV. A long value is cut short with "…", and an array shows
+its length and first elements, e.g. <code>[936] 0, 0, 0, …</code>. Arrays are not
+plotted, and their chip says "not plotted". A <code>!</code> in place of the ✕ means
+the last archive request failed. Hover a chip for details.</p>
 <h2 id="keys"><a class="header" href="#keys">Keys</a></h2>
 <p>These work whenever no text box has the focus.</p>
 <div class="table-wrapper"><table><thead><tr><th>key</th><th>effect</th></tr></thead><tbody>
