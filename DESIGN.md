@@ -72,8 +72,9 @@ impl Plot {
     pub fn set_undo_enabled(&mut self, on: bool);   // off: record nothing, keep nothing
     pub fn set_view_name(&mut self, name: Option<&str>);  // the host's name, kept per step
     pub fn view_name(&self) -> Option<&str>;
-    // As ui, with the host's items (views, settings) added to the ≡ menu:
-    pub fn ui_with_menu(&mut self, ui: &mut egui::Ui, menu: &mut dyn FnMut(&mut egui::Ui));
+    // As ui, with the host's items added to the ≡ menu: MenuPart::Top
+    // first (the app's zoom), MenuPart::Main after the plot's (views, theme):
+    pub fn ui_with_menu(&mut self, ui: &mut egui::Ui, menu: &mut dyn FnMut(&mut egui::Ui, MenuPart));
     // Middle-click and paste: the host reads the selection (see "Selection").
     pub fn take_middle_click(&mut self) -> Option<MiddleClick>;   // Plot or Search
     pub fn paste_pvs(&mut self, text: &str) -> Pasted;
@@ -234,7 +235,7 @@ Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
 - **Archiver pill.** `● host` (e.g. `archappl.diamond.ac.uk`), right of the Live pill: a green dot when the archiver answers, amber when it fails (not red, which is the Live dot beside it), a spinner while checking, a hollow grey dot and "No archiver" without one. Hover shows the retrieval URL, the appliance version, the state, and the last error with when it happened. Click opens a popover: the URL in an editable field (Enter or Use), the recent archivers, and "No archiver (live only)". On a compact bar it is the dot alone.
 - **Undo** (`↶`) and **Redo** (`↷`) icon buttons, greyed out with nothing to undo or redo; the tooltip names the step ("Undo zoom (Ctrl+Z)"). Hidden with `Plot::set_undo_controls(false)`.
 - **Autoscale** (`⤢`) and **Reset** (`⌂`, bobview `Icon::Home`) icon buttons.
-- **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It holds Log scale and Clear search history (the widget's own items), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
+- **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It starts with the interface zoom, `Zoom − 100% +` (see "Interface zoom"), then holds Log scale and Clear search history (the widget's own items), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
 - **Narrow windows** (under about 600 pt). The range pill collapses to a combo, the archiver pill to its dot, and undo, redo, autoscale and reset move into the menu.
 
 Plot area (fills the rest):
@@ -283,6 +284,27 @@ Keyboard (only when no text field has focus):
 - `←`/`→` pan by 10% of the span, and `+`/`-` (or `=`) zoom time ×0.8 or ×1.25 about the centre.
 - `L` toggles live, `A` autoscales and `Home` resets.
 - `Ctrl+Z` undoes, `Ctrl+Shift+Z` and `Ctrl+Y` redo (`⌘` on a Mac).
+
+### Interface zoom
+
+The app (not the embeddable `Plot`, whose host has its own) zooms the whole
+window's text and controls: egui's zoom factor, relative to the desktop's
+scale, so it multiplies a HiDPI scale as bobview's `--ui-scale` does.
+- Steps as a browser's: 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200,
+  250 and 300%. bobview's display zoom steps by ×1.25, which gives no round
+  percentages.
+- The `≡` menu's first row, `Zoom − 100% +` (`MenuPart::Top` of
+  `Plot::ui_with_menu`); clicking the percentage goes back to 100%. There is
+  no Fit: the plot always fills its window.
+- `Ctrl+=` (and `Ctrl++`), `Ctrl+−` and `Ctrl+0`, as in browsers. `ArchiveApp`
+  takes them before the plot draws, so they work while a text field has the
+  focus (they mean nothing to one), and never reach the plot's `+`/`-`.
+  Ctrl+scroll is left alone: it zooms values.
+- Each change shows "Zoom 125%" for 1.5 s and is saved in `settings.json`
+  (`ui_zoom`). Once there are windows and layouts it moves to each window's
+  layout. `--ui-scale` / `ARCHIVEVIEW_UI_SCALE` give the starting zoom and
+  win over the saved one; snapshots start at 100% unless `--ui-scale` is
+  given.
 
 ### Undo and redo
 
@@ -373,14 +395,15 @@ Persistence follows bobview's `layout.rs`:
 
 ```json
 { "archiver_url": "http://archiver:17668/retrieval", "recent_archivers": ["http://archiver:17668/retrieval"],
-  "theme": "system", "save_default_on_exit": true }
+  "theme": "system", "save_default_on_exit": true, "ui_zoom": 1.25 }
 ```
 
 `archiver_url` is written by `--archiver` (not in snapshot mode, and only
 after the command line is checked) and by a switch to another archiver in
 the pill or by opening a view; each also puts it first in
 `recent_archivers` (at most 8). Switching to no archiver writes nothing:
-it lasts for the run. Unknown fields are kept (`Settings::extra`), and a
+it lasts for the run. `ui_zoom` is the interface zoom (left out at 1),
+written at each change. Unknown fields are kept (`Settings::extra`), and a
 `settings.json` that does not parse is never saved over.
 
 With `--no-archiver`, exit saves the default view with the archiver the
@@ -433,6 +456,7 @@ archiveview [--archiver URL] [--view NAME] [--range SPAN] [--theme system|light|
 - `--archiver`: the retrieval base, e.g. `http://host:17668`. `/retrieval` is appended unless the URL already ends with it. It overrides the view's and `settings.json`'s archiver and is remembered in `settings.json`; the plot is live only with none.
 - `--no-archiver`: no archiver, whatever the view or settings say.
 - `--range`: e.g. `1h`, `7d` or `90m`, parsed by `parse_span`.
+- `--ui-scale` (or `ARCHIVEVIEW_UI_SCALE`): the interface zoom to start at, over `settings.json`'s `ui_zoom`.
 - `--snapshot`: run headless and write a PNG. The run takes at least `--wait` seconds, then waits until `!is_loading()`, with a 60 s deadline. The size defaults to 1280x800 and the wait to 2 s. This is bobview's software rasteriser.
 - Logging uses the `ARCHIVEVIEW_LOG` level, with library targets capped at warn as in bobview.
 - Exit codes are 2 for usage errors and 1 for failures.

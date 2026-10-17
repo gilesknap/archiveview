@@ -71,6 +71,19 @@ thinned the data into bins, the card also shows the bin's min and max.
 Double-click the plot, press `Home`, or click **⌂**: the time range returns
 to the last preset and autoscale turns on.
 
+## Zoom the interface
+
+To make the text and controls bigger or smaller (not the data: that is
+zooming time or values), use the **Zoom − 100% +** row at the top of the
+**≡** menu, or `Ctrl+=` (or `Ctrl++`), `Ctrl+−` and `Ctrl+0`, as in a
+browser. They work even while you type in the search box. Clicking the
+percentage, or `Ctrl+0`, goes back to 100%. The steps run from 50% to 300%,
+and each change shows "Zoom 125%" briefly.
+
+The zoom is remembered for the next start (`ui_zoom` in
+[`settings.json`](../reference/config.md#settingsjson)). `--ui-scale 1.25`
+or `ARCHIVEVIEW_UI_SCALE=1.25` starts at 125% whatever was saved.
+
 ## Undo and redo
 
 Explore freely: zoom in to look at something, then step back. **↶** and

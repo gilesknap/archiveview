@@ -29,7 +29,8 @@ saved over until it is fixed.
     "http://127.0.0.1:17668/retrieval"
   ],
   "theme": "system",
-  "save_default_on_exit": true
+  "save_default_on_exit": true,
+  "ui_zoom": 1.25
 }
 ```
 
@@ -38,6 +39,7 @@ saved over until it is fixed.
 | `archiver_url` | none | the archiver used when neither `--archiver` nor the view opened at start-up names one. Written by `--archiver`, and by switching to another archiver in the pill or by opening a view (not by **No archiver**). |
 | `recent_archivers` | none | archivers used recently, newest first (at most 8), offered by the archiver pill |
 | `theme` | `"system"` | `"system"` (follow the OS), `"light"` or `"dark"`; set from the ≡ menu |
+| `ui_zoom` | `1` | the interface zoom set in the ≡ menu or with `Ctrl+=`/`Ctrl+−`/`Ctrl+0`, from `0.5` to `3`; left out at `1`. `--ui-scale` and `ARCHIVEVIEW_UI_SCALE` win over it. For now there is one for the app; once archiveview has windows and layouts, each window keeps its own in its layout. |
 | `save_default_on_exit` | `true` | save the plot as the `default` view on quit, so the next start (with no PVs or `--view`) reopens where you left off |
 
 A missing or unreadable `settings.json` gives the defaults (an unreadable
