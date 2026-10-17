@@ -8,9 +8,11 @@
 //! - `window`: time window and value range maths (pan, zoom, presets);
 //! - `timeaxis`: ticks and adaptive labels in local time;
 //! - `render`: painting the plot area;
-//! - `bar`: the slim top bar (search, range pill, live pill, buttons);
+//! - `bar`: the slim top bar (search, range pill, live pill, archiver
+//!   pill, buttons);
 //! - `legend`: the chips under the plot;
-//! - `hover`: the crosshair readout, empty state and status line.
+//! - `hover`: the crosshair readout, empty state and status line;
+//! - `status`: whether the archiver can be reached.
 
 mod bar;
 mod fetch;
@@ -18,6 +20,7 @@ mod hover;
 mod legend;
 mod render;
 mod series;
+mod status;
 mod timeaxis;
 mod window;
 
@@ -32,6 +35,7 @@ use crate::view::{self, TraceView, View, YAxis};
 use fetch::Fetcher;
 pub use series::now;
 use series::{History, Pt, Trace};
+pub use status::{ArchiverState, ArchiverStatus};
 use window::Window;
 
 pub use timeaxis::parse_span;
@@ -49,6 +53,9 @@ const RETRY: f64 = 10.0;
 
 /// The Live pill pulses this long after following now starts (seconds).
 const PULSE_SECS: f64 = 3.0;
+
+/// The most archivers the pill's switcher lists.
+const MAX_RECENT: usize = 8;
 
 /// The most value axes: traces with yet more units share the last.
 const MAX_AXES: usize = 3;
@@ -119,6 +126,18 @@ pub struct Plot {
     active: bool,
     search: bar::SearchState,
     custom: bar::CustomState,
+    /// Whether the archiver can be reached, for the archiver pill.
+    monitor: status::Monitor,
+    /// Recently used archivers (retrieval bases), newest first, for the
+    /// pill's switcher.
+    recent: Vec<String>,
+    /// The user picked another archiver in the pill since the host last
+    /// asked ([`Plot::take_archiver_change`]).
+    archiver_changed: bool,
+    /// The pill can switch archivers, and a view's archiver is followed
+    /// ([`Plot::set_archiver_switching`]).
+    switch_archivers: bool,
+    edit: bar::ArchiverEdit,
 }
 
 /// The value axis.
@@ -179,6 +198,9 @@ impl Plot {
     }
 
     fn with_id(pvs: &PvManager, archiver: Option<ArchiverClient>, id: egui::Id) -> Self {
+        let mut monitor = status::Monitor::default();
+        monitor.reset(archiver.is_some());
+        let recent = archiver.iter().map(|a| a.base().to_string()).collect();
         Self {
             pvs: pvs.clone(),
             archiver,
@@ -207,12 +229,25 @@ impl Plot {
             active: false,
             search: bar::SearchState::default(),
             custom: bar::CustomState::default(),
+            monitor,
+            recent,
+            archiver_changed: false,
+            switch_archivers: false,
+            edit: bar::ArchiverEdit::default(),
         }
     }
 
-    /// Change (or remove) the archiver; refetches every trace.
+    /// Change (or remove) the archiver: refetches every trace's history,
+    /// and checks that the new one can be reached.
     pub fn set_archiver(&mut self, archiver: Option<ArchiverClient>) {
+        if let Some(a) = &archiver {
+            remember(&mut self.recent, a.base());
+        }
         self.archiver = archiver;
+        self.monitor.reset(self.archiver.is_some());
+        // Searches in flight were for the old archiver: drop their answers
+        // and search again.
+        self.search.restart();
         for t in &mut self.traces {
             t.history = None;
             // The generation carries on, so a late answer from the old
@@ -226,6 +261,47 @@ impl Plot {
 
     pub fn archiver(&self) -> Option<&ArchiverClient> {
         self.archiver.as_ref()
+    }
+
+    /// Whether the archiver can be reached, as the archiver pill shows it.
+    pub fn archiver_status(&self) -> &ArchiverStatus {
+        &self.monitor.status
+    }
+
+    /// True (once) after the user switched archivers in the archiver
+    /// pill: the plot already uses the new one ([`Plot::archiver`]), and
+    /// the host may remember it (the standalone app writes it to its
+    /// settings).
+    pub fn take_archiver_change(&mut self) -> bool {
+        std::mem::take(&mut self.archiver_changed)
+    }
+
+    /// Let the user switch archivers in the archiver pill, and have
+    /// [`Plot::set_view`] switch to a view's archiver. Off by default: an
+    /// embedding host that manages the archiver itself keeps the pill as
+    /// a status display only, and its stored views don't move the plot to
+    /// another archiver. The standalone app turns it on.
+    pub fn set_archiver_switching(&mut self, on: bool) {
+        self.switch_archivers = on;
+        if !on {
+            self.edit = bar::ArchiverEdit::default();
+        }
+    }
+
+    /// The archivers the pill offers to switch to (retrieval URLs, newest
+    /// first), e.g. as remembered from an earlier run. Switching adds to
+    /// the front.
+    pub fn set_recent_archivers(&mut self, urls: &[String]) {
+        let current = self.archiver.as_ref().map(|a| a.base().to_string());
+        self.recent.clear();
+        for url in urls.iter().rev().chain(current.as_ref()) {
+            remember(&mut self.recent, url);
+        }
+    }
+
+    /// The archivers the pill offers, newest first.
+    pub fn recent_archivers(&self) -> &[String] {
+        &self.recent
     }
 
     /// Add traces (skipping names already plotted, compared by
@@ -277,7 +353,7 @@ impl Plot {
         }
     }
 
-    /// The current view (traces, range, y axis), to save.
+    /// The current view (traces, range, y axis, archiver), to save.
     pub fn view(&self) -> View {
         let range = if self.window.live {
             view::Range::Relative {
@@ -308,11 +384,22 @@ impl Plot {
                 max: (!self.y.autoscale).then_some(self.y.hi),
                 log: self.y.log,
             },
+            archiver: self.archiver.as_ref().map(|a| a.base().to_string()),
         }
     }
 
-    /// Show `view`, replacing the traces and range.
+    /// Show `view`, replacing the traces and range. With archiver
+    /// switching on ([`Plot::set_archiver_switching`]), a view that names
+    /// an archiver switches to it; otherwise, or for a view without one,
+    /// the archiver stays as it is.
     pub fn set_view(&mut self, view: &View) {
+        if let Some(url) = view.archiver.as_ref().filter(|_| self.switch_archivers) {
+            match ArchiverClient::new(url) {
+                Ok(a) if self.archiver.as_ref() != Some(&a) => self.set_archiver(Some(a)),
+                Ok(_) => {}
+                Err(e) => log::warn!("view archiver {url}: {e}"),
+            }
+        }
         self.traces.clear();
         for tv in &view.pvs {
             if let Some(t) = self.add(&tv.name) {
@@ -355,6 +442,7 @@ impl Plot {
     pub fn is_loading(&self) -> bool {
         self.fetcher.pending()
             || self.pending
+            || (self.archiver.is_some() && self.monitor.due)
             || bar::search_due(self)
             || (self.archiver.is_some()
                 && self.traces.iter().any(|t| {
@@ -440,6 +528,7 @@ impl Plot {
         self.interact(ui, &resp, &f, now);
         let ppp = ui.ctx().pixels_per_point();
         self.schedule_fetches(now, f.data.width() * ppp);
+        self.schedule_probe(now);
 
         // Paint. Bands are lighter the more traces have one; a picked-out
         // trace keeps its band, the others lose theirs.
@@ -661,8 +750,13 @@ impl Plot {
         }
     }
 
-    /// Take in finished fetches and searches.
+    /// Take in finished fetches, searches and archiver probes, and what
+    /// they say of the archiver.
     fn take_results(&mut self, now: f64) {
+        let mut back = false;
+        if let Some((epoch, result)) = self.fetcher.take_probed() {
+            back |= self.monitor.probed(epoch, result, now);
+        }
         for done in self.fetcher.take() {
             let Some(t) = self.traces.iter_mut().find(|t| t.id == done.trace) else {
                 continue;
@@ -671,8 +765,15 @@ impl Plot {
                 continue;
             }
             t.fetch.in_flight = false;
-            if done.result.is_ok() {
-                t.fetch.failures = 0;
+            match &done.result {
+                Ok(_) => {
+                    t.fetch.failures = 0;
+                    back |= self.monitor.ok(now);
+                }
+                Err(e) if status::archiver_fault(e, false) => self.monitor.suspect(e, now),
+                // Not archived, or something about this PV: the archiver
+                // answered, but that says nothing of the others.
+                Err(_) => {}
             }
             // The window really fetched: a raw-only trace's is shorter.
             if let Some(r) = &mut t.fetch.requested
@@ -746,12 +847,47 @@ impl Plot {
                 }
                 Err(e) => {
                     log::warn!("{}: {e}", t.name);
+                    t.fetch.archivers_fault = status::archiver_fault(&e, false);
                     t.fetch.error = Some(e.to_string());
                     t.fetch.failures += 1;
                 }
             }
         }
-        bar::take_found(self, now);
+        back |= bar::take_found(self, now);
+        if back {
+            // The archiver is back: ask again now for what failed because
+            // it was down (not for what fails for reasons of its own,
+            // which keeps backing off).
+            for t in &mut self.traces {
+                if t.fetch.error.is_some() && t.fetch.archivers_fault && !t.fetch.in_flight {
+                    t.fetch.failures = 0;
+                    t.fetch.requested = None;
+                }
+            }
+        }
+    }
+
+    /// Check the archiver when one was just set, and every
+    /// `status::REPROBE` seconds while it cannot be reached.
+    fn schedule_probe(&mut self, now: f64) {
+        let Some(client) = &self.archiver else {
+            return;
+        };
+        if self.monitor.should_probe(now) {
+            self.monitor.sent(now);
+            self.fetcher
+                .probe(&self.pvs, client, self.monitor.epoch, self.repaint.clone());
+        }
+        if self.monitor.status.state == ArchiverState::Unreachable {
+            // Wake for the next probe even in an idle window.
+            let next = self.monitor.probed_at + self.monitor.reprobe - now;
+            if let Some(r) = &self.repaint {
+                r.ctx.request_repaint_after_for(
+                    std::time::Duration::from_secs_f64(next.clamp(0.05, status::REPROBE)),
+                    r.viewport,
+                );
+            }
+        }
     }
 
     /// Start the fetches the visible window needs, debounced while the
@@ -1075,6 +1211,13 @@ impl Plot {
             self.reset();
         }
     }
+}
+
+/// Put archiver `url` first in `recent`, at most [`MAX_RECENT`] long.
+fn remember(recent: &mut Vec<String>, url: &str) {
+    recent.retain(|u| u != url);
+    recent.insert(0, url.to_string());
+    recent.truncate(MAX_RECENT);
 }
 
 /// Group traces by units (`None`: hidden) into value axes, in order of
@@ -1513,6 +1656,10 @@ mod tests {
         let enum_hist = t[3].history.as_ref().expect("enum history");
         assert!(!enum_hist.binned);
         assert!(enum_hist.samples.iter().all(|s| s.val.fract() == 0.0));
+        // A PV that is not archived is no fault of the archiver's.
+        let st = h.plot.archiver_status();
+        assert_eq!(st.state, ArchiverState::Reachable);
+        assert_eq!(st.last_error, None);
     }
 
     #[test]
@@ -1569,6 +1716,142 @@ mod tests {
         assert!(!t.fetch.not_archived);
         assert!(t.fetch.error.as_ref().unwrap().contains("not an archiver"));
         assert_eq!(t.fetch.failures, 1);
+        h.until(|p| !p.is_loading());
+        let st = h.plot.archiver_status();
+        assert_eq!(st.state, ArchiverState::Unreachable);
+        let (e, _) = st.last_error.as_ref().unwrap();
+        assert!(e.contains("not an archiver"), "{e}");
+    }
+
+    #[test]
+    fn the_archiver_state_follows_the_archiver_down_and_up() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let addr = mock.addr();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.monitor.reprobe = 0.2;
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        assert_eq!(p.archiver_status().state, ArchiverState::Checking);
+        assert!(p.is_loading(), "the probe is due");
+        let mut h = Harness::new(p);
+        // The start-up probe: reachable, with its version.
+        h.until(|p| !p.is_loading());
+        let st = h.plot.archiver_status().clone();
+        assert_eq!(st.state, ArchiverState::Reachable);
+        assert!(
+            st.version.as_deref().unwrap_or("").contains("mock"),
+            "{st:?}"
+        );
+
+        // Down: the next fetch fails, and that turns it unreachable.
+        drop(mock);
+        h.plot.traces[0].fetch.requested = None;
+        h.until(|p| p.archiver_status().state == ArchiverState::Unreachable);
+        assert!(h.plot.archiver_status().last_error.is_some());
+        h.until(|p| !p.is_loading());
+        assert!(h.plot.traces[0].fetch.error.is_some());
+        // Still down: re-probed, still unreachable.
+        let probed = h.plot.monitor.probed_at;
+        h.until(|p| p.monitor.probed_at > probed && !p.is_loading());
+        assert_eq!(h.plot.archiver_status().state, ArchiverState::Unreachable);
+
+        // Back up on the same port: a re-probe finds it, and the trace
+        // that failed asks again at once.
+        let _mock = mockarchiver::MockArchiver::start(addr).unwrap();
+        h.until(|p| p.archiver_status().state == ArchiverState::Reachable);
+        h.until(|p| p.traces[0].fetch.error.is_none() && !p.is_loading());
+        assert!(h.plot.traces[0].history.is_some());
+    }
+
+    #[test]
+    fn an_archiver_that_cannot_be_reached_is_unreachable() {
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new("http://127.0.0.1:1").unwrap();
+        let mut h = Harness::new(Plot::new(&pvs, Some(client)));
+        h.until(|p| !p.is_loading());
+        assert_eq!(h.plot.archiver_status().state, ArchiverState::Unreachable);
+        // None: nothing to reach.
+        h.plot.set_archiver(None);
+        assert_eq!(h.plot.archiver_status().state, ArchiverState::None);
+        assert!(!h.plot.is_loading());
+    }
+
+    #[test]
+    fn an_archiver_is_picked_in_the_pill() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let mut h = Harness::new(Plot::new(&pvs, None));
+        assert_eq!(h.plot.archiver_status().state, ArchiverState::None);
+        let pill = h.plot.edit.pill.expect("drawn").center();
+        h.frame(vec![egui::Event::PointerMoved(pill)]);
+        h.button(pill, true);
+        h.button(pill, false);
+        assert!(!h.plot.edit.open, "embedded: a status display only");
+        h.plot.set_archiver_switching(true);
+        h.button(pill, true);
+        h.button(pill, false);
+        assert!(h.plot.edit.open, "the popover opens");
+        h.frame(vec![]);
+        h.frame(vec![egui::Event::Text(mock.url())]);
+        h.key(egui::Key::Enter);
+        assert!(!h.plot.edit.open);
+        let base = ArchiverClient::new(&mock.url()).unwrap().base().to_string();
+        assert_eq!(h.plot.archiver().map(|a| a.base()), Some(base.as_str()));
+        assert!(h.plot.take_archiver_change(), "the host is told");
+        assert!(!h.plot.take_archiver_change(), "once");
+        assert_eq!(h.plot.recent_archivers(), [base]);
+        h.until(|p| p.archiver_status().state == ArchiverState::Reachable && !p.is_loading());
+
+        // "Use" on the same archiver checks it again.
+        let probed = h.plot.monitor.probed_at;
+        h.button(pill, true);
+        h.button(pill, false);
+        assert!(h.plot.edit.open);
+        h.frame(vec![]);
+        h.key(egui::Key::Enter);
+        assert!(!h.plot.take_archiver_change(), "no change");
+        assert!(h.plot.monitor.probed_at > probed, "probed again");
+    }
+
+    #[test]
+    fn switching_archivers_refetches_history() {
+        let a = mockarchiver::MockArchiver::start_local().unwrap();
+        let b = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, Some(ArchiverClient::new(&a.url()).unwrap()));
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        assert!(h.plot.traces[0].history.is_some());
+        h.plot.fetcher.sent.lock().clear();
+
+        // As a view saved with archiver b does (once allowed to: an
+        // embedded plot keeps its host's archiver).
+        let mut v = h.plot.view();
+        let a_url = v.archiver.clone();
+        let b_url = ArchiverClient::new(&b.url()).unwrap().base().to_string();
+        v.archiver = Some(b_url.clone());
+        h.plot.set_view(&v);
+        assert_eq!(h.plot.archiver().map(|a| a.base().to_string()), a_url);
+        h.plot.set_archiver_switching(true);
+        h.plot.set_view(&v);
+        assert_eq!(h.plot.archiver().unwrap().base(), b_url);
+        assert_eq!(h.plot.archiver_status().state, ArchiverState::Checking);
+        assert!(h.plot.traces[0].history.is_none(), "a's history is gone");
+        assert!(!h.plot.take_archiver_change(), "not the user's pick");
+        h.until(|p| !p.is_loading());
+        assert_eq!(h.plot.fetcher.sent.lock().len(), 1, "fetched again");
+        assert!(h.plot.traces[0].history.is_some());
+        assert_eq!(h.plot.archiver_status().state, ArchiverState::Reachable);
+        assert_eq!(h.plot.view().archiver, Some(b_url.clone()));
+        // Both are offered in the pill, newest first.
+        assert_eq!(h.plot.recent_archivers()[0], b_url);
+        assert_eq!(h.plot.recent_archivers().len(), 2);
+        // A view without an archiver leaves it be.
+        v.archiver = None;
+        h.plot.set_view(&v);
+        assert_eq!(h.plot.archiver().unwrap().base(), b_url);
     }
 
     #[test]
@@ -1720,6 +2003,8 @@ mod tests {
         });
         let pvs = PvManager::new();
         let mut p = Plot::new(&pvs, Some(ArchiverClient::new(&url).unwrap()));
+        // No probe: only the data requests are counted.
+        p.monitor.due = false;
         p.add_pvs(&names(&["A:B"]));
         let mut h = Harness::new(p);
         h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);

@@ -462,6 +462,18 @@ impl ArchiverClient {
     pub fn metadata_url(&self, pv: &str) -> String {
         format!("{}/bpl/getMetadata?pv={}", self.base, encode(pv))
     }
+
+    /// `bpl/getVersion`: the appliance's version, a cheap "are you there".
+    pub fn version_url(&self) -> String {
+        format!("{}/bpl/getVersion", self.base)
+    }
+
+    /// The host (and port, when given) of the base URL, for display:
+    /// `archappl.diamond.ac.uk` or `127.0.0.1:17668`.
+    pub fn host(&self) -> &str {
+        let rest = self.base.split_once("://").map_or(&*self.base, |(_, r)| r);
+        rest.split('/').next().unwrap_or(rest)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -486,6 +498,12 @@ impl ArchiverClient {
     /// The PV's archive type info. Blocking.
     pub fn metadata(&self, pv: &str) -> Result<PvInfo> {
         parse_metadata(&self.get(&self.metadata_url(pv))?)
+    }
+
+    /// The appliance's version (`bpl/getVersion`), e.g. "Archiver
+    /// Appliance Version 1.1.0". Blocking.
+    pub fn version(&self) -> Result<String> {
+        parse_version(&self.get(&self.version_url())?)
     }
 }
 
@@ -515,6 +533,11 @@ pub fn parse_names(body: &str) -> Result<Vec<String>> {
 /// Decode a `getMetadata` body.
 pub fn parse_metadata(body: &str) -> Result<PvInfo> {
     decode::metadata(body)
+}
+
+/// Decode a `getVersion` body: `{"version": "..."}`.
+pub fn parse_version(body: &str) -> Result<String> {
+    decode::version(body)
 }
 
 /// Percent-encode a query parameter value (everything but RFC 3986

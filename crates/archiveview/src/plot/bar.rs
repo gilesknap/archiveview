@@ -1,10 +1,11 @@
 //! The slim top bar: the PV search box with live completion from the
-//! archiver, the time-range pill, the Live pill, autoscale and reset, and
-//! the `≡` menu.
+//! archiver, the time-range pill, the Live pill, the archiver pill,
+//! autoscale and reset, and the `≡` menu.
 
-use archiver::Search;
+use archiver::{ArchiverClient, Search};
 use egui::{Align, Color32, Key, Layout, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
+use super::status::ArchiverState;
 use super::timeaxis::{format_local, format_span, parse_local, parse_span};
 use super::window::{PRESETS, Window};
 use super::{Plot, now};
@@ -38,6 +39,30 @@ pub struct SearchState {
     open: bool,
     /// Give the box the keyboard on the next frame (`/`).
     pub focus: bool,
+}
+
+impl SearchState {
+    /// Search again (another archiver): answers to earlier searches are
+    /// dropped.
+    pub fn restart(&mut self) {
+        self.asked += 1;
+        self.waiting = false;
+        self.searched.clear();
+        self.results.clear();
+        self.error = None;
+    }
+}
+
+/// The archiver popover: a URL field and the recent archivers.
+#[derive(Default)]
+pub struct ArchiverEdit {
+    pub(super) open: bool,
+    url: String,
+    error: Option<String>,
+    /// Give the URL field the keyboard on the next frame.
+    focus: bool,
+    /// Where the pill was drawn last.
+    pub(super) pill: Option<Rect>,
 }
 
 /// The custom range popover.
@@ -107,6 +132,7 @@ pub fn top_bar(
                 plot.y.autoscale = true;
             }
         }
+        archiver_pill(plot, ui, compact, now);
         live_pill(plot, ui, now);
         if compact {
             range_combo(plot, ui);
@@ -497,25 +523,32 @@ pub fn search_due(plot: &Plot) -> bool {
     plot.archiver.is_some() && !text.is_empty() && text != plot.search.searched
 }
 
-/// Take in a finished search.
-pub fn take_found(plot: &mut Plot, _now: f64) {
-    if let Some((n, found)) = plot.fetcher.take_found() {
-        let s = &mut plot.search;
-        if n != s.asked {
-            return;
+/// Take in a finished search, and what it says of the archiver: true
+/// when the archiver is back after failing (see `status::Monitor::ok`).
+pub fn take_found(plot: &mut Plot, now: f64) -> bool {
+    let Some((n, found)) = plot.fetcher.take_found() else {
+        return false;
+    };
+    let s = &mut plot.search;
+    if n != s.asked {
+        return false;
+    }
+    s.waiting = false;
+    s.selected = 0;
+    match found {
+        Ok(names) => {
+            s.results = names;
+            s.error = None;
+            plot.monitor.ok(now)
         }
-        s.waiting = false;
-        match found {
-            Ok(names) => {
-                s.results = names;
-                s.error = None;
+        Err(e) => {
+            s.results.clear();
+            s.error = Some(e.to_string());
+            if super::status::archiver_fault(&e, true) {
+                plot.monitor.suspect(&e, now);
             }
-            Err(e) => {
-                s.results.clear();
-                s.error = Some(e);
-            }
+            false
         }
-        s.selected = 0;
     }
 }
 
@@ -744,6 +777,277 @@ fn custom_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect, now: f64) {
         plot.window = w;
         plot.home_span = w.span;
         plot.glide = 0.0;
+    }
+}
+
+// --- archiver ---------------------------------------------------------------
+
+/// The widest host name the archiver pill shows (points); longer ones are
+/// cut short.
+const HOST_WIDTH: f32 = 200.0;
+
+/// `● host`: a dot for whether the archiver can be reached (green,
+/// red, a spinner while checking, hollow grey for none) and its host.
+/// Hover for the URL, version and last error; click to change it. A
+/// compact bar shows the dot alone.
+fn archiver_pill(plot: &mut Plot, ui: &mut egui::Ui, compact: bool, now: f64) {
+    let h = icons::height(ui);
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let state = plot.monitor.status.state;
+    let label = if compact {
+        String::new()
+    } else {
+        let host = plot.archiver.as_ref().map_or("No archiver", |a| a.host());
+        elide(ui.painter(), host, &font, HOST_WIDTH)
+    };
+    let text_w = super::render::text_size(ui.painter(), &label, &font).x;
+    let size = if compact {
+        Vec2::splat(h)
+    } else {
+        Vec2::new(text_w + 36.0, h)
+    };
+    let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+    let v = ui.visuals();
+    let dark = v.dark_mode;
+    let fill = if r.hovered() || plot.edit.open {
+        v.widgets.hovered.weak_bg_fill
+    } else {
+        v.extreme_bg_color
+    };
+    ui.painter().rect(
+        rect,
+        h / 2.0,
+        fill,
+        v.widgets.noninteractive.bg_stroke,
+        StrokeKind::Inside,
+    );
+    let dot = if compact {
+        rect.center()
+    } else {
+        Pos2::new(rect.left() + 16.0, rect.center().y)
+    };
+    match state {
+        ArchiverState::None => {
+            ui.painter()
+                .circle_stroke(dot, 3.5, Stroke::new(1.5, v.weak_text_color()));
+        }
+        ArchiverState::Checking => {
+            // A small turning arc, as the status line's.
+            let a0 = (ui.input(|i| i.time) * 6.0) as f32;
+            let pts: Vec<Pos2> = (0..=10)
+                .map(|i| {
+                    let a = a0 + i as f32 * 0.45;
+                    dot + Vec2::new(a.cos(), a.sin()) * 4.5
+                })
+                .collect();
+            ui.painter().add(egui::Shape::line(
+                pts,
+                Stroke::new(1.5, v.weak_text_color()),
+            ));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        ArchiverState::Reachable => {
+            ui.painter()
+                .circle_filled(dot, 4.0, crate::style::reachable(dark));
+        }
+        ArchiverState::Unreachable => {
+            ui.painter()
+                .circle_filled(dot, 4.0, crate::style::unreachable(dark));
+        }
+    }
+    if !label.is_empty() {
+        let fg = if plot.archiver.is_some() {
+            v.text_color()
+        } else {
+            v.weak_text_color()
+        };
+        ui.painter().text(
+            Pos2::new(dot.x + 10.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            &label,
+            font,
+            fg,
+        );
+    }
+    let r = if plot.edit.open {
+        r
+    } else {
+        r.on_hover_ui(|ui| archiver_tooltip(plot, ui, now))
+    };
+    if r.clicked() && plot.switch_archivers {
+        let e = &mut plot.edit;
+        e.open = !e.open;
+        e.url = plot
+            .archiver
+            .as_ref()
+            .map(|a| a.base().to_string())
+            .unwrap_or_default();
+        e.error = None;
+        e.focus = e.open;
+    }
+    plot.edit.pill = Some(rect);
+    archiver_popover(plot, ui, rect);
+}
+
+/// The archiver pill's tooltip: the URL, the version, the state and the
+/// last error.
+fn archiver_tooltip(plot: &Plot, ui: &mut egui::Ui, now: f64) {
+    let st = &plot.monitor.status;
+    let weak = |text: String| egui::RichText::new(text).small().weak();
+    let Some(a) = &plot.archiver else {
+        ui.label(egui::RichText::new("No archiver").strong());
+        ui.label("Live data only, and search adds names as typed.");
+        if plot.switch_archivers {
+            ui.label(weak("Click to set an archiver".into()));
+        }
+        return;
+    };
+    ui.label(egui::RichText::new(a.base()).strong());
+    if let Some(version) = &st.version {
+        ui.label(version);
+    }
+    let (state, color) = match st.state {
+        ArchiverState::Checking => ("Checking…".to_string(), ui.visuals().text_color()),
+        ArchiverState::Reachable => (
+            match st.last_ok {
+                Some(t) => format!("Reachable (answered {})", ago(now, t)),
+                None => "Reachable".into(),
+            },
+            crate::style::reachable(ui.visuals().dark_mode),
+        ),
+        ArchiverState::Unreachable => (
+            "Unreachable: checked again every minute".to_string(),
+            crate::style::unreachable(ui.visuals().dark_mode),
+        ),
+        ArchiverState::None => (String::new(), ui.visuals().text_color()),
+    };
+    ui.colored_label(color, state);
+    if let Some((e, t)) = &st.last_error {
+        // The URL is shown above already.
+        let e = e.strip_prefix(&format!("{}: ", a.base())).unwrap_or(e);
+        ui.label(format!("Last error {}: {e}", ago(now, *t)));
+    }
+    if plot.switch_archivers {
+        ui.label(weak("Click to change the archiver".into()));
+    }
+}
+
+/// When `t` was, from `now`: "14:02:10, 3m 5s ago".
+fn ago(now: f64, t: f64) -> String {
+    let local = format_local(t);
+    let clock = local.get(11..).unwrap_or(&local);
+    if now - t < 1.0 {
+        format!("at {clock}, just now")
+    } else {
+        format!("at {clock}, {} ago", format_span(now - t))
+    }
+}
+
+/// `text` cut short with "…" to fit `max` points.
+fn elide(painter: &egui::Painter, text: &str, font: &egui::FontId, max: f32) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut shown = text.to_string();
+    let mut keep = chars.len();
+    while super::render::text_size(painter, &shown, font).x > max && keep > 4 {
+        keep -= 1;
+        shown = format!("{}…", chars[..keep].iter().collect::<String>());
+    }
+    shown
+}
+
+/// The archiver popover under the pill: a URL field, the recent
+/// archivers, and "No archiver".
+fn archiver_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect) {
+    if !plot.edit.open {
+        return;
+    }
+    let width = 340.0;
+    let pos = Pos2::new(
+        (anchor.right() - width).max(ui.ctx().content_rect().left() + 4.0),
+        anchor.bottom() + 6.0,
+    );
+    // The choice: Some(None) for no archiver.
+    let mut pick: Option<Option<ArchiverClient>> = None;
+    let current = plot.archiver.as_ref().map(|a| a.base().to_string());
+    let e = &mut plot.edit;
+    let area = egui::Area::new(plot.id.with("archiver-popover"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style())
+                .corner_radius(10.0)
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.set_width(width - 24.0);
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.label(egui::RichText::new("Archiver").strong());
+                    ui.horizontal(|ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut e.url)
+                                .hint_text("http://archiver:17668")
+                                .desired_width(width - 110.0),
+                        );
+                        if std::mem::take(&mut e.focus) {
+                            r.request_focus();
+                        }
+                        let go = ui.button("Use").clicked()
+                            || (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+                        if go {
+                            match ArchiverClient::new(&e.url) {
+                                Ok(a) => pick = Some(Some(a)),
+                                Err(err) => e.error = Some(err.to_string()),
+                            }
+                        }
+                    });
+                    if let Some(err) = &e.error {
+                        ui.colored_label(ui.visuals().error_fg_color, err);
+                    }
+                    if !plot.recent.is_empty() {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Recent").small().weak());
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        for url in &plot.recent {
+                            let on = current.as_deref() == Some(url.as_str());
+                            if ui.selectable_label(on, url).clicked() {
+                                match ArchiverClient::new(url) {
+                                    Ok(a) => pick = Some(Some(a)),
+                                    Err(err) => e.error = Some(err.to_string()),
+                                }
+                            }
+                        }
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                    }
+                    if current.is_some() {
+                        ui.separator();
+                        if ui
+                            .button("No archiver (live only)")
+                            .on_hover_text("Show live data only")
+                            .clicked()
+                        {
+                            pick = Some(None);
+                        }
+                    }
+                });
+        });
+    let away = ui.input(|i| {
+        i.pointer.any_pressed()
+            && i.pointer
+                .interact_pos()
+                .is_some_and(|p| !area.response.rect.contains(p) && !anchor.contains(p))
+    });
+    if away || ui.input(|i| i.key_pressed(Key::Escape)) {
+        plot.edit.open = false;
+    }
+    if let Some(archiver) = pick {
+        plot.edit.open = false;
+        if archiver.as_ref().map(|a| a.base()) != current.as_deref() {
+            plot.set_archiver(archiver);
+            plot.archiver_changed = true;
+        } else if archiver.is_some() {
+            // The same one again: check it now (it may be back).
+            plot.monitor.due = true;
+        }
     }
 }
 

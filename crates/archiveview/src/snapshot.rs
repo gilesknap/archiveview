@@ -64,6 +64,7 @@ pub fn run(app: AppOptions, opts: &Options, out: &Path) -> Result<(), String> {
     // Frames after loading: a few to settle animations, with the pointer
     // resting where asked.
     let mut settle = 0;
+    let mut placed = false;
     // Typing into the search box: `/`, then the text.
     let key = |pressed| egui::Event::Key {
         key: egui::Key::Slash,
@@ -101,7 +102,13 @@ pub fn run(app: AppOptions, opts: &Options, out: &Path) -> Result<(), String> {
                 Some(_) if opts.hover.is_none() && typing.is_empty() => {
                     events.push(egui::Event::PointerGone);
                 }
-                Some([x, y]) => events.push(egui::Event::PointerMoved(Pos2::new(x, y) / ppp)),
+                // Moved there once: a pointer moving every frame would
+                // never show a tooltip.
+                Some([x, y]) if !placed => {
+                    placed = true;
+                    events.push(egui::Event::PointerMoved(Pos2::new(x, y) / ppp));
+                }
+                Some(_) => {}
                 None => {}
             }
             events.extend(typing.pop_front().unwrap_or_default());
@@ -128,8 +135,11 @@ pub fn run(app: AppOptions, opts: &Options, out: &Path) -> Result<(), String> {
         }
         if ready && typing.is_empty() {
             settle += 1;
-            // Long enough for 150 ms easing to finish.
-            if settle > 12 {
+            // Long enough for 150 ms easing to finish, and with the
+            // pointer resting, for a tooltip under it to show (after
+            // egui's 0.5 s delay).
+            let frames = if opts.hover.is_some() { 25 } else { 12 };
+            if settle > frames {
                 break output;
             }
         }

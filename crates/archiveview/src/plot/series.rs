@@ -144,6 +144,9 @@ pub struct FetchState {
     pub not_archived: bool,
     /// The last request's error.
     pub error: Option<String>,
+    /// That error was the archiver's (see `status::archiver_fault`), so
+    /// it is asked again at once when the archiver comes back.
+    pub archivers_fault: bool,
     /// Requests failed in a row, for backing off.
     pub failures: u32,
     /// Fetch raw, never `optimized` (waveforms, strings): `None` until
