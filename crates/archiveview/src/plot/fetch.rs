@@ -51,7 +51,11 @@ pub struct Done {
 }
 
 /// A finished search: its number and the names (or an error).
-pub type Found = (u64, Result<Vec<String>, String>);
+pub type Found = (u64, Result<Vec<String>, archiver::Error>);
+
+/// A finished archiver probe: the archiver's epoch, and its version
+/// (`None` when it answers, but not to `getVersion`) or the error.
+pub type Probed = (u64, Result<Option<String>, archiver::Error>);
 
 /// Where to ask for a repaint when a request finishes: the context and the
 /// viewport the plot was last drawn in. A host such as bobview may show
@@ -74,6 +78,7 @@ impl Repaint {
 pub struct Fetcher {
     inbox: Arc<Mutex<Vec<Done>>>,
     found: Arc<Mutex<Option<Found>>>,
+    probed: Arc<Mutex<Option<Probed>>>,
     busy: Arc<AtomicUsize>,
     /// Every data job sent, for tests.
     #[cfg(test)]
@@ -94,7 +99,10 @@ impl Fetcher {
 
     /// Requests in flight, or results not yet taken in.
     pub fn pending(&self) -> bool {
-        self.busy() || !self.inbox.lock().is_empty() || self.found.lock().is_some()
+        self.busy()
+            || !self.inbox.lock().is_empty()
+            || self.found.lock().is_some()
+            || self.probed.lock().is_some()
     }
 
     pub fn take(&self) -> Vec<Done> {
@@ -103,6 +111,10 @@ impl Fetcher {
 
     pub fn take_found(&self) -> Option<Found> {
         self.found.lock().take()
+    }
+
+    pub fn take_probed(&self) -> Option<Probed> {
+        self.probed.lock().take()
     }
 
     /// Run `job` against `client` in the background.
@@ -198,7 +210,7 @@ impl Fetcher {
     ) {
         let client = client.clone();
         let found = self.found.clone();
-        let store = move |names: Result<Vec<String>, String>| {
+        let store = move |names: Result<Vec<String>, archiver::Error>| {
             // Searches can finish out of order: keep only the newest answer
             // not yet taken in, so an older one never hides a newer one.
             let mut slot = found.lock();
@@ -208,10 +220,62 @@ impl Fetcher {
         };
         let panicked = {
             let store = store.clone();
-            move || store(Err("the search failed unexpectedly".into()))
+            move || {
+                store(Err(archiver::Error::Transport(
+                    "the search failed unexpectedly".into(),
+                )))
+            }
         };
         self.run(pvs, repaint, panicked, move || {
-            store(client.search(&search).map_err(|e| e.to_string()));
+            store(client.search(&search));
+        });
+    }
+
+    /// Ask `client` for its version, to learn whether it can be reached:
+    /// the archiver's `epoch` comes back with the answer. An archiver
+    /// that answers 404 to `getVersion` (a proxy passing on only data and
+    /// search) is asked for a search instead.
+    pub fn probe(
+        &self,
+        pvs: &PvManager,
+        client: &ArchiverClient,
+        epoch: u64,
+        repaint: Option<Repaint>,
+    ) {
+        let client = client
+            .clone()
+            .with_timeout_secs(super::status::PROBE_TIMEOUT);
+        let probed = self.probed.clone();
+        let panicked = {
+            let probed = probed.clone();
+            move || {
+                *probed.lock() = Some((
+                    epoch,
+                    Err(archiver::Error::Transport(
+                        "the check failed unexpectedly".into(),
+                    )),
+                ));
+            }
+        };
+        self.run(pvs, repaint, panicked, move || {
+            let result = match client.version() {
+                Ok(v) => Ok(Some(v)),
+                Err(e) if e.is_not_archived() => {
+                    log::debug!("{}: no getVersion: {e}", client.base());
+                    match client.search(&Search::exact("archiveview", 1)) {
+                        Ok(_) => Ok(None),
+                        Err(check) if check.is_not_archived() => Err(archiver::Error::BadUrl(
+                            format!("{}: not an archiver (HTTP 404)", client.base()),
+                        )),
+                        Err(check) => Err(check),
+                    }
+                }
+                Err(e) => Err(e),
+            };
+            if let Err(e) = &result {
+                log::info!("archiver {}: {e}", client.base());
+            }
+            *probed.lock() = Some((epoch, result));
         });
     }
 

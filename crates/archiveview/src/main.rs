@@ -10,12 +10,15 @@ use archiveview::{ArchiverClient, app, config, snapshot};
 
 #[cfg(not(target_arch = "wasm32"))]
 const AFTER_HELP: &str = "\
-History comes from an EPICS Archiver Appliance's retrieval service
-(--archiver, or archiver_url in settings.json); live values from Channel
-Access, or PV Access for pva:// names. EPICS_CA_ADDR_LIST and friends select
-the IOCs. With neither PVs nor --view, the default view is restored when one
-has been saved (in $XDG_CONFIG_HOME/archiveview/views, by default
-~/.config/archiveview/views).
+History comes from an EPICS Archiver Appliance's retrieval service; live
+values from Channel Access, or PV Access for pva:// names. EPICS_CA_ADDR_LIST
+and friends select the IOCs. With neither PVs nor --view, the default view
+(saved on exit) is restored, in $XDG_CONFIG_HOME/archiveview/views, by
+default ~/.config/archiveview/views.
+
+The archiver is --archiver, else none with --no-archiver, else the one the
+opened view was saved with, else archiver_url in settings.json. --archiver
+is remembered there, so it is needed only once.
 
 In the window: type a PV name (or search the archiver) in the top bar; drag
 to pan, scroll to zoom time, shift+scroll or drag the value axis to zoom
@@ -40,7 +43,7 @@ struct Cli {
     pvs: Vec<String>,
     /// The Archiver Appliance retrieval URL, e.g. http://archiver:17668
     /// or Phoebus's pbraw://archiver:17668/retrieval (/retrieval is added
-    /// unless given)
+    /// unless given); remembered for later runs
     #[arg(short, long, value_name = "URL")]
     archiver: Option<String>,
     /// Open the saved view NAME
@@ -52,7 +55,8 @@ struct Cli {
     /// Colour scheme (default: settings.json, else the system's)
     #[arg(long, value_name = "THEME", value_parser = parse_theme)]
     theme: Option<config::Theme>,
-    /// Don't use an archiver even if settings.json names one: live only
+    /// Don't use an archiver even if a view or settings.json names one:
+    /// live only
     #[arg(long, conflicts_with = "archiver")]
     no_archiver: bool,
     /// Scale the whole interface, e.g. 1.25 (default: ARCHIVEVIEW_UI_SCALE,
@@ -175,16 +179,22 @@ fn main() {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run(cli: Cli) -> Result<(), Failure> {
-    let settings = config::Settings::load();
-    let url = if cli.no_archiver {
-        None
-    } else {
-        cli.archiver.clone().or(settings.archiver_url.clone())
-    };
-    let archiver = url
-        .map(|u| ArchiverClient::new(&u))
+    let archiver = cli
+        .archiver
+        .as_deref()
+        .map(ArchiverClient::new)
         .transpose()
         .map_err(|e| Failure::usage(e.to_string()))?;
+    // Remembered, so later runs need no --archiver (but not by snapshots,
+    // which are for docs and CI).
+    if let Some(a) = &archiver
+        && cli.snapshot.is_none()
+    {
+        let mut settings = config::Settings::load();
+        if remember_archiver(&mut settings, a) {
+            settings.save();
+        }
+    }
     if let Some(name) = &cli.view {
         if !cli.pvs.is_empty() {
             return Err(Failure::usage("give PVs or --view, not both"));
@@ -193,6 +203,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
     }
     let opts = app::Options {
         archiver,
+        no_archiver: cli.no_archiver,
         pvs: cli.pvs.clone(),
         view: cli.view.clone(),
         range: cli.range,
@@ -240,6 +251,15 @@ fn run(cli: Cli) -> Result<(), Failure> {
         Box::new(move |cc| Ok(Box::new(app::ArchiveApp::new(&cc.egui_ctx, opts)))),
     )
     .map_err(|e| Failure::failed(e.to_string()))
+}
+
+/// Make `--archiver`'s `a` the settings' archiver and the first recent
+/// one; true if that changed them (so they need saving).
+#[cfg(not(target_arch = "wasm32"))]
+fn remember_archiver(settings: &mut config::Settings, a: &ArchiverClient) -> bool {
+    let before = settings.clone();
+    settings.remember_archiver(a.base());
+    *settings != before
 }
 
 struct Logger(log::LevelFilter);
@@ -309,5 +329,29 @@ mod tests {
             Cli::try_parse_from(["archiveview", "--theme", "Dark", "--hover", "10,20"]).unwrap();
         assert_eq!(cli.theme, Some(config::Theme::Dark));
         assert_eq!(cli.hover, Some([10.0, 20.0]));
+        assert!(Cli::try_parse_from(["archiveview", "--archiver", "h", "--no-archiver"]).is_err());
+    }
+
+    #[test]
+    fn the_archiver_given_is_remembered() {
+        let mut s = config::Settings {
+            archiver_url: Some("http://old/retrieval".into()),
+            recent_archivers: vec!["http://old/retrieval".into()],
+            ..Default::default()
+        };
+        let a = ArchiverClient::new("pbraw://archappl.diamond.ac.uk/retrieval").unwrap();
+        assert!(remember_archiver(&mut s, &a));
+        assert_eq!(
+            s.archiver_url.as_deref(),
+            Some("http://archappl.diamond.ac.uk/retrieval")
+        );
+        assert_eq!(
+            s.recent_archivers,
+            [
+                "http://archappl.diamond.ac.uk/retrieval",
+                "http://old/retrieval"
+            ]
+        );
+        assert!(!remember_archiver(&mut s, &a), "nothing new to save");
     }
 }

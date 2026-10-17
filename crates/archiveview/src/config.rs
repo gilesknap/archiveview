@@ -39,12 +39,19 @@ pub enum Theme {
     Dark,
 }
 
+/// How many archivers `Settings::recent_archivers` keeps.
+pub const MAX_RECENT_ARCHIVERS: usize = 8;
+
 /// `settings.json`. Every field defaults, so old and partial files load.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
-    /// Used when `--archiver` is not given.
+    /// The archiver last chosen (`--archiver`, or in the archiver pill):
+    /// used when neither `--archiver` nor the view opened names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archiver_url: Option<String>,
+    /// Archivers used recently, newest first, for the archiver pill.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_archivers: Vec<String>,
     #[serde(default)]
     pub theme: Theme,
     /// Save the current view as `default` when the window closes, so the
@@ -61,6 +68,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             archiver_url: None,
+            recent_archivers: Vec::new(),
             theme: Theme::default(),
             save_default_on_exit: true,
         }
@@ -79,6 +87,15 @@ impl Settings {
         if let Some(d) = config_dir() {
             self.save_to(&d);
         }
+    }
+
+    /// Make `url` (a retrieval base) the archiver to use from now on, and
+    /// the first of the recent ones.
+    pub fn remember_archiver(&mut self, url: &str) {
+        self.archiver_url = Some(url.to_string());
+        self.recent_archivers.retain(|u| u != url);
+        self.recent_archivers.insert(0, url.to_string());
+        self.recent_archivers.truncate(MAX_RECENT_ARCHIVERS);
     }
 
     fn load_from(dir: &Path) -> Self {
@@ -229,6 +246,7 @@ mod tests {
         assert_eq!(Settings::load_from(&dir), Settings::default());
         let s = Settings {
             archiver_url: Some("http://archiver:17668".into()),
+            recent_archivers: vec!["http://archiver:17668".into()],
             theme: Theme::Dark,
             save_default_on_exit: false,
         };
@@ -245,6 +263,28 @@ mod tests {
         );
         std::fs::write(dir.join("settings.json"), "{ bad").unwrap();
         assert_eq!(Settings::load_from(&dir), Settings::default());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn archivers_are_remembered() {
+        let dir = temp("remember");
+        let mut s = Settings::load_from(&dir);
+        s.remember_archiver("http://a/retrieval");
+        s.remember_archiver("http://b/retrieval");
+        s.remember_archiver("http://a/retrieval");
+        s.save_to(&dir);
+        let back = Settings::load_from(&dir);
+        assert_eq!(back.archiver_url.as_deref(), Some("http://a/retrieval"));
+        assert_eq!(
+            back.recent_archivers,
+            ["http://a/retrieval", "http://b/retrieval"]
+        );
+        for i in 0..20 {
+            s.remember_archiver(&format!("http://{i}/retrieval"));
+        }
+        assert_eq!(s.recent_archivers.len(), MAX_RECENT_ARCHIVERS);
+        assert_eq!(s.recent_archivers[0], "http://19/retrieval");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -268,6 +308,21 @@ mod tests {
         assert_eq!(views.list(), ["default", "alpha", "beam"]);
         assert!(views.exists("beam") && !views.exists("nope"));
         assert_eq!(views.load("beam").unwrap(), view);
+        // With an archiver, and an older file without one.
+        let with = View {
+            archiver: Some("http://archiver:17668/retrieval".into()),
+            ..view.clone()
+        };
+        views.save("with", &with).unwrap();
+        assert_eq!(views.load("with").unwrap(), with);
+        std::fs::write(
+            dir.join("views/old.json"),
+            r#"{"version":1,"pvs":[{"name":"MOCK:SINE"}],"range":{"kind":"relative","secs":86400}}"#,
+        )
+        .unwrap();
+        assert_eq!(views.load("old").unwrap(), view);
+        views.delete("with").unwrap();
+        views.delete("old").unwrap();
         assert!(views.save("../x", &view).is_err());
         assert!(views.save(".hidden", &view).is_err());
         assert!(views.load("nope").is_err());
