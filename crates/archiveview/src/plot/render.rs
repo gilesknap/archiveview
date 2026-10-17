@@ -267,6 +267,16 @@ pub struct Line<'a> {
     pub width: f32,
     /// Its value axis (an index into the frame's axes).
     pub axis: usize,
+    /// The opacity of its min..max band, from [`band_alpha`]; 0 for none,
+    /// as for a trace with no bins.
+    pub band: f32,
+}
+
+/// The opacity of each min..max band when `n` traces have one. Lighter as
+/// more of them overlap, so the lines show through, and where bands cross
+/// the blend stays close to the chips' colours rather than turning muddy.
+pub fn band_alpha(n: usize) -> f32 {
+    (0.22 / n.max(1) as f32).max(0.07)
 }
 
 /// Paint the background, grid, labels and `lines`, leaving out any time
@@ -313,8 +323,13 @@ pub fn paint(
     );
 
     let clipped = painter.with_clip_rect(painter.clip_rect().intersect(data.expand(1.0)));
+    // Every band under every line: a busy trace's band must not hide
+    // another trace's line.
     for line in lines {
-        draw_line(&clipped, f, line);
+        draw_line(&clipped, f, line, true);
+    }
+    for line in lines {
+        draw_line(&clipped, f, line, false);
     }
 
     // Time labels below, the first with its date.
@@ -428,7 +443,11 @@ pub fn now_marker(painter: &egui::Painter, f: &Frame, now: f64, v: &egui::Visual
     painter.galley(tag.min + Vec2::new(5.0, 1.0), galley, color);
 }
 
-fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line) {
+/// Draw `line`'s min..max band (`band`), or its value line.
+fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line, band: bool) {
+    if band && line.band <= 0.0 {
+        return;
+    }
     let ys = f.scale(line.axis);
     let ok = |v: f64| v.is_finite() && (!ys.log || v > 0.0);
     // Far-off points are pulled in so the maths stays finite.
@@ -440,8 +459,8 @@ fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line) {
     let pts = hold_to_gaps(line.pts, ok);
     for run in pts.split(|p| !ok(p.v)).filter(|r| !r.is_empty()) {
         // The min..max envelope of bins, as quads between neighbours.
-        if run.iter().any(Pt::is_bin) {
-            let fill = line.color.gamma_multiply(0.22);
+        if band && run.iter().any(Pt::is_bin) {
+            let fill = line.color.gamma_multiply(line.band);
             let mut mesh = Mesh::default();
             // One (x, lo, hi) per pixel column: quads narrower than a pixel
             // would shimmer into moiré.
@@ -479,6 +498,9 @@ fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line) {
             if !mesh.is_empty() {
                 painter.add(Shape::mesh(mesh));
             }
+        }
+        if band {
+            continue;
         }
         // The value line: steps for raw samples, slopes between bin means.
         // Each point is marked whether it is a bin mean, which may be
@@ -705,6 +727,62 @@ mod tests {
         ];
         let out = column_means(&run);
         assert_eq!(out, [p(0.45, 15.0), p(5.1, 20.0), p(5.3, 30.0)]);
+    }
+
+    #[test]
+    fn bands_are_lighter_as_more_overlap() {
+        assert_eq!(band_alpha(0), band_alpha(1));
+        assert!(band_alpha(2) < band_alpha(1));
+        assert!(band_alpha(3) < band_alpha(2));
+        assert!(band_alpha(20) > 0.0, "never invisible");
+    }
+
+    #[test]
+    fn every_band_is_drawn_under_every_line() {
+        let bin = |t: f64, v: f64| Pt {
+            lo: v - 1.0,
+            hi: v + 1.0,
+            step: false,
+            ..Pt::raw(t, v)
+        };
+        let a: Vec<Pt> = (0..20).map(|i| bin(i as f64, 3.0)).collect();
+        let b: Vec<Pt> = (0..20).map(|i| bin(i as f64, 6.0)).collect();
+        let line = |pts, color| Line {
+            pts,
+            color,
+            width: 1.5,
+            axis: 0,
+            band: band_alpha(2),
+        };
+        let lines = [line(&a, Color32::RED), line(&b, Color32::BLUE)];
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0))),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            let painter = ui.painter();
+            let axis = AxisSpec {
+                lo: 0.0,
+                hi: 10.0,
+                ..AxisSpec::default()
+            };
+            let font = FontId::proportional(11.0);
+            let f = frame(painter, ui.max_rect(), (0.0, 19.0), &[axis], &font, &font);
+            paint(painter, &f, &lines, ui.visuals(), None);
+        });
+        // Bands are meshes, lines are paths: both bands, then both lines.
+        let order: String = out
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                Shape::Mesh(_) => Some('b'),
+                Shape::Path(_) => Some('l'),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, "bbll");
+        out.textures_delta.clear();
     }
 
     #[test]

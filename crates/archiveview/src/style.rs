@@ -147,6 +147,25 @@ pub fn live(dark: bool) -> Color32 {
     }
 }
 
+/// The archiver pill's dot when the archiver answers.
+pub fn reachable(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(74, 222, 128)
+    } else {
+        Color32::from_rgb(22, 163, 74)
+    }
+}
+
+/// The archiver pill's dot when the archiver fails: amber, so it is not
+/// taken for the Live pill's red dot beside it.
+pub fn unreachable(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(251, 191, 36)
+    } else {
+        Color32::from_rgb(217, 119, 6)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -29,6 +29,9 @@ archiveview-mockarchiver &
 archiveview --archiver http://127.0.0.1:17668 MOCK:SINE MOCK:NOISE
 ```
 
+`--archiver` is remembered, so next time a plain `archiveview` reopens the
+same plot from the same archiver.
+
 Linux needs a few graphics libraries first; see
 [Install archiveview](https://gilesknap.github.io/archiveview/main/how-to/install.html).
 

@@ -10,12 +10,13 @@
 | **1h 8h 1d 7d** | show that span ending now, following live |
 | **⋯** | a custom span (`90m`, `2 days`) or a start and end date-time |
 | **● Live** | red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow |
+| **● host** | the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See [Connect](../how-to/connect.md#see-and-change-the-archiver) |
 | **⤢** | autoscale every value axis |
 | **⌂** | reset: back to the last preset, autoscale on |
 | **≡** | Log scale (every value axis); then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
 
-In a narrow window the presets become a drop-down, and ⤢ and ⌂ move into
-the ≡ menu.
+In a narrow window the presets become a drop-down, the archiver pill shows
+only its dot, and ⤢ and ⌂ move into the ≡ menu.
 
 ## On the plot
 
@@ -39,14 +40,17 @@ the ≡ menu.
 | gesture | effect |
 | --- | --- |
 | click | hide or show the trace |
-| hover | highlight the trace and dim the others |
+| hover | highlight the trace (bolder, drawn on top, with its band) and dim the others |
 | click ✕ | remove the PV |
 | click the colour dot | choose the trace's value axis, or New axis |
 | drag onto a value axis | move the trace to that axis; dropped elsewhere on the plot, to a new axis of its own |
 
 A chip shows the latest value and units, a spinner while history loads, a
 grey "—" while disconnected, and a "live only" mark when the archiver has no
-history of the PV. Hover it for details.
+history of the PV. A long value is cut short with "…", and an array shows
+its length and first elements, e.g. `[936] 0, 0, 0, …`. Arrays are not
+plotted, and their chip says "not plotted". A `!` in place of the ✕ means
+the last archive request failed. Hover a chip for details.
 
 ## Keys
 

@@ -58,6 +58,10 @@ chip for each sits along the bottom with its latest value.
   min-to-max band.
 - Click **7d** in the time-range pill to see the whole week, then
   **double-click** the plot to return to where you started.
+- The pill reading **● 127.0.0.1:17668** is the archiver: its dot is green
+  while the archiver answers. Hover over it for details.
+
+archiveview remembers `--archiver`, so from now on you can leave it out.
 
 ## 4. Find another PV
 
@@ -73,7 +77,7 @@ machine:
 ```bash
 bobview-testioc &
 export EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO
-archiveview --archiver http://127.0.0.1:17668 --range 10m bl01t:SUM
+archiveview --range 10m bl01t:SUM
 ```
 
 (install the IOC first with `cargo install bobview-testioc`, or take it from a
@@ -88,8 +92,8 @@ live following stops. Press `L`, or click the pill, to jump back to now.
 
 Open the **≡** menu, type `demo` into the **Save as…** field under Views
 and press Enter. Next
-time, `archiveview --archiver http://127.0.0.1:17668 --view demo` reopens the
-same PVs and time range. See [Save and load views](../how-to/views.md).
+time, `archiveview --view demo` reopens the same PVs and time range, from
+the same archiver. Plain `archiveview` reopens the plot as you left it. See [Save and load views](../how-to/views.md).
 
 ## 7. Finish
 

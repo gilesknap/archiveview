@@ -26,6 +26,11 @@ pub struct View {
     /// these are 1, 2, ...
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub axes: Vec<YAxis>,
+    /// The archiver's retrieval URL when the view was saved, if any.
+    /// Opening the view switches to it. (Added after version 1 without a
+    /// bump: older files simply lack it.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archiver: Option<String>,
 }
 
 impl Default for View {
@@ -36,6 +41,7 @@ impl Default for View {
             range: Range::default(),
             y: YAxis::default(),
             axes: Vec::new(),
+            archiver: None,
         }
     }
 }
@@ -248,6 +254,29 @@ mod tests {
         assert!(v.axes.is_empty());
         assert_eq!((v.y.min, v.y.max, v.y.log), (Some(0.0), Some(300.0), true));
         assert_eq!(v.y.name, None);
+    }
+
+    #[test]
+    fn views_keep_their_archiver() {
+        let v = View {
+            archiver: Some("http://archappl.diamond.ac.uk/retrieval".into()),
+            ..View::default()
+        };
+        let json = serde_json::to_value(&v).unwrap();
+        assert_eq!(
+            json["archiver"],
+            serde_json::json!("http://archappl.diamond.ac.uk/retrieval")
+        );
+        assert_eq!(serde_json::from_value::<View>(json).unwrap(), v);
+        // Without one, there is no key, and a file without it loads.
+        let json = serde_json::to_value(View::default()).unwrap();
+        assert!(json.get("archiver").is_none());
+        let old: View = serde_json::from_str(
+            r#"{"version":1,"pvs":[{"name":"A:B"}],"range":{"kind":"relative","secs":60}}"#,
+        )
+        .unwrap();
+        assert_eq!(old.archiver, None);
+        assert_eq!(old.pvs.len(), 1);
     }
 
     #[test]

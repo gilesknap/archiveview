@@ -45,12 +45,17 @@ impl Plot {
     pub fn new(pvs: &pv::PvManager, archiver: Option<ArchiverClient>) -> Self;
     pub fn set_archiver(&mut self, archiver: Option<ArchiverClient>);
     pub fn archiver(&self) -> Option<&ArchiverClient>;
+    pub fn archiver_status(&self) -> &ArchiverStatus;   // for the archiver pill
+    pub fn take_archiver_change(&mut self) -> bool;     // the user switched in the pill
+    pub fn set_recent_archivers(&mut self, urls: &[String]);
+    pub fn recent_archivers(&self) -> &[String];
     pub fn add_pvs(&mut self, names: &[String]);
     pub fn remove_pv(&mut self, name: &str);
     pub fn names(&self) -> Vec<String>;
     pub fn title(&self) -> String;
     pub fn view(&self) -> View;            // serde, for the host's own layouts
-    pub fn set_view(&mut self, view: &View);
+    pub fn set_view(&mut self, view: &View);   // follows view.archiver if switching is on
+    pub fn set_archiver_switching(&mut self, on: bool);  // off by default
     pub fn is_loading(&self) -> bool;
     pub fn ui(&mut self, ui: &mut egui::Ui);   // fills the space ui offers
     pub fn set_range(&mut self, range: &view::Range);
@@ -67,6 +72,8 @@ These rules make the widget safe to embed:
 - **It reuses the caller's pv context.** `Plot::new` clones the caller's `PvManager`. A `tagged` handle from bobview repaints only the window that holds this plot. Archive fetches run as `pvs.runtime().spawn_blocking(..)` jobs on the pv crate's tokio runtime, so the widget starts no runtime and no threads of its own.
 - **Its repaints are self-contained.** Each frame the widget stores `ui.ctx().clone()` and `ctx.viewport_id()`. Completed fetches call `ctx.request_repaint_of(viewport)`: outside a frame a plain `request_repaint` targets the root viewport, and bobview shows each trend in a viewport of its own. While following "now", it asks for `request_repaint_after` at the scroll pace (bobview's `scroll_repaint`). The Live pill pulses (at about 15 fps) only for 3 s after following starts and while the pointer is over the plot, so an idle live plot repaints only at the scroll pace.
 - **A minimum size.** The plot takes all the space it is offered, but at least 360 × 200 points, so it neither collapses nor grows without end in an auto-sized `egui::Window`. Hosts should give such windows a `default_size`.
+- **The host owns the archiver.** By default the archiver pill only shows the state, and `set_view` ignores a view's `archiver`, so a bobview layout restored later never moves its plot to another archiver. `set_archiver_switching(true)`, which `ArchiveApp` calls, enables the pill's switcher and following views' archivers.
+- **It persists nothing.** With switching on, the pill switches the plot's archiver itself and reports it (`take_archiver_change`); remembering it (in `settings.json`) is `ArchiveApp`'s job, as is the recent-archivers list it hands the widget.
 - **It works with no archiver.** With `archiver = None` the plot is live only, like bobview's current trend. Search then completes only the names already plotted, and the time presets still apply, limited to the live buffer.
 - **It takes the host's theme and fonts.** It reads `ui.visuals()` (`dark_mode`, `extreme_bg_color`, text colour) and never installs fonts or sets the theme. Doing that is `ArchiveApp`'s job.
 
@@ -104,6 +111,7 @@ Refetch rules:
 - Changing the range (pan, zoom, preset, live scrolling past the padded window) triggers a refetch after a **300 ms** debounce.
 - Each trace has at most one job in flight. While it runs no other starts, however the window moves; when it finishes, the next frame asks again for wherever the window is then. A new archiver (`set_archiver`) makes older results stale, using a generation counter, and their results are dropped. `set_archiver` keeps counting (it does not reset the counter), so answers from the previous archiver are stale too.
 - Searches can finish out of order; the inbox keeps only the newest answer.
+- A new archiver also clears the search (its answers in flight are dropped) and is probed (see "Archiver status").
 - A request that panics still counts down the busy count (a drop guard) and reports an error, so snapshots and live refreshes never wait on it (with the release profile's `panic = "abort"` a panic ends the process anyway).
 - Until the new data arrives, the previous history stays on screen, so there is no flicker.
 
@@ -113,6 +121,16 @@ Errors:
 
 Live-following:
 - While following now, the plot refreshes the history so it fills in behind the live data. Raw history fetches only the tail (`from` = its last sample's time) every 30 s and appends it, dropping what has scrolled out of the padded window. If appended raw history fetched as `optimized_N` grows past N samples (a PV that got busy), the next refresh fetches the whole window again so it comes back binned. Binned history is fetched whole again (bins of a shorter tail would not line up with the others), but no more often than every three bin widths (`fetch::refresh_after`): a week's bins are ten minutes wide, and refetching them every 30 s from every viewer would load the appliance for no visible change.
+
+### Archiver status
+
+The archiver pill shows one of four states: none (no archiver), checking,
+reachable or unreachable (`plot/status.rs`).
+
+- `bpl/getVersion` is asked once when an archiver is set (start-up, a switch in the pill, a view naming another archiver), with a 10 s timeout, and again when "Use" is pressed on the current archiver. An archiver answering it with an HTTP error other than 502–504 (a proxy passing on only data and search, or refusing it with 401/403) is asked for a search instead: any answer but a 404 to both (not an archiver) or the archiver's own faults counts as reachable, with no version.
+- After that the state is passive: every data result and search answer updates it. A success turns it reachable. An error that looks like the archiver's (no connection, HTTP 502/503/504, a wrong URL (`BadUrl` from the 404 check), or a 404 for a search) sends a probe, and only the probe's failure turns it unreachable: one PV's query timing out while others load is not the archiver down. A 404 for one PV's data (not archived), a 400 for an odd name, a 500 for a bad search regex, and undecodable data say nothing about the archiver.
+- Only while unreachable is it probed again, every 60 s, so it turns green when the archiver returns. Coming back (by a probe or any success) asks again at once for the traces whose fetch failed because of the archiver (`FetchState::archivers_fault`), rather than waiting out their backoff; others keep backing off.
+- Answers about an earlier archiver are dropped by an epoch counter, as fetches are by their generation. The probe answer slot never lets a late answer about an earlier archiver replace a newer one, and a probe unanswered for 15 s (its answer lost) no longer holds the next one back.
 
 ### Live merge
 
@@ -131,13 +149,15 @@ Live-following:
 Traces:
 - Raw samples are drawn as steps: the value holds until the next sample, matching archiver semantics.
 - The archive's first sample may be before `from`, and is drawn held from the left edge.
-- Binned samples are drawn as a mean line with a translucent min..max **envelope** (fill alpha about 0.18, in the trace colour).
+- Binned samples are drawn as a mean line with a translucent min..max **envelope** (band) in the trace colour: fill alpha 0.22 for one band, divided by the number of visible traces with bands (not below 0.07), so overlapping bands stay light and their blend stays near the chips' colours.
+- Every band is drawn before every line, so a busy PV's band never hides another trace's line. Bands still blend where they overlap, and a line can still lie on another with the same values: hovering a chip is the way to read one trace (below).
+- Arrays (waveforms) are **not plotted**: element 0 over time says little about a waveform. Their chip shows the latest array (`[936] 0, 0, 0, …`) with a "not plotted" mark, the crosshair card leaves them out, and its history is not fetched: when `getMetadata` gives more than one element the plot asks for no data, and otherwise drops the samples of a first response that turns out to be a waveform. A channel is an array once the `pv` crate gives it an array value (it does exactly when NELM > 1, however many elements it holds now) or the archive calls it a waveform, and stays one.
 - Gaps (NaN, or severity INVALID with `cnxlostepsecs`) break the line.
 
 Decimation:
 - Points are decimated per pixel column into first, min, max and last (bobview `plot::decimate`, plus the `Thinned` cache for the live ring).
 - Zero-length segments are deduplicated, because they would produce NaN triangles (bobview `plot::line`).
-- Lines are anti-aliased with 1.5 pt stroke width, and 2.5 pt for the hovered trace.
+- Lines are anti-aliased with 1.5 pt stroke width, and 2.5 pt for the trace whose chip is hovered, which is also drawn last (on top of a trace with the same values) and is the only one with its band.
 
 Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
 - Every trace carries an axis id (`Trace::axis`), `None` until it **settles**, once. It is ready when its data is on screen and its archived history has come; with live data only (no archive, not archived, or an error), after 1 s of it, so a first sample (often a 0) does not decide. Traces settle **in legend order**: a ready trace waits while an earlier one may still get data (its archive answer is due, or it is in its 1 s), until that one settles, turns out to have no data, or 5 s pass since it was added. So the grouping does not depend on which archive answer comes first. A trace is not drawn until it settles (no provisional axes squeezing the plot while a big view loads); its chip shows its spinner meanwhile, and snapshots wait for it (`is_loading`). After that only the user moves it; zooming, refetches and reloads never do.
@@ -169,7 +189,7 @@ Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🔍 Search PVs…            │ 1h  8h  1d  7d  ⋯ │  ● Live  │  ⤢  ⌂  │     ≡   │  ← slim top bar (one row, ~36 pt)
+│ 🔍 Search PVs…            │ 1h  8h  1d  7d  ⋯ │ ● Live │ ● host │ ⤢  ⌂ │  ≡ │  ← slim top bar (one row, ~36 pt)
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 300 ┤                                                     ┆ ╭─────────────╮ │
 │     │        ╱‾‾‾╲            ▒▒▒                          ┆ │ Tue 17 14:32:05│ │
@@ -190,9 +210,10 @@ Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
   - A small `.*` toggle inside the box switches to regex.
 - **Time-range pill.** A segmented control: 1h, 8h, 1d, 7d and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
 - **Live toggle.** A pill reading `● Live`. While following now its red dot shows; it pulses (a halo animated with `ctx.input(|i| i.time)`, repainting at about 15 fps) for 3 s after following starts and while the pointer is over the plot, and is still otherwise. When not following, it reads `○ Live` and clicking it jumps to now.
+- **Archiver pill.** `● host` (e.g. `archappl.diamond.ac.uk`), right of the Live pill: a green dot when the archiver answers, amber when it fails (not red, which is the Live dot beside it), a spinner while checking, a hollow grey dot and "No archiver" without one. Hover shows the retrieval URL, the appliance version, the state, and the last error with when it happened. Click opens a popover: the URL in an editable field (Enter or Use), the recent archivers, and "No archiver (live only)". On a compact bar it is the dot alone.
 - **Autoscale** (`⤢`) and **Reset** (`⌂`, bobview `Icon::Home`) icon buttons.
 - **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It holds Log scale (the widget's own item), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
-- **Narrow windows** (under about 600 pt). The pill collapses to a combo, and autoscale and reset move into the menu.
+- **Narrow windows** (under about 600 pt). The range pill collapses to a combo, the archiver pill to its dot, and autoscale and reset move into the menu.
 
 Plot area (fills the rest):
 
@@ -210,10 +231,11 @@ Plot area (fills the rest):
 
 Legend chips (a wrapped row hugging the bottom of the plot):
 
-- Each chip is a pill with a colour dot, the PV name (without `ca://` or `<type>`), the latest value and EGU in tabular figures, and an ✕ that appears on hover.
+- Each chip is a pill with a colour dot, the PV name (without `ca://` or `<type>`), the latest value and EGU in tabular figures, and an ✕ that appears on hover. A value is cut with "…" to 32 characters and to what fits the window; an array shows its length and first three elements.
+- Quiet marks after the value say why a trace has no line or no history: "not plotted" (an array), "live only" (not archived), "no data", "text". A `!` in place of the ✕ means the last archive request failed; the tooltip has the error.
 - Click toggles visibility: a hidden trace's chip is greyed with a hollow dot.
-- Clicking the colour dot opens a menu of the value axes plus "New axis"; dragging the chip onto an axis moves its trace there.
-- Hovering a chip highlights its trace (thicker line) and dims the others to 25% alpha.
+- Hovering a chip highlights its trace (thicker line, drawn on top, its band at full strength) and dims the others to 25% alpha, without their bands. An array's chip picks out nothing (it has no line).
+- Clicking the colour dot opens a menu of the value axes plus "New axis"; dragging the chip onto an axis moves its trace there. An array's chip has neither (it has no axis).
 - A disconnected trace's value shows a grey "—" and the chip's tooltip says why.
 - While a trace is fetching, a small spinner replaces the dot.
 
@@ -254,8 +276,19 @@ Persistence follows bobview's `layout.rs`:
 `settings.json`:
 
 ```json
-{ "archiver_url": "http://archiver:17668", "theme": "system", "save_default_on_exit": true }
+{ "archiver_url": "http://archiver:17668/retrieval", "recent_archivers": ["http://archiver:17668/retrieval"],
+  "theme": "system", "save_default_on_exit": true }
 ```
+
+`archiver_url` is written by `--archiver` (not in snapshot mode, and only
+after the command line is checked) and by a switch to another archiver in
+the pill or by opening a view; each also puts it first in
+`recent_archivers` (at most 8). Switching to no archiver writes nothing:
+it lasts for the run. Unknown fields are kept (`Settings::extra`), and a
+`settings.json` that does not parse is never saved over.
+
+With `--no-archiver`, exit saves the default view with the archiver the
+default had, not none.
 
 `views/<name>.json`:
 
@@ -265,19 +298,27 @@ Persistence follows bobview's `layout.rs`:
   "pvs": [ { "name": "SR-DI-DCCT-01:SIGNAL", "axis": 0 }, { "name": "bl01t:SUM", "color": "#d62728", "visible": false, "axis": 1 } ],
   "range": { "kind": "relative", "secs": 3600 },
   "y": { "autoscale": true },
-  "axes": [ { "autoscale": false, "min": 0, "max": 20, "log": false, "name": "Sum" } ]
+  "axes": [ { "autoscale": false, "min": 0, "max": 20, "log": false, "name": "Sum" } ],
+  "archiver": "http://archiver:17668/retrieval"
 }
 ```
 
 `y` is the first value axis and `axes` the others; a trace's `axis` counts `y` as 0. Both were added without a version bump: a file from before has no `axes` and no trace `axis`, so its traces settle as they are added; `y`'s settings are kept for its first visible PV (whichever settles first), and its `log: true` applies to every axis the others create. An older program ignores the new fields.
 
+`archiver` (optional, added without a version bump) is the retrieval base
+in use when the view was saved; opening the view switches to it.
+
 `range` can also be `{ "kind": "absolute", "start": "2026-10-17T09:00:00Z", "end": "2026-10-17T12:00:00Z" }`.
 
 Startup order:
-1. PVs on the command line give a new view with those PVs, using `--range`.
+1. PVs on the command line give a new view with those PVs, using `--range`. They replace the default view rather than adding to it (there is no `--new`); with "save default on exit" on, this plot becomes the default.
 2. Otherwise `--view NAME` opens that view.
-3. Otherwise `views/default.json` opens, if it exists.
+3. Otherwise `views/default.json` opens, if it exists, with a "Restored last session" notice whose "Start empty" button clears the plot (keeping the archiver and `--range`).
 4. Otherwise the plot starts in the empty state.
+
+The archiver at start-up (`app::startup_archiver`): `--archiver` >
+`--no-archiver` (none) > the opened view's `archiver` (the default view or
+`--view`) > `settings.json`'s `archiver_url` > none.
 
 ## Command line
 
@@ -287,7 +328,8 @@ archiveview [--archiver URL] [--view NAME] [--range SPAN] [--theme system|light|
             [PV ...]
 ```
 
-- `--archiver`: the retrieval base, e.g. `http://host:17668`. `/retrieval` is appended unless the URL already ends with it. It overrides `settings.json`, and the plot is live only with neither.
+- `--archiver`: the retrieval base, e.g. `http://host:17668`. `/retrieval` is appended unless the URL already ends with it. It overrides the view's and `settings.json`'s archiver and is remembered in `settings.json`; the plot is live only with none.
+- `--no-archiver`: no archiver, whatever the view or settings say.
 - `--range`: e.g. `1h`, `7d` or `90m`, parsed by `parse_span`.
 - `--snapshot`: run headless and write a PNG. The run takes at least `--wait` seconds, then waits until `!is_loading()`, with a 60 s deadline. The size defaults to 1280x800 and the wait to 2 s. This is bobview's software rasteriser.
 - Logging uses the `ARCHIVEVIEW_LOG` level, with library targets capped at warn as in bobview.
@@ -314,6 +356,8 @@ The client normalises the URL to `R = <url>/retrieval`, then uses these endpoint
 **Search:** `R/bpl/getMatchingPVs?pv=<glob>&limit=N` (or `regex=`)
 - The glob is converted naively: `*` becomes `.*`, `?` becomes `.`, and the whole name must match. Nothing else is escaped, so a name holding regex metacharacters (`XF:23ID1-ES{Dif-Ax:TH}Mtr`, common at NSLS-II) makes a `pv=` search fail with HTTP 500.
 - So the search box always sends `regex=`: text without wildcards as `(?i).*<escaped text>.*` (a substring, any case), and a typed glob converted with every other character escaped (whole name, with case). The "not archived" check searches for the exact name, escaped, the same way.
+
+**Version:** `R/bpl/getVersion` gives `{"version": "Archiver Appliance Version 1.1.0…"}`; the archiver pill's probe.
 
 **Metadata:** `R/bpl/getMetadata?pv=PV`
 - Every value comes back as a string: `DBRType`, `elementCount`, `units`, `precision`, and so on.

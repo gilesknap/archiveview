@@ -40,6 +40,7 @@ Every endpoint is on the one port.
 | `/retrieval/data/getData.json` | `pv`, `from`, `to`. Operators: raw (with the last sample before `from`), `optimized_N`, `mean_N`, `nth_N`, `ncount`, and the `…Sample_N` variants that leave empty bins out |
 | `/retrieval/bpl/getMatchingPVs` | `pv` (glob) or `regex`, `limit` |
 | `/retrieval/bpl/getMetadata` | `pv` |
+| `/retrieval/bpl/getVersion` | none; `{"version": "Archiver Appliance Version mock-…"}` |
 | `/mgmt/bpl/getAllPVs` | `pv` (comma-separated globs), `regex`, `limit` |
 
 As the real appliance does, it answers 404 with an HTML page for an unknown

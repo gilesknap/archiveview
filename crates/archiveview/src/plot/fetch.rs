@@ -51,7 +51,11 @@ pub struct Done {
 }
 
 /// A finished search: its number and the names (or an error).
-pub type Found = (u64, Result<Vec<String>, String>);
+pub type Found = (u64, Result<Vec<String>, archiver::Error>);
+
+/// A finished archiver probe: the archiver's epoch, and its version
+/// (`None` when it answers, but not to `getVersion`) or the error.
+pub type Probed = (u64, Result<Option<String>, archiver::Error>);
 
 /// Where to ask for a repaint when a request finishes: the context and the
 /// viewport the plot was last drawn in. A host such as bobview may show
@@ -74,6 +78,7 @@ impl Repaint {
 pub struct Fetcher {
     inbox: Arc<Mutex<Vec<Done>>>,
     found: Arc<Mutex<Option<Found>>>,
+    probed: Arc<Mutex<Option<Probed>>>,
     busy: Arc<AtomicUsize>,
     /// Every data job sent, for tests.
     #[cfg(test)]
@@ -94,7 +99,10 @@ impl Fetcher {
 
     /// Requests in flight, or results not yet taken in.
     pub fn pending(&self) -> bool {
-        self.busy() || !self.inbox.lock().is_empty() || self.found.lock().is_some()
+        self.busy()
+            || !self.inbox.lock().is_empty()
+            || self.found.lock().is_some()
+            || self.probed.lock().is_some()
     }
 
     pub fn take(&self) -> Vec<Done> {
@@ -103,6 +111,10 @@ impl Fetcher {
 
     pub fn take_found(&self) -> Option<Found> {
         self.found.lock().take()
+    }
+
+    pub fn take_probed(&self) -> Option<Probed> {
+        self.probed.lock().take()
     }
 
     /// Run `job` against `client` in the background.
@@ -164,16 +176,23 @@ impl Fetcher {
                 Some(i) if !i.binnable() => (Operator::Raw, job.raw_from.max(job.from)),
                 _ => (job.op, job.from),
             };
-            let result = client
-                .get_data(&Query::new(&job.pv, from, job.to, op))
-                .map_err(|e| {
-                    log::debug!("{}: {e}", job.pv);
-                    if e.is_not_archived() {
-                        check_404(&client, &job.pv, e)
-                    } else {
-                        e
-                    }
-                });
+            // An array is not plotted: the metadata says it is archived,
+            // and that is all the plot needs. A day of a busy waveform
+            // could be gigabytes.
+            let result = if let Some(series) = info.as_ref().and_then(|i| array_series(&job.pv, i))
+            {
+                Ok(Some(series))
+            } else {
+                client.get_data(&Query::new(&job.pv, from, job.to, op))
+            };
+            let result = result.map_err(|e| {
+                log::debug!("{}: {e}", job.pv);
+                if e.is_not_archived() {
+                    check_404(&client, &job.pv, e)
+                } else {
+                    e
+                }
+            });
             inbox.lock().push(Done {
                 trace: job.trace,
                 generation: job.generation,
@@ -198,7 +217,7 @@ impl Fetcher {
     ) {
         let client = client.clone();
         let found = self.found.clone();
-        let store = move |names: Result<Vec<String>, String>| {
+        let store = move |names: Result<Vec<String>, archiver::Error>| {
             // Searches can finish out of order: keep only the newest answer
             // not yet taken in, so an older one never hides a newer one.
             let mut slot = found.lock();
@@ -208,10 +227,52 @@ impl Fetcher {
         };
         let panicked = {
             let store = store.clone();
-            move || store(Err("the search failed unexpectedly".into()))
+            move || {
+                store(Err(archiver::Error::Transport(
+                    "the search failed unexpectedly".into(),
+                )))
+            }
         };
         self.run(pvs, repaint, panicked, move || {
-            store(client.search(&search).map_err(|e| e.to_string()));
+            store(client.search(&search));
+        });
+    }
+
+    /// Ask `client` for its version, to learn whether it can be reached:
+    /// the archiver's `epoch` comes back with the answer. An archiver
+    /// that answers `getVersion` with an HTTP error (a proxy passing on
+    /// only data and search) is asked for a search instead.
+    pub fn probe(
+        &self,
+        pvs: &PvManager,
+        client: &ArchiverClient,
+        epoch: u64,
+        repaint: Option<Repaint>,
+    ) {
+        let client = client
+            .clone()
+            .with_timeout_secs(super::status::PROBE_TIMEOUT);
+        let probed = self.probed.clone();
+        let panicked = {
+            let probed = probed.clone();
+            move || {
+                store_probe(
+                    &probed,
+                    (
+                        epoch,
+                        Err(archiver::Error::Transport(
+                            "the check failed unexpectedly".into(),
+                        )),
+                    ),
+                );
+            }
+        };
+        self.run(pvs, repaint, panicked, move || {
+            let result = probe(&client);
+            if let Err(e) = &result {
+                log::info!("archiver {}: {e}", client.base());
+            }
+            store_probe(&probed, (epoch, result));
         });
     }
 
@@ -252,6 +313,38 @@ impl Fetcher {
             let _ = (pvs, panicked);
             drop(task);
         }
+    }
+}
+
+/// Keep a probe's answer for the plot, unless one about a newer archiver
+/// is waiting: an answer about an earlier archiver arriving late must not
+/// hide the current one's (the plot may not have been drawn in between).
+fn store_probe(slot: &Mutex<Option<Probed>>, probed: Probed) {
+    let mut slot = slot.lock();
+    if slot.as_ref().is_none_or(|(epoch, _)| probed.0 >= *epoch) {
+        *slot = Some(probed);
+    }
+}
+
+/// Probe `client`: its version, or `None` when it answers HTTP but not to
+/// `getVersion` (a proxy passing on only data and search, or refusing it
+/// with 401 or 403), as long as a search answers.
+fn probe(client: &ArchiverClient) -> Result<Option<String>, archiver::Error> {
+    let e = match client.version() {
+        Ok(v) => return Ok(Some(v)),
+        Err(e @ archiver::Error::Http { status, .. }) if !(502..=504).contains(&status) => e,
+        Err(e) => return Err(e),
+    };
+    log::debug!("{}: no getVersion: {e}", client.base());
+    match client.search(&Search::exact("archiveview", 1)) {
+        Ok(_) => Ok(None),
+        // 404 for both: nothing is served here.
+        Err(check) if check.is_not_archived() && e.is_not_archived() => Err(
+            archiver::Error::BadUrl(format!("{}: not an archiver (HTTP 404)", client.base())),
+        ),
+        Err(check) if super::status::archiver_fault(&check, false) => Err(check),
+        // Something answers, if not to these.
+        Err(_) => Ok(None),
     }
 }
 
@@ -356,6 +449,24 @@ pub fn covers(got: (f64, f64), binned: bool, from: f64, to: f64) -> bool {
     inside && fine_enough
 }
 
+/// For an array PV (more than one element, by its metadata): an empty
+/// waveform series standing for its history, which is not fetched.
+fn array_series(pv: &str, info: &PvInfo) -> Option<TimeSeries> {
+    info.element_count
+        .is_some_and(|n| n > 1)
+        .then(|| TimeSeries {
+            meta: archiver::Meta {
+                name: pv.to_string(),
+                egu: info.units.clone(),
+                prec: info.precision,
+                ..Default::default()
+            },
+            kind: archiver::ValueKind::Waveform,
+            binned: false,
+            samples: Vec::new(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,6 +521,20 @@ mod tests {
             refresh_after(30.0, week, Operator::Optimized(1500), false),
             30.0
         );
+    }
+
+    #[test]
+    fn a_late_probe_answer_does_not_hide_a_newer_one() {
+        let slot = Mutex::new(None);
+        let down = || Err(archiver::Error::Transport("down".into()));
+        // Archiver 2's answer waits; archiver 1's comes late.
+        store_probe(&slot, (2, Ok(Some("v2".into()))));
+        store_probe(&slot, (1, down()));
+        assert_eq!(slot.lock().take(), Some((2, Ok(Some("v2".into())))));
+        // In order, the newer replaces the older.
+        store_probe(&slot, (1, down()));
+        store_probe(&slot, (2, Ok(None)));
+        assert_eq!(slot.lock().take(), Some((2, Ok(None))));
     }
 
     #[test]

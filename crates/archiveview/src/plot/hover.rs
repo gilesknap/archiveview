@@ -66,7 +66,8 @@ pub fn crosshair(
     }
     let mut rows = Vec::new();
     for (n, (trace, pts)) in plot.traces.iter().zip(data).enumerate() {
-        if !trace.visible {
+        // Arrays are not plotted: their chip has the value.
+        if !trace.visible || trace.is_array() {
             continue;
         }
         let color = plot.color(trace, dark);
@@ -304,15 +305,7 @@ pub fn status(plot: &Plot, ui: &egui::Ui, f: &Frame) {
         .find_map(|t| t.fetch.error.as_ref().map(|e| (t.label(), e)))
     {
         (format!("archiver: {name}: {e}"), v.warn_fg_color, false)
-    } else if let Some(name) = (plot.archiver.is_some()
-        && plot.window.span > super::fetch::RAW_MAX_SPAN)
-        .then(|| {
-            plot.traces
-                .iter()
-                .find(|t| t.visible && t.fetch.raw_only == Some(true) && t.archive_name().is_some())
-        })
-        .flatten()
-    {
+    } else if let Some(name) = raw_capped(plot) {
         (
             format!(
                 "{}: raw history only for the last {}",
@@ -348,12 +341,19 @@ pub fn status(plot: &Plot, ui: &egui::Ui, f: &Frame) {
     }
     let max = (f.data.width() - 40.0).max(40.0);
     let font = FontId::proportional(12.0);
-    let full: Vec<char> = text.chars().collect();
-    let mut shown = text;
-    let mut keep = full.len();
-    while super::render::text_size(&painter, &shown, &font).x > max && keep > 4 {
-        keep = keep * 9 / 10;
-        shown = format!("{}…", full[..keep].iter().collect::<String>());
-    }
+    let shown = super::legend::fit(&painter, &text, &font, max);
     painter.text(pos, Align2::LEFT_TOP, shown, font, color);
+}
+
+/// The plotted trace whose history is cut to the last
+/// [`super::fetch::RAW_MAX_SPAN`] in the window shown, if any: one
+/// fetched raw (a string or enum). Arrays are not plotted, so they don't
+/// count.
+pub(super) fn raw_capped(plot: &Plot) -> Option<&super::series::Trace> {
+    if plot.archiver.is_none() || plot.window.span <= super::fetch::RAW_MAX_SPAN {
+        return None;
+    }
+    plot.traces.iter().find(|t| {
+        t.visible && t.fetch.raw_only == Some(true) && t.archive_name().is_some() && !t.is_array()
+    })
 }

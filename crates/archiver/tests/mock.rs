@@ -262,6 +262,7 @@ fn search_and_metadata() {
     assert!(!c.metadata("MOCK:ENUM").unwrap().binnable());
     assert!(c.metadata("MOCK:SINE").unwrap().binnable());
     assert!(c.metadata("NOPE").unwrap_err().is_not_archived());
+    assert!(c.version().unwrap().contains("mock"));
 }
 
 #[test]

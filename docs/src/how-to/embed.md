@@ -51,6 +51,17 @@ What the widget does, and doesn't, assume:
   manager's tokio runtime. It starts no runtime or threads of its own.
 - **No archiver is fine.** With `None` it plots live values only, like
   bobview's trend window. `set_archiver` changes it later.
+- **The archiver is the host's unless it says otherwise.** The archiver
+  pill always shows whether the archiver can be reached
+  (`plot.archiver_status()`), but by default it is a status display only,
+  and `set_view` ignores a view's `archiver`, so a layout restored later
+  never moves the plot to another archiver. `plot.set_archiver_switching(true)`
+  (as the standalone app does) lets the user switch archivers in the pill
+  and makes `set_view` follow a view's archiver. The plot then switches
+  itself, and `plot.take_archiver_change()` is true once afterwards so the
+  host can remember the choice; give it the host's remembered archivers
+  with `plot.set_recent_archivers(..)`. Persisting them is the host's job:
+  the widget writes no files.
 - **No globals.** Every plot keeps its own state and egui ids, so several can
   be open at once. `Plot::new` salts its ids with a running count;
   `Plot::with_id_salt(&pvs, archiver, "trend-1")` uses the host's own salt,
@@ -62,7 +73,9 @@ What the widget does, and doesn't, assume:
   root one) and, while following now, at the pace the time axis scrolls.
 
 To save a plot in the host's own layout files, store `plot.view()` (it is
-`serde`-serialisable) and restore it with `plot.set_view(&view)`.
+`serde`-serialisable) and restore it with `plot.set_view(&view)`. A view
+records the archiver in use; `set_view` switches to it only with archiver
+switching on.
 `plot.is_loading()` is true while archive requests are in flight.
 
 See the [Rust API](../reference/api.md) for the full interface.
