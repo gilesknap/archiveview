@@ -414,12 +414,19 @@ with <code>ARCHIVEVIEW_LOG=debug</code>, which logs every archiver request.</p>
 <p>Press <code>/</code>, or click the search box at the left of the bar, and type part of
 a name. After a short pause the box lists the archiver's matching PVs:</p>
 <ul>
-<li>The first row is highlighted: <code>↑</code>/<code>↓</code> move through the list, <code>Enter</code> adds
-the highlighted row, and a click adds the one clicked.</li>
-<li>A PV whose name is exactly what you typed is always the first row, so
+<li>The first match is highlighted: <code>↑</code>/<code>↓</code> move through the list, <code>Enter</code>
+adds the highlighted row, and a click adds the one clicked.</li>
+<li>A PV whose name is exactly what you typed is always the first match, so
 typing a full name and pressing <code>Enter</code> adds that PV, even when other
 names containing it sort before it.</li>
-<li><code>Esc</code> closes the list, and a second <code>Esc</code> clears the box.</li>
+<li>Adding a PV keeps the text and the list, so you can add several from one
+search: <code>↓</code>, <code>Enter</code>, <code>↓</code>, <code>Enter</code>, ... PVs already on the plot are
+dimmed with a ✓, and picking one again does nothing.</li>
+<li><code>Esc</code> closes the list and keeps the text (<code>↓</code> or a click brings the list back); a
+second <code>Esc</code>, or the ✕ in the box, clears it. A click elsewhere closes
+the list and keeps the text.</li>
+<li>Coming back to the box (a click, or <code>/</code>) selects its text, so typing
+starts a new search; press <code>→</code> or <code>End</code> to edit the old one instead.</li>
 </ul>
 <div class="table-wrapper"><table><thead><tr><th>you type</th><th>archiver is asked for (regex)</th><th>matches</th></tr></thead><tbody>
 <tr><td><code>dcct</code></td><td><code>(?i).*dcct.*</code></td><td>any name containing <code>dcct</code>, in any case (<code>SR-DI-DCCT-01:SIGNAL</code>)</td></tr>
@@ -435,6 +442,24 @@ other character stands for itself.</p>
 instead. It must match the <strong>whole</strong> name: <code>SR-DI</code> matches nothing, while
 <code>SR-DI.*</code> works. Start it with <code>(?i)</code> to ignore case.</p>
 <p>The list shows the first 50 matches; type more of the name to narrow it.</p>
+<h2 id="reuse-a-recent-search"><a class="header" href="#reuse-a-recent-search">Reuse a recent search</a></h2>
+<p>archiveview remembers a search once you add a PV from it (typos and
+half-typed names are not kept), with its <code>.*</code> setting. It keeps the last
+50, in <code>history.json</code> in the <a href="how-to/../reference/config.html">config directory</a>, so
+they survive a restart. Plain text that differs only in case (<code>bl16i</code>,
+<code>BL16I</code>) is one search, kept as you last typed it.</p>
+<ul>
+<li><strong>Click the empty box, or press <code>/</code>:</strong> the list shows your recent
+searches under <strong>Recent</strong>. Pick one with <code>↓</code> and <code>Enter</code>, or a click, to
+put it back in the box and search again. Nothing is added until you pick
+a match.</li>
+<li><strong>While typing:</strong> recent searches that start with (or contain) the text
+come first, marked with a clock, above the archiver's matches. <code>Enter</code>
+still adds the first match; move up to a recent search to use it. So
+typing <code>BL16I</code> offers <code>BL16I-EA-*</code> from yesterday.</li>
+<li>Hover a recent search and click its ✕ to forget it, or choose
+<strong>Clear search history</strong> in the ≡ menu to forget them all.</li>
+</ul>
 <h2 id="add-a-pv-the-archiver-doesnt-know"><a class="header" href="#add-a-pv-the-archiver-doesnt-know">Add a PV the archiver doesn't know</a></h2>
 <p>Type the full name: as well as any archived matches, the list ends with an
 <strong>Add "…" as typed</strong> row. Highlight it with <code>↓</code> (or click it) and press
@@ -705,6 +730,12 @@ root one) and, while following now, at the pace the time axis scrolls.</li>
 records the archiver in use; <code>set_view</code> switches to it only with archiver
 switching on.
 <code>plot.is_loading()</code> is true while archive requests are in flight.</p>
+<p>The search box remembers recent searches in memory only. To keep them
+across runs, as the standalone app does in <code>history.json</code>, give the plot
+the saved list with <code>plot.set_search_history(history)</code> and save
+<code>plot.search_history()</code> (a <code>serde</code>-serialisable <code>SearchHistory</code>) whenever
+<code>plot.search_history_changed()</code> returns true. A host with several plots
+can share one list by passing it between them the same way.</p>
 <p>See the <a href="how-to/../reference/api.html">Rust API</a> for the full interface.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="build-from-source"><a class="header" href="#build-from-source">Build from source</a></h1>
 <p>You need a stable Rust toolchain (<a href="https://rustup.rs">rustup</a>).</p>
@@ -945,7 +976,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <div style="break-before: page; page-break-before: always;"></div><h1 id="gestures-and-keys"><a class="header" href="#gestures-and-keys">Gestures and keys</a></h1>
 <h2 id="the-bar"><a class="header" href="#the-bar">The bar</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>control</th><th>what it does</th></tr></thead><tbody>
-<tr><td>search box</td><td>find archived PVs as you type; Enter adds. See <a href="reference/../how-to/search.html">Find and add PVs</a></td></tr>
+<tr><td>search box</td><td>find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. See <a href="reference/../how-to/search.html">Find and add PVs</a></td></tr>
 <tr><td><code>.*</code> (in the search box, shown while it has the focus)</td><td>search with a regular expression instead of a glob</td></tr>
 <tr><td>✕ (in the search box)</td><td>clear it</td></tr>
 <tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
@@ -954,7 +985,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="reference/../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale the value axis</td></tr>
 <tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
-<tr><td><strong>≡</strong></td><td>Log scale; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
+<tr><td><strong>≡</strong></td><td>Log scale, Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
 </tbody></table>
 </div>
 <p>In a narrow window the presets become a drop-down, the archiver pill shows
@@ -988,7 +1019,7 @@ the last archive request failed. Hover a chip for details.</p>
 <p>These work whenever no text box has the focus.</p>
 <div class="table-wrapper"><table><thead><tr><th>key</th><th>effect</th></tr></thead><tbody>
 <tr><td><code>/</code></td><td>focus the search box</td></tr>
-<tr><td><code>Esc</code></td><td>close the search list or popover; clear the search box</td></tr>
+<tr><td><code>Esc</code></td><td>close the search list or popover; again, clear the search box</td></tr>
 <tr><td><code>←</code> <code>→</code></td><td>pan by a tenth of the span</td></tr>
 <tr><td><code>+</code> (or <code>=</code>) <code>-</code></td><td>zoom time in and out about the middle</td></tr>
 <tr><td><code>L</code></td><td>follow now, or stop following</td></tr>
@@ -996,7 +1027,8 @@ the last archive request failed. Hover a chip for details.</p>
 <tr><td><code>Home</code></td><td>reset</td></tr>
 </tbody></table>
 </div>
-<p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds.</p>
+<p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds (or, on a recent search,
+searches for it again).</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="environment-variables"><a class="header" href="#environment-variables">Environment variables</a></h1>
 <div class="table-wrapper"><table><thead><tr><th>variable</th><th>used by</th><th>meaning</th></tr></thead><tbody>
 <tr><td><code>ARCHIVEVIEW_LOG</code></td><td>archiveview</td><td>log level on stderr: <code>error</code>, <code>warn</code> (default), <code>info</code>, <code>debug</code> or <code>trace</code>. Below <code>debug</code>, the egui, eframe, winit and EPICS libraries log warnings only.</td></tr>
@@ -1014,6 +1046,7 @@ remembered in <code>settings.json</code>) or the archiver pill.</p>
 <code>XDG_CONFIG_HOME</code> is set, otherwise <code>~/.config/archiveview</code>:</p>
 <pre><code>~/.config/archiveview/
 ├── settings.json
+├── history.json
 └── views/
     ├── default.json
     └── beam.json
@@ -1044,6 +1077,25 @@ saved over until it is fixed.</p>
 </div>
 <p>A missing or unreadable <code>settings.json</code> gives the defaults (an unreadable
 one logs a warning).</p>
+<h2 id="historyjson"><a class="header" href="#historyjson">history.json</a></h2>
+<p>The search box's <a href="reference/../how-to/search.html#reuse-a-recent-search">recent searches</a>,
+newest first, saved each time they change:</p>
+<pre><code class="language-json">{
+  "searches": [
+    { "text": "BL16I-EA-*" },
+    { "text": "SR01C-DI-EBPM-01:SA:.*", "regex": true }
+  ]
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>searches[].text</code></td><td>the text as typed</td></tr>
+<tr><td><code>searches[].regex</code></td><td><code>true</code> when the <code>.*</code> toggle was on; default <code>false</code></td></tr>
+</tbody></table>
+</div>
+<p>At most 50 are kept. A missing or unreadable file means no recent searches
+(an unreadable one logs a warning, and is replaced the next time a search
+is remembered). Delete it, or use <strong>Clear search history</strong> in the ≡ menu,
+to forget them.</p>
 <h2 id="viewsnamejson"><a class="header" href="#viewsnamejson">views/NAME.json</a></h2>
 <pre><code class="language-json">{
   "version": 1,

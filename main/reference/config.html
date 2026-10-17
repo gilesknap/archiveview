@@ -186,6 +186,7 @@
 <code>XDG_CONFIG_HOME</code> is set, otherwise <code>~/.config/archiveview</code>:</p>
 <pre><code>~/.config/archiveview/
 ├── settings.json
+├── history.json
 └── views/
     ├── default.json
     └── beam.json
@@ -216,6 +217,25 @@ saved over until it is fixed.</p>
 </div>
 <p>A missing or unreadable <code>settings.json</code> gives the defaults (an unreadable
 one logs a warning).</p>
+<h2 id="historyjson"><a class="header" href="#historyjson">history.json</a></h2>
+<p>The search box's <a href="../how-to/search.html#reuse-a-recent-search">recent searches</a>,
+newest first, saved each time they change:</p>
+<pre><code class="language-json">{
+  "searches": [
+    { "text": "BL16I-EA-*" },
+    { "text": "SR01C-DI-EBPM-01:SA:.*", "regex": true }
+  ]
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>searches[].text</code></td><td>the text as typed</td></tr>
+<tr><td><code>searches[].regex</code></td><td><code>true</code> when the <code>.*</code> toggle was on; default <code>false</code></td></tr>
+</tbody></table>
+</div>
+<p>At most 50 are kept. A missing or unreadable file means no recent searches
+(an unreadable one logs a warning, and is replaced the next time a search
+is remembered). Delete it, or use <strong>Clear search history</strong> in the ≡ menu,
+to forget them.</p>
 <h2 id="viewsnamejson"><a class="header" href="#viewsnamejson">views/NAME.json</a></h2>
 <pre><code class="language-json">{
   "version": 1,

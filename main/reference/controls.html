@@ -184,7 +184,7 @@
                         <h1 id="gestures-and-keys"><a class="header" href="#gestures-and-keys">Gestures and keys</a></h1>
 <h2 id="the-bar"><a class="header" href="#the-bar">The bar</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>control</th><th>what it does</th></tr></thead><tbody>
-<tr><td>search box</td><td>find archived PVs as you type; Enter adds. See <a href="../how-to/search.html">Find and add PVs</a></td></tr>
+<tr><td>search box</td><td>find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. See <a href="../how-to/search.html">Find and add PVs</a></td></tr>
 <tr><td><code>.*</code> (in the search box, shown while it has the focus)</td><td>search with a regular expression instead of a glob</td></tr>
 <tr><td>✕ (in the search box)</td><td>clear it</td></tr>
 <tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
@@ -193,7 +193,7 @@
 <tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale the value axis</td></tr>
 <tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
-<tr><td><strong>≡</strong></td><td>Log scale; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
+<tr><td><strong>≡</strong></td><td>Log scale, Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
 </tbody></table>
 </div>
 <p>In a narrow window the presets become a drop-down, the archiver pill shows
@@ -227,7 +227,7 @@ the last archive request failed. Hover a chip for details.</p>
 <p>These work whenever no text box has the focus.</p>
 <div class="table-wrapper"><table><thead><tr><th>key</th><th>effect</th></tr></thead><tbody>
 <tr><td><code>/</code></td><td>focus the search box</td></tr>
-<tr><td><code>Esc</code></td><td>close the search list or popover; clear the search box</td></tr>
+<tr><td><code>Esc</code></td><td>close the search list or popover; again, clear the search box</td></tr>
 <tr><td><code>←</code> <code>→</code></td><td>pan by a tenth of the span</td></tr>
 <tr><td><code>+</code> (or <code>=</code>) <code>-</code></td><td>zoom time in and out about the middle</td></tr>
 <tr><td><code>L</code></td><td>follow now, or stop following</td></tr>
@@ -235,7 +235,8 @@ the last archive request failed. Hover a chip for details.</p>
 <tr><td><code>Home</code></td><td>reset</td></tr>
 </tbody></table>
 </div>
-<p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds.</p>
+<p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds (or, on a recent search,
+searches for it again).</p>
 
                     </main>
 

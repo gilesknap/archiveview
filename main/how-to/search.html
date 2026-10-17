@@ -186,12 +186,19 @@
 <p>Press <code>/</code>, or click the search box at the left of the bar, and type part of
 a name. After a short pause the box lists the archiver's matching PVs:</p>
 <ul>
-<li>The first row is highlighted: <code>↑</code>/<code>↓</code> move through the list, <code>Enter</code> adds
-the highlighted row, and a click adds the one clicked.</li>
-<li>A PV whose name is exactly what you typed is always the first row, so
+<li>The first match is highlighted: <code>↑</code>/<code>↓</code> move through the list, <code>Enter</code>
+adds the highlighted row, and a click adds the one clicked.</li>
+<li>A PV whose name is exactly what you typed is always the first match, so
 typing a full name and pressing <code>Enter</code> adds that PV, even when other
 names containing it sort before it.</li>
-<li><code>Esc</code> closes the list, and a second <code>Esc</code> clears the box.</li>
+<li>Adding a PV keeps the text and the list, so you can add several from one
+search: <code>↓</code>, <code>Enter</code>, <code>↓</code>, <code>Enter</code>, ... PVs already on the plot are
+dimmed with a ✓, and picking one again does nothing.</li>
+<li><code>Esc</code> closes the list and keeps the text (<code>↓</code> or a click brings the list back); a
+second <code>Esc</code>, or the ✕ in the box, clears it. A click elsewhere closes
+the list and keeps the text.</li>
+<li>Coming back to the box (a click, or <code>/</code>) selects its text, so typing
+starts a new search; press <code>→</code> or <code>End</code> to edit the old one instead.</li>
 </ul>
 <div class="table-wrapper"><table><thead><tr><th>you type</th><th>archiver is asked for (regex)</th><th>matches</th></tr></thead><tbody>
 <tr><td><code>dcct</code></td><td><code>(?i).*dcct.*</code></td><td>any name containing <code>dcct</code>, in any case (<code>SR-DI-DCCT-01:SIGNAL</code>)</td></tr>
@@ -207,6 +214,24 @@ other character stands for itself.</p>
 instead. It must match the <strong>whole</strong> name: <code>SR-DI</code> matches nothing, while
 <code>SR-DI.*</code> works. Start it with <code>(?i)</code> to ignore case.</p>
 <p>The list shows the first 50 matches; type more of the name to narrow it.</p>
+<h2 id="reuse-a-recent-search"><a class="header" href="#reuse-a-recent-search">Reuse a recent search</a></h2>
+<p>archiveview remembers a search once you add a PV from it (typos and
+half-typed names are not kept), with its <code>.*</code> setting. It keeps the last
+50, in <code>history.json</code> in the <a href="../reference/config.html">config directory</a>, so
+they survive a restart. Plain text that differs only in case (<code>bl16i</code>,
+<code>BL16I</code>) is one search, kept as you last typed it.</p>
+<ul>
+<li><strong>Click the empty box, or press <code>/</code>:</strong> the list shows your recent
+searches under <strong>Recent</strong>. Pick one with <code>↓</code> and <code>Enter</code>, or a click, to
+put it back in the box and search again. Nothing is added until you pick
+a match.</li>
+<li><strong>While typing:</strong> recent searches that start with (or contain) the text
+come first, marked with a clock, above the archiver's matches. <code>Enter</code>
+still adds the first match; move up to a recent search to use it. So
+typing <code>BL16I</code> offers <code>BL16I-EA-*</code> from yesterday.</li>
+<li>Hover a recent search and click its ✕ to forget it, or choose
+<strong>Clear search history</strong> in the ≡ menu to forget them all.</li>
+</ul>
 <h2 id="add-a-pv-the-archiver-doesnt-know"><a class="header" href="#add-a-pv-the-archiver-doesnt-know">Add a PV the archiver doesn't know</a></h2>
 <p>Type the full name: as well as any archived matches, the list ends with an
 <strong>Add "…" as typed</strong> row. Highlight it with <code>↓</code> (or click it) and press

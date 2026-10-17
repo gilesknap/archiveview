@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DEFAULT_VIEW","MAX_RECENT_ARCHIVERS"],"enum":["Theme"],"fn":["config_dir","delete_view","list_views","load_view","save_view","valid_name","view_exists"],"struct":["Settings"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_VIEW","MAX_RECENT_ARCHIVERS"],"enum":["Theme"],"fn":["config_dir","delete_view","list_views","load_history","load_view","save_history","save_view","valid_name","view_exists"],"struct":["Settings"]};
