@@ -54,11 +54,14 @@ most 4000). The appliance then decides:
 So the amount of data sent is bounded by the plot's width, not the time
 range: a week of a 10 Hz PV costs the same as an hour.
 
-Waveforms, strings and enums are fetched raw (an enum's index). Array
-(waveform) PVs are not plotted: a line of one element over time says little
-about a waveform, so their chip shows the latest array instead, and a
-waveform's history is fetched once, only to tell that it is archived. The plot asks the archiver's `getMetadata` once
-per PV to learn its type, and falls back to the shape of the first response.
+Strings and enums are fetched raw (an enum's index). The plot asks the
+archiver's `getMetadata` once per PV to learn its type, and falls back to
+the shape of the first response.
+
+Array (waveform) PVs are not plotted: a line of one element over time says
+little about a waveform, so their chip shows the latest array instead. When
+the metadata says a PV is an array, no data is fetched at all; without
+metadata, the first response tells, and its samples are dropped.
 
 ### Joining live values
 

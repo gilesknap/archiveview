@@ -132,8 +132,8 @@ Traces:
 - Raw samples are drawn as steps: the value holds until the next sample, matching archiver semantics.
 - The archive's first sample may be before `from`, and is drawn held from the left edge.
 - Binned samples are drawn as a mean line with a translucent min..max **envelope** (band) in the trace colour: fill alpha 0.22 for one band, divided by the number of visible traces with bands (not below 0.07), so overlapping bands stay light and their blend stays near the chips' colours.
-- Every band is drawn before every line, so a busy PV's band never hides another trace's line.
-- Arrays (waveforms) are **not plotted**: element 0 over time says little about a waveform. Their chip shows the latest array (`[936] 0, 0, 0, …`) with a "not plotted" mark, the crosshair card leaves them out, and an archived waveform's history is fetched once only, to tell that it is archived.
+- Every band is drawn before every line, so a busy PV's band never hides another trace's line. Bands still blend where they overlap, and a line can still lie on another with the same values: hovering a chip is the way to read one trace (below).
+- Arrays (waveforms) are **not plotted**: element 0 over time says little about a waveform. Their chip shows the latest array (`[936] 0, 0, 0, …`) with a "not plotted" mark, the crosshair card leaves them out, and its history is not fetched: when `getMetadata` gives more than one element the plot asks for no data, and otherwise drops the samples of a first response that turns out to be a waveform. A channel is an array once the `pv` crate gives it an array value (it does exactly when NELM > 1, however many elements it holds now) or the archive calls it a waveform, and stays one.
 - Gaps (NaN, or severity INVALID with `cnxlostepsecs`) break the line.
 
 Decimation:
@@ -205,7 +205,7 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 - Each chip is a pill with a colour dot, the PV name (without `ca://` or `<type>`), the latest value and EGU in tabular figures, and an ✕ that appears on hover. A value is cut with "…" to 32 characters and to what fits the window; an array shows its length and first three elements.
 - Quiet marks after the value say why a trace has no line or no history: "not plotted" (an array), "live only" (not archived), "no data", "text". A `!` in place of the ✕ means the last archive request failed; the tooltip has the error.
 - Click toggles visibility: a hidden trace's chip is greyed with a hollow dot.
-- Hovering a chip highlights its trace (thicker line, drawn on top, its band at full strength) and dims the others to 25% alpha, without their bands.
+- Hovering a chip highlights its trace (thicker line, drawn on top, its band at full strength) and dims the others to 25% alpha, without their bands. An array's chip picks out nothing (it has no line).
 - A disconnected trace's value shows a grey "—" and the chip's tooltip says why.
 - While a trace is fetching, a small spinner replaces the dot.
 

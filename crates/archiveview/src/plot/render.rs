@@ -204,7 +204,8 @@ pub struct Line<'a> {
     pub width: f32,
     /// Its value axis (an index into the frame's axes).
     pub axis: usize,
-    /// The opacity of its min..max band, from [`band_alpha`] (0: none).
+    /// The opacity of its min..max band, from [`band_alpha`]; 0 for none,
+    /// as for a trace with no bins.
     pub band: f32,
 }
 
@@ -373,6 +374,9 @@ pub fn now_marker(painter: &egui::Painter, f: &Frame, now: f64, v: &egui::Visual
 
 /// Draw `line`'s min..max band (`band`), or its value line.
 fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line, band: bool) {
+    if band && line.band <= 0.0 {
+        return;
+    }
     let ys = f.scale(line.axis);
     let ok = |v: f64| v.is_finite() && (!ys.log || v > 0.0);
     // Far-off points are pulled in so the maths stays finite.
@@ -384,7 +388,7 @@ fn draw_line(painter: &egui::Painter, f: &Frame, line: &Line, band: bool) {
     let pts = hold_to_gaps(line.pts, ok);
     for run in pts.split(|p| !ok(p.v)).filter(|r| !r.is_empty()) {
         // The min..max envelope of bins, as quads between neighbours.
-        if band && line.band > 0.0 && run.iter().any(Pt::is_bin) {
+        if band && run.iter().any(Pt::is_bin) {
             let fill = line.color.gamma_multiply(line.band);
             let mut mesh = Mesh::default();
             // One (x, lo, hi) per pixel column: quads narrower than a pixel

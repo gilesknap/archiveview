@@ -164,16 +164,23 @@ impl Fetcher {
                 Some(i) if !i.binnable() => (Operator::Raw, job.raw_from.max(job.from)),
                 _ => (job.op, job.from),
             };
-            let result = client
-                .get_data(&Query::new(&job.pv, from, job.to, op))
-                .map_err(|e| {
-                    log::debug!("{}: {e}", job.pv);
-                    if e.is_not_archived() {
-                        check_404(&client, &job.pv, e)
-                    } else {
-                        e
-                    }
-                });
+            // An array is not plotted: the metadata says it is archived,
+            // and that is all the plot needs. A day of a busy waveform
+            // could be gigabytes.
+            let result = if let Some(series) = info.as_ref().and_then(|i| array_series(&job.pv, i))
+            {
+                Ok(Some(series))
+            } else {
+                client.get_data(&Query::new(&job.pv, from, job.to, op))
+            };
+            let result = result.map_err(|e| {
+                log::debug!("{}: {e}", job.pv);
+                if e.is_not_archived() {
+                    check_404(&client, &job.pv, e)
+                } else {
+                    e
+                }
+            });
             inbox.lock().push(Done {
                 trace: job.trace,
                 generation: job.generation,
@@ -354,6 +361,24 @@ pub fn covers(got: (f64, f64), binned: bool, from: f64, to: f64) -> bool {
     let inside = a <= from && b >= to;
     let fine_enough = !binned || (to - from) / (b - a) >= 0.35;
     inside && fine_enough
+}
+
+/// For an array PV (more than one element, by its metadata): an empty
+/// waveform series standing for its history, which is not fetched.
+fn array_series(pv: &str, info: &PvInfo) -> Option<TimeSeries> {
+    info.element_count
+        .is_some_and(|n| n > 1)
+        .then(|| TimeSeries {
+            meta: archiver::Meta {
+                name: pv.to_string(),
+                egu: info.units.clone(),
+                prec: info.precision,
+                ..Default::default()
+            },
+            kind: archiver::ValueKind::Waveform,
+            binned: false,
+            samples: Vec::new(),
+        })
 }
 
 #[cfg(test)]

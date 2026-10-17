@@ -67,6 +67,11 @@ static NEXT_PLOT: AtomicU64 = AtomicU64::new(0);
 /// unsubscribes and abandons in-flight fetches. Its only shared state is
 /// the counter [`Plot::new`] salts ids with, so any number may exist at
 /// once.
+///
+/// Array (waveform) PVs are not plotted: their chip shows the latest array
+/// (`[936] 0, 0, 0, …`) and says "not plotted", and their history is not
+/// fetched. (Earlier builds plotted element 0 over time; a host such as
+/// bobview that wants a waveform's elements should show them itself.)
 pub struct Plot {
     pvs: PvManager,
     archiver: Option<ArchiverClient>,
@@ -107,6 +112,9 @@ pub struct Plot {
     drag: Option<Drag>,
     /// The trace whose chip is hovered: drawn bold, the others dimmed.
     highlight: Option<u64>,
+    /// The chips as last laid out: (trace, rect, value shown).
+    #[cfg(test)]
+    chips_shown: Vec<(u64, Rect, String)>,
     /// Keyboard shortcuts apply: the plot was clicked last.
     active: bool,
     search: bar::SearchState,
@@ -194,6 +202,8 @@ impl Plot {
             glide: 0.0,
             drag: None,
             highlight: None,
+            #[cfg(test)]
+            chips_shown: Vec::new(),
             active: false,
             search: bar::SearchState::default(),
             custom: bar::CustomState::default(),
@@ -394,6 +404,10 @@ impl Plot {
             ui.allocate_exact_size(Vec2::new(width, plot_h), Sense::click_and_drag());
         ui.add_space(gap);
         legend::interact(self, ui, &mut chips);
+        #[cfg(test)]
+        {
+            self.chips_shown = chips.shown();
+        }
 
         // Kinetic panning after a drag.
         if self.glide != 0.0 && self.drag.is_none() {
@@ -429,8 +443,9 @@ impl Plot {
 
         // Paint. Bands are lighter the more traces have one; a picked-out
         // trace keeps its band, the others lose theirs.
-        let bands = (self.traces.iter().zip(&data))
-            .filter(|(t, pts)| t.visible && pts.iter().any(Pt::is_bin))
+        let binned: Vec<bool> = data.iter().map(|pts| pts.iter().any(Pt::is_bin)).collect();
+        let bands = (self.traces.iter().zip(&binned))
+            .filter(|(t, b)| t.visible && **b)
             .count();
         let lines: Vec<render::Line> = self
             .paint_order()
@@ -443,6 +458,7 @@ impl Plot {
                     Some(_) => (color.gamma_multiply(0.25), 1.5, 0.0),
                     None => (color, 1.5, render::band_alpha(bands)),
                 };
+                let band = if binned[i] { band } else { 0.0 };
                 render::Line {
                     pts: &data[i],
                     color,
@@ -708,12 +724,18 @@ impl Plot {
                     } else {
                         series.meta
                     };
+                    // An array's samples are not plotted: knowing it is
+                    // archived is enough, so they are not kept.
+                    let mut samples = series.samples;
+                    if series.kind == ValueKind::Waveform {
+                        samples = Vec::new();
+                    }
                     t.history = Some(History {
                         to: done.to,
                         binned: series.binned,
                         kind: series.kind,
                         meta,
-                        samples: series.samples,
+                        samples,
                     });
                     t.fetch.error = None;
                 }
@@ -1235,14 +1257,45 @@ mod tests {
         p.add_pvs(&names(&["sim://sine", "sim://ramp", "sim://noise"]));
         let mut h = Harness::new(p);
         assert_eq!(h.plot.paint_order(), [0, 1, 2]);
-        // The chips hug the bottom; the first is on the left.
-        h.frame(vec![egui::Event::PointerMoved(Pos2::new(30.0, 587.0))]);
+        let (id, rect, _) = h.plot.chips_shown[0].clone();
+        assert_eq!(id, h.plot.traces[0].id);
+        h.frame(vec![egui::Event::PointerMoved(rect.center())]);
         h.frame(vec![]);
         assert_eq!(h.plot.highlight, Some(h.plot.traces[0].id));
         assert_eq!(h.plot.paint_order(), [1, 2, 0]);
         // A hidden trace is not drawn at all.
         h.plot.traces[1].visible = false;
         assert_eq!(h.plot.paint_order(), [2, 0]);
+    }
+
+    #[test]
+    fn every_chip_fits_the_legend() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        let long = "a long status message that goes on ".repeat(8);
+        p.add_pvs(&names(&[
+            &format!("loc://status<VString>(\"{}\")", long.trim()),
+            "loc://wave<VDoubleArray>(1.5, 2, 3, 4, 5)",
+            "sim://sine",
+        ]));
+        let mut h = Harness::new(p);
+        h.frame(vec![]);
+        let chips = h.plot.chips_shown.clone();
+        assert_eq!(chips.len(), 3);
+        let width = 1000.0;
+        for (_, rect, _) in &chips {
+            assert!(rect.width() <= width, "{rect:?}");
+        }
+        // The text cut short to fit, the array shown compactly.
+        assert!(chips[0].2.ends_with('…'), "{}", chips[0].2);
+        assert!(chips[0].2.len() < long.len());
+        assert!(chips[1].2.starts_with("[5] 1.5, 2"), "{}", chips[1].2);
+        assert!(h.plot.traces[1].is_array());
+        assert!(h.plot.traces[1].points(0.0, now(), now()).is_empty());
+        // An array's chip picks out nothing: it has no line.
+        h.frame(vec![egui::Event::PointerMoved(chips[1].1.center())]);
+        h.frame(vec![]);
+        assert_eq!(h.plot.highlight, None);
     }
 
     #[test]
@@ -1444,7 +1497,12 @@ mod tests {
         assert!(t[0].fetch.error.is_none());
         assert_eq!(t[1].fetch.raw_only, Some(true));
         assert!(t[1].history.as_ref().is_some_and(|h| !h.binned));
-        // Archived, but an array: not plotted.
+        // Archived, but an array: known from its metadata, its samples
+        // neither fetched nor kept, and not plotted.
+        let wave = t[1].history.as_ref().unwrap();
+        assert_eq!(wave.kind, ValueKind::Waveform);
+        assert!(wave.samples.is_empty());
+        assert!(t[1].is_array());
         assert!(
             t[1].points(f64::NEG_INFINITY, f64::INFINITY, now())
                 .is_empty()
@@ -1455,6 +1513,30 @@ mod tests {
         let enum_hist = t[3].history.as_ref().expect("enum history");
         assert!(!enum_hist.binned);
         assert!(enum_hist.samples.iter().all(|s| s.val.fract() == 0.0));
+    }
+
+    #[test]
+    fn the_raw_history_hint_leaves_out_arrays() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.set_range(&view::Range::Relative {
+            secs: 2.0 * 86_400.0,
+        });
+        p.add_pvs(&names(&["MOCK:WAVE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        assert_eq!(h.plot.traces[0].fetch.raw_only, Some(true));
+        assert!(
+            hover::raw_capped(&h.plot).is_none(),
+            "an array is not plotted"
+        );
+        // An enum is fetched raw and plotted: its history is cut.
+        h.plot.add_pvs(&names(&["MOCK:ENUM"]));
+        h.until(|p| !p.is_loading());
+        let capped = hover::raw_capped(&h.plot).map(|t| t.label());
+        assert_eq!(capped.as_deref(), Some("MOCK:ENUM"));
     }
 
     #[test]

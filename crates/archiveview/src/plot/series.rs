@@ -7,6 +7,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use archiver::{Meta, Operator, Sample, ValueKind};
 use parking_lot::Mutex;
@@ -59,26 +60,36 @@ impl Samples {
     }
 }
 
-/// Whether `v` is an array of more than one number. Arrays are not
-/// plotted: a time plot of element 0 says little about a waveform, and
-/// its chip shows the array instead.
+/// Whether `v` is an array. The `pv` crate gives an array type exactly
+/// when the channel has more than one element (NELM > 1 over CA, a
+/// scalar array over PVA), however many it holds now, so this is a
+/// property of the channel, not of one update.
 pub fn is_array(v: &pv::Value) -> bool {
-    match v {
-        pv::Value::DoubleArray(a) => a.len() > 1,
-        pv::Value::LongArray(a) => a.len() > 1,
-        _ => false,
+    matches!(
+        v,
+        pv::Value::DoubleArray(_) | pv::Value::LongArray(_) | pv::Value::StrArray(_)
+    )
+}
+
+/// What a PV update adds to the live samples, as [`sample`], noting in
+/// `array` (for good) when the channel turns out to be an array: an
+/// array's live samples are never kept.
+fn observe(array: &AtomicBool, s: &PvState, arrived: f64) -> Option<(f64, f64)> {
+    if is_array(&s.value) {
+        array.store(true, Ordering::Relaxed);
     }
+    if array.load(Ordering::Relaxed) {
+        return None;
+    }
+    sample(s, arrived)
 }
 
 /// What a PV update adds to the live samples: its value at its IOC time,
 /// a gap (at arrival time) if it disconnected, or nothing if it has no
-/// number (or is an array).
+/// number.
 fn sample(s: &PvState, arrived: f64) -> Option<(f64, f64)> {
     if !s.connected {
         return Some((arrived, f64::NAN));
-    }
-    if is_array(&s.value) {
-        return None;
     }
     let v = s.value.as_f64()?;
     let t = s
@@ -158,6 +169,8 @@ pub struct Trace {
     /// Locked by the listener while the PV's state is locked, so never
     /// read `pv.state()` while holding this lock.
     live: Arc<Mutex<Samples>>,
+    /// The channel is an array (seen live): not plotted.
+    array: Arc<AtomicBool>,
     _listener: Listener,
     /// A colour the view asked for, as `#rrggbb`.
     pub color: Option<String>,
@@ -172,8 +185,10 @@ impl Trace {
     pub fn new(id: u64, name: &str, pv: Pv) -> Self {
         let live = Arc::new(Mutex::new(Samples::default()));
         let into = live.clone();
+        let array = Arc::new(AtomicBool::new(false));
+        let is_array = array.clone();
         let listener: Listener = Arc::new(move |s: &PvState| {
-            if let Some((t, v)) = sample(s, now()) {
+            if let Some((t, v)) = observe(&is_array, s, now()) {
                 into.lock().push(t, v);
             }
         });
@@ -183,6 +198,7 @@ impl Trace {
             name: name.to_string(),
             pv,
             live,
+            array,
             _listener: listener,
             color: None,
             slot: 0,
@@ -200,10 +216,10 @@ impl Trace {
         matches!(name.scheme, pv::Scheme::Ca | pv::Scheme::Pva).then(|| name.pv.clone())
     }
 
-    /// An array PV, known from its live value or its archived samples:
-    /// not plotted.
-    pub fn is_array(&self, state: &PvState) -> bool {
-        is_array(&state.value)
+    /// An array PV, known from its live channel or from the archive (a
+    /// waveform there, even when it held one element): not plotted.
+    pub fn is_array(&self) -> bool {
+        self.array.load(Ordering::Relaxed)
             || self
                 .history
                 .as_ref()
@@ -221,11 +237,12 @@ impl Trace {
     pub fn points(&self, from: f64, to: f64, now: f64) -> Vec<Pt> {
         // Copied out before the PV's state is read: an update holds that
         // lock while it adds a sample.
+        if self.is_array() {
+            return Vec::new();
+        }
         let live: Vec<(f64, f64)> = self.live.lock().since(from).collect();
         let connected = self.pv.connected();
         let (hist, binned, hist_to): (&[Sample], bool, f64) = match &self.history {
-            // Arrays are not plotted.
-            Some(h) if h.kind == ValueKind::Waveform => return Vec::new(),
             Some(h) => (&h.samples, h.binned, h.to),
             None => (&[], false, f64::NEG_INFINITY),
         };
@@ -447,15 +464,22 @@ mod tests {
             value,
             ..Default::default()
         };
-        let wave = pv::Value::DoubleArray(vec![1.0, 2.0, 3.0].into());
-        assert!(is_array(&wave));
-        assert_eq!(sample(&state(wave), 5e9), None);
-        // One element is a value like any other.
-        let one = pv::Value::LongArray(vec![7].into());
-        assert!(!is_array(&one));
-        assert_eq!(sample(&state(one), 5e9), Some((5e9, 7.0)));
-        // Disconnecting still makes a gap.
-        assert!(sample(&PvState::default(), 5e9).unwrap().1.is_nan());
+        let array = AtomicBool::new(false);
+        // A scalar channel: its values are kept.
+        let scalar = state(pv::Value::Double(1.0));
+        assert_eq!(observe(&array, &scalar, 5e9), Some((5e9, 1.0)));
+        assert!(!array.load(Ordering::Relaxed));
+        // A variable-length array, 1 element, then 3, then 1 again: an
+        // array throughout, never a sample (not even a stale element 0).
+        for n in [1, 3, 1] {
+            let wave = state(pv::Value::DoubleArray(vec![2.0; n].into()));
+            assert!(is_array(&wave.value));
+            assert_eq!(observe(&array, &wave, 5e9), None, "{n} elements");
+        }
+        assert!(array.load(Ordering::Relaxed));
+        // Once an array, always: a disconnect or a scalar adds nothing.
+        assert_eq!(observe(&array, &PvState::default(), 5e9), None);
+        assert_eq!(observe(&array, &scalar, 5e9), None);
     }
 
     #[test]

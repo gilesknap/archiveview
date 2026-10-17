@@ -36,6 +36,19 @@ struct Chip {
     /// Quiet words after the value: "live only", "no data".
     mark: Option<String>,
     note: String,
+    /// The value as shown, for tests.
+    #[cfg(test)]
+    text: String,
+}
+
+impl Chips {
+    /// Each chip's trace, rect on screen and value as shown.
+    #[cfg(test)]
+    pub fn shown(&self) -> Vec<(u64, Rect, String)> {
+        (self.chips.iter())
+            .map(|c| (c.trace, c.rect.translate(self.origin), c.text.clone()))
+            .collect()
+    }
 }
 
 impl Chip {
@@ -65,7 +78,7 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
         let state = t.pv.state();
         let prec = precision(t, &state);
         let egu = units(t);
-        let array = t.is_array(&state);
+        let array = t.is_array();
         let archived_last = t.history.as_ref().filter(|_| !array).and_then(|h| {
             h.samples
                 .iter()
@@ -74,7 +87,13 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
                 .map(|s| s.val)
         });
         let (value, current) = if state.connected && array {
-            (array_text(&state.value, prec), true)
+            // An array archived as a waveform may have one element live.
+            let text = array_text(&state.value, prec)
+                .unwrap_or_else(|| state.format(prec.map(|p| p as i32), true));
+            (text, true)
+        } else if state.connected && matches!(state.value, pv::Value::Str(_)) {
+            // Text: shown (cut short below), not plotted.
+            (state.format(None, false), true)
         } else if state.connected
             && let Some(v) = state.value.as_f64()
         {
@@ -108,13 +127,15 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             } else if let Some(e) = &t.fetch.error {
                 format!("Archive: {e}")
             } else if let Some(h) = &t.history {
-                if h.samples.is_empty() {
+                if h.kind == archiver::ValueKind::Waveform {
+                    "Archive: archived (an array: history not fetched)".to_string()
+                } else if h.samples.is_empty() {
                     "Archive: no data in range".to_string()
                 } else {
                     let what = match h.kind {
                         archiver::ValueKind::Scalar if h.binned => "bins (mean, min…max)",
                         archiver::ValueKind::Scalar => "samples",
-                        archiver::ValueKind::Waveform => "array samples (not plotted)",
+                        archiver::ValueKind::Waveform => "array samples",
                         archiver::ValueKind::Text => "text samples (not plotted)",
                         archiver::ValueKind::Other => "samples (not plottable)",
                     };
@@ -153,6 +174,8 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             width - rest,
         );
         let w = (rest + super::render::text_size(painter, &value, &font).x).min(width);
+        #[cfg(test)]
+        let text = value.clone();
         if x > 0.0 && x + w > width {
             x = 0.0;
             y += HEIGHT + GAP;
@@ -170,6 +193,8 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             },
             mark,
             note: note.join("\n"),
+            #[cfg(test)]
+            text,
         });
         x += w + GAP;
     }
@@ -225,8 +250,9 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         plot.traces.retain(|t| t.id != id);
         highlight = None;
     }
-    // Only a visible trace is picked out.
-    plot.highlight = highlight.filter(|id| plot.traces.iter().any(|t| t.id == *id && t.visible));
+    // Only a drawn trace is picked out: visible, and not an array.
+    plot.highlight = highlight
+        .filter(|id| (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array()));
 }
 
 /// The quiet words after a chip's value, saying why it has no line or no
@@ -246,13 +272,15 @@ fn marks(
     }
     if archiver && fetch.not_archived {
         marks.push("live only");
+    } else if array {
+        // Its history is not kept: nothing more to say.
     } else if no_value && let Some(h) = history {
         if h.samples.is_empty() {
             marks.push("no data");
         } else if h.kind == archiver::ValueKind::Text {
             // Archived, but nothing a plot can draw.
             marks.push("text");
-        } else if h.kind == archiver::ValueKind::Other && !array {
+        } else if h.kind == archiver::ValueKind::Other {
             marks.push("not plotted");
         }
     }
@@ -260,20 +288,25 @@ fn marks(
 }
 
 /// An array's value, short: its length and first few elements, as
-/// `[936] 0, 0, 0, …`.
-fn array_text(v: &pv::Value, prec: Option<usize>) -> String {
-    let all: Vec<f64> = match v {
-        pv::Value::DoubleArray(a) => a.to_vec(),
-        pv::Value::LongArray(a) => a.iter().map(|x| *x as f64).collect(),
-        _ => return String::new(),
+/// `[936] 0, 0, 0, …`. `None` for a value that is not an array.
+fn array_text(v: &pv::Value, prec: Option<usize>) -> Option<String> {
+    let num = |x: f64| format_value(x, prec, "");
+    let (len, mut parts): (usize, Vec<String>) = match v {
+        pv::Value::DoubleArray(a) => (
+            a.len(),
+            a.iter().take(ARRAY_SHOWN).map(|x| num(*x)).collect(),
+        ),
+        pv::Value::LongArray(a) => (
+            a.len(),
+            a.iter().take(ARRAY_SHOWN).map(|x| num(*x as f64)).collect(),
+        ),
+        pv::Value::StrArray(a) => (a.len(), a.iter().take(ARRAY_SHOWN).cloned().collect()),
+        _ => return None,
     };
-    let mut parts: Vec<String> = (all.iter().take(ARRAY_SHOWN))
-        .map(|x| format_value(*x, prec, ""))
-        .collect();
-    if all.len() > ARRAY_SHOWN {
+    if len > ARRAY_SHOWN {
         parts.push("…".into());
     }
-    format!("[{}] {}", all.len(), parts.join(", "))
+    Some(format!("[{len}] {}", parts.join(", ")))
 }
 
 /// `text` cut to `max` characters, the last an ellipsis.
@@ -285,15 +318,24 @@ fn ellipsize(text: &str, max: usize) -> String {
     format!("{}…", keep.trim_end())
 }
 
-/// `text` cut (with an ellipsis) to fit `width` points in `font`.
-fn fit(painter: &egui::Painter, text: &str, font: &FontId, width: f32) -> String {
-    let mut shown = text.to_string();
-    let mut keep = text.chars().count();
-    while keep > 1 && super::render::text_size(painter, &shown, font).x > width {
-        keep -= 1;
-        shown = ellipsize(text, keep);
+/// `text` cut (with an ellipsis) to fit `width` points in `font`: the
+/// most characters that fit, found by bisection. At least "…".
+pub(super) fn fit(painter: &egui::Painter, text: &str, font: &FontId, width: f32) -> String {
+    let fits = |s: &str| super::render::text_size(painter, s, font).x <= width;
+    if fits(text) {
+        return text.to_string();
     }
-    shown
+    // `lo` characters fit (one, the ellipsis, is the floor); `hi` don't.
+    let (mut lo, mut hi) = (1, text.chars().count());
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if fits(&ellipsize(text, mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    ellipsize(text, lo)
 }
 
 pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark: bool) {
@@ -418,12 +460,39 @@ mod tests {
     }
 
     #[test]
+    fn fit_keeps_the_most_that_fits() {
+        let ctx = egui::Context::default();
+        let text = "a long status message that goes on and on and on";
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter();
+            let size = |s: &str| super::super::render::text_size(painter, s, &font()).x;
+            assert_eq!(fit(painter, text, &font(), 1e4), text);
+            for width in [0.0, 20.0, 60.0, 150.0] {
+                let shown = fit(painter, text, &font(), width);
+                let n = shown.chars().count();
+                assert!(shown.ends_with('…'), "{shown}");
+                assert!(n == 1 || size(&shown) <= width, "{shown} in {width}");
+                // Nothing longer would fit.
+                let longest = (1..text.len())
+                    .map(|k| ellipsize(text, k))
+                    .filter(|s| size(s) <= width)
+                    .map(|s| s.chars().count())
+                    .max();
+                assert!(longest.is_none_or(|m| m <= n), "{shown} in {width}");
+            }
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
     fn arrays_show_their_length_and_first_elements() {
         let wave = pv::Value::DoubleArray(vec![0.0; 936].into());
-        assert_eq!(array_text(&wave, Some(0)), "[936] 0, 0, 0, …");
+        assert_eq!(array_text(&wave, Some(0)).unwrap(), "[936] 0, 0, 0, …");
         let short = pv::Value::LongArray(vec![1, 2].into());
-        assert_eq!(array_text(&short, Some(0)), "[2] 1, 2");
-        assert_eq!(array_text(&pv::Value::Double(1.0), None), "");
+        assert_eq!(array_text(&short, Some(0)).unwrap(), "[2] 1, 2");
+        let one = pv::Value::DoubleArray(vec![4.0].into());
+        assert_eq!(array_text(&one, Some(1)).unwrap(), "[1] 4.0");
+        assert_eq!(array_text(&pv::Value::Double(1.0), None), None);
     }
 
     #[test]
@@ -455,11 +524,14 @@ mod tests {
         let text = history(archiver::ValueKind::Text, 3);
         assert_eq!(marks(true, &fetch, Some(&text), false, true), ["text"]);
         // An archived array.
-        let wave = history(archiver::ValueKind::Waveform, 3);
-        assert_eq!(
-            marks(true, &fetch, Some(&wave), true, false),
-            ["not plotted"]
-        );
+        // An archived array (its samples not kept), connected or not.
+        let wave = history(archiver::ValueKind::Waveform, 0);
+        for no_value in [false, true] {
+            assert_eq!(
+                marks(true, &fetch, Some(&wave), true, no_value),
+                ["not plotted"]
+            );
+        }
         // An ordinary trace.
         let scalar = history(archiver::ValueKind::Scalar, 3);
         assert!(marks(true, &fetch, Some(&scalar), false, false).is_empty());
