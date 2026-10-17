@@ -488,8 +488,18 @@ list is in <a href="how-to/../reference/controls.html">Gestures and keys</a>.</p
 <h2 id="choose-a-time-range"><a class="header" href="#choose-a-time-range">Choose a time range</a></h2>
 <p>The pill in the bar holds the presets <strong>1h</strong>, <strong>8h</strong>, <strong>1d</strong> and <strong>7d</strong>. A
 preset shows that span ending now, following the current time.</p>
-<p>The <strong>⋯</strong> segment opens a small popover for anything else: type a span such
-as <code>90m</code>, <code>2 days</code> or <code>1 hour 30 min</code>, or give a start and an end date-time.</p>
+<p>The <strong>⋯</strong> segment opens a small popover for anything else. Its <strong>Last</strong>
+field has the keyboard, with the current span selected: type a span such as
+<code>90m</code>, <code>2 days</code> or <code>1 hour 30 min</code> and press Enter to show it ending now,
+following the current time. The chips beside the label, <strong>2h</strong>, <strong>12h</strong>,
+<strong>3d</strong> and <strong>30d</strong>, show those spans in one click.</p>
+<p>For a fixed range, fill in <strong>From</strong> and <strong>To</strong> as <code>YYYY-MM-DD HH:MM</code> (local
+time, seconds optional) and press Enter in either. Tab moves from From to To.
+An empty To, or <code>now</code>, means now, and the range then follows the current
+time.</p>
+<p>If a field can't be read, the error appears under it and the popover stays
+open to try again. Esc, or a click anywhere else, closes the popover without
+changing the range.</p>
 <p>When you have zoomed or panned away from a preset, no segment is lit and the
 pill shows the span you are looking at, such as <code>3h 20m</code>.</p>
 <h2 id="pan-and-zoom-time"><a class="header" href="#pan-and-zoom-time">Pan and zoom time</a></h2>
@@ -1054,7 +1064,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><code>.*</code> (in the search box, shown while it has the focus)</td><td>search with a regular expression instead of a glob</td></tr>
 <tr><td>✕ (in the search box)</td><td>clear it</td></tr>
 <tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
-<tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>) or a start and end date-time</td></tr>
+<tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>, or a 2h 12h 3d 30d chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See <a href="reference/../how-to/navigate.html#choose-a-time-range">Choose a time range</a></td></tr>
 <tr><td><strong>● Live</strong></td><td>red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow</td></tr>
 <tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="reference/../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale every value axis</td></tr>
