@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use archiver::{ArchiverClient, Error, Operator, Query, Search, Severity, ValueKind};
 use mockarchiver::MockArchiver;
+use mockarchiver::signals::NAN_CYCLE;
 
 fn now() -> f64 {
     SystemTime::now()
@@ -124,20 +125,23 @@ fn mean_and_nth() {
 #[test]
 fn nan_tokens_and_disconnects() {
     let (_mock, c) = setup();
-    let to = now();
+    // End on a disconnect cycle boundary, a cycle or two back: relative to
+    // now, a range could end inside a disconnect, cutting off its hole.
+    let cycle = NAN_CYCLE as f64;
+    let to = ((now() / cycle).floor() - 1.0) * cycle;
     let s = c
         .get_data(&Query::new("MOCK:NAN", to - 7200.0, to, Operator::Raw))
         .unwrap()
         .unwrap();
     let gaps = s.samples.iter().filter(|s| s.is_gap()).count();
-    // A NaN every 50 samples, plus 3-4 disconnects in two hours.
+    // A NaN every 50 samples, plus 4 disconnects in two hours.
     assert!(gaps > 100, "{gaps}");
     let lost: Vec<_> = s
         .samples
         .iter()
         .filter(|s| s.is_gap() && s.severity == Severity::Invalid && s.status == 9)
         .collect();
-    assert!((3..=4).contains(&lost.len()), "{}", lost.len());
+    assert_eq!(lost.len(), 4);
     // Each is followed by a 60 s hole.
     for g in lost {
         let next = s.samples.iter().find(|s| s.t > g.t).unwrap();
