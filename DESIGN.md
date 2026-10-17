@@ -346,7 +346,27 @@ then middle-click the plot.
   keyboard shortcuts apply. Pasted PVs go through one `add_pvs` call, as
   the search box's do.
 - **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace, commas
-  and semicolons, drop quotes and brackets around a word. A word can be a
+  and semicolons, but not inside the `(arguments)` of a word starting
+  `loc://` or `sim://` (`sim://sine(0, 10, 0.1)` is one word). A `(` not
+  closed on its line within 256 bytes is an ordinary character, and a word
+  whose `(` fails stops looking, so parsing stays linear in the selection
+  (it runs on the UI thread; an unbounded scan made 120 KB take 20 s).
+  Drop quotes and brackets around a word, and a leading `(`/`[` or
+  trailing `)`/`]` the word has one too many of, so a list in brackets
+  (`(SR:X, SR:Y)`) gives its names while `A:B[1]` keeps its own. The schemes are
+  those the host's `PvManager` serves, as `pv::PvName::parse` reads them
+  (a match on `pv::Scheme`, so a new one has to be decided on): `ca://`
+  and `pva://` (either case), and `loc://` and `sim://`, which bobview's
+  widgets copy and no archiver has (`Trace::archive_name` is `None`, so
+  nothing is asked of the archiver and they plot live only). Formulas
+  (`=expr`, `eq://expr`) are not taken: their spaces and operators cannot
+  be told from prose (right-click → Trend in bobview adds them). Other
+  schemes (`https://`, `sys://`) are not PVs. After `loc://` a record
+  name may be followed by a `<VType>` and then `(arguments)`, which end
+  it; after `sim://` it must be one of bobview-pv's functions
+  (`SIM_FUNCTIONS`: `sine`, `sawtooth`, `ramp`, `noise`, `gaussianNoise`,
+  `flipflop`, `const`, copied since pv does not export them), with no
+  `<VType>`, so a typo is not a trace stuck on "unknown simulated PV". A word can be a
   name if (after an optional `ca://`/`pva://`) it is only record-name
   characters (plus `{}` and `$`), has a letter, doesn't start with `-`/`+`
   (flags) or start or end with `.`/`:`, and, without a scheme, isn't a
