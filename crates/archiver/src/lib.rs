@@ -2,8 +2,9 @@
 //!
 //! The pieces are split so that a browser build could reuse everything but
 //! the HTTP: [`ArchiverClient`] builds the request URLs (`*_url`), the
-//! `parse_*` functions decode the bodies, and on native targets the
-//! blocking `get_data`/`search`/`metadata` methods do both over `ureq`.
+//! `parse_*` functions decode the bodies, and the blocking
+//! `get_data`/`search`/`metadata` methods do both over `ureq` on native
+//! targets. In a browser those methods fail at once.
 //!
 //! Times are UTC seconds since the Unix epoch as `f64` (sub-microsecond
 //! resolution for current dates), the same as bobview's trend and
@@ -23,10 +24,11 @@ mod http;
 /// No blocking HTTP in a browser: every request fails at once.
 #[cfg(target_arch = "wasm32")]
 impl ArchiverClient {
-    fn get(&self, url: &str) -> Result<String> {
+    fn get(&self, _url: &str) -> Result<String> {
         let _ = self.timeout_secs;
         Err(Error::Transport(format!(
-            "{url}: no blocking HTTP in a browser"
+            "{}: no blocking HTTP in a browser",
+            self.base()
         )))
     }
 }
