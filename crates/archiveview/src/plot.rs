@@ -2469,6 +2469,18 @@ mod tests {
         );
         h.frame(vec![]);
         assert_eq!(h.plot.take_search_selection(), None);
+
+        // Back in the box from elsewhere, a middle-click pastes where it
+        // lands (here past the end), not over the whole text as a primary
+        // click into the box selects it.
+        click_by(&mut h, egui::PointerButton::Primary, MIDDLE, &[]);
+        assert!(!h.ctx.memory(|m| m.has_focus(h.plot.id.with("search"))));
+        click_by(&mut h, egui::PointerButton::Middle, Pos2::new(300.0, 12.0), &[]);
+        assert_eq!(h.plot.take_middle_click(), Some(MiddleClick::Search));
+        assert_eq!(h.plot.take_search_selection(), None);
+        h.plot.paste_into_search("Y");
+        h.frame(vec![]);
+        assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNALXY");
     }
 
     #[test]
