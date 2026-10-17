@@ -256,8 +256,8 @@ fn run(cli: Cli) -> Result<(), Failure> {
             use raw_window_handle::HasDisplayHandle;
             let display = cc.display_handle().ok().map(|d| d.as_raw());
             // SAFETY: the app drops it in `on_exit`, before the window goes.
-            let selection = unsafe { archiveview::selection::SystemSelection::new(display) };
-            app.set_selection(Some(Box::new(selection)));
+            let selection = unsafe { archiveview::selection::system(display) };
+            app.set_selection(&cc.egui_ctx, Some(selection));
             Ok(Box::new(app))
         }),
     )

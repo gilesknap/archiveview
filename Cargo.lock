@@ -171,6 +171,8 @@ dependencies = [
  "serde",
  "serde_json",
  "smithay-clipboard",
+ "wayland-backend",
+ "wayland-client",
  "web-time",
 ]
 

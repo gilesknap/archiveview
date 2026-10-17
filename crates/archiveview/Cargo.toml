@@ -25,6 +25,8 @@ app = [
     "dep:clap",
     "dep:arboard",
     "dep:smithay-clipboard",
+    "dep:wayland-client",
+    "dep:wayland-backend",
     "dep:raw-window-handle",
 ]
 
@@ -49,9 +51,13 @@ clap = { version = "4.6.7", optional = true, features = ["derive", "wrap_help"] 
 arboard = { version = "3.6", optional = true, default-features = false }
 raw-window-handle = { version = "0.6.2", optional = true }
 
-# Wayland's primary selection, read as egui-winit reads its clipboard.
-[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android", target_os = "emscripten"))))'.dependencies]
+# Wayland's primary selection, read as egui-winit reads its clipboard (on
+# egui-winit's platforms), and a look at the compositor's globals for the
+# primary-selection protocol. All already built for egui-winit.
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 smithay-clipboard = { version = "0.7.2", optional = true }
+wayland-client = { version = "0.31", optional = true }
+wayland-backend = { version = "0.3", optional = true, features = ["client_system"] }
 
 [dev-dependencies]
 archiveview-mockarchiver = { path = "../mockarchiver" }
