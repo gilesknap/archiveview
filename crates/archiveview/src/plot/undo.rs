@@ -18,6 +18,7 @@
 use std::collections::VecDeque;
 
 use super::axes::Stats;
+use super::pane::Pane;
 use super::series::{Parked, Trace, plain_name};
 use super::window::Window;
 use super::{Plot, ValueAxis, now};
@@ -41,7 +42,7 @@ pub struct Snapshot {
     home_span: f64,
     default_log: bool,
     traces: Vec<TraceState>,
-    axes: Vec<ValueAxis>,
+    panes: Vec<PaneState>,
     /// The host's name for the view shown ([`Plot::set_view_name`]).
     view_name: Option<String>,
 }
@@ -51,9 +52,26 @@ impl Snapshot {
         self.traces.iter().find(|t| t.id == id)
     }
 
-    fn axis(&self, id: u32) -> Option<&ValueAxis> {
-        self.axes.iter().find(|a| a.id == id)
+    /// Every value axis, pane by pane.
+    fn axes(&self) -> impl Iterator<Item = &ValueAxis> {
+        self.panes.iter().flat_map(|p| &p.axes)
     }
+
+    fn axis(&self, id: u32) -> Option<&ValueAxis> {
+        self.axes().find(|a| a.id == id)
+    }
+
+    fn pane(&self, id: u32) -> Option<&PaneState> {
+        self.panes.iter().find(|p| p.id == id)
+    }
+}
+
+/// A pane, as a step keeps it.
+#[derive(Clone, Debug)]
+struct PaneState {
+    id: u32,
+    weight: f32,
+    axes: Vec<ValueAxis>,
 }
 
 /// A trace, as a step keeps it.
@@ -65,6 +83,7 @@ struct TraceState {
     slot: usize,
     visible: bool,
     axis: Option<u32>,
+    pane: Option<u32>,
     stats: Option<Stats>,
 }
 
@@ -113,9 +132,9 @@ pub struct Undo {
     /// Traces taken off the plot that a step may bring back, oldest
     /// first.
     parked: Vec<Parked>,
-    /// Each axis as it was when it first appeared, for steps that learn
-    /// of a trace settling on it later.
-    born: Vec<ValueAxis>,
+    /// Each axis as it was when it first appeared, and its pane, for
+    /// steps that learn of a trace settling on it later.
+    born: Vec<(u32, ValueAxis)>,
     /// Counts pointer and key presses, to keep a drag or a held key one
     /// step however slow.
     pub press: u64,
@@ -252,10 +271,17 @@ impl Plot {
                     slot: t.slot,
                     visible: t.visible,
                     axis: t.axis,
+                    pane: t.pane,
                     stats: t.stats.clone(),
                 })
                 .collect(),
-            axes: self.axes.clone(),
+            panes: (self.panes.iter())
+                .map(|p| PaneState {
+                    id: p.id,
+                    weight: p.weight,
+                    axes: p.axes.clone(),
+                })
+                .collect(),
             view_name: self.view_name.clone(),
         }
     }
@@ -285,12 +311,15 @@ impl Plot {
         };
         let hint = self.undo.hint.take();
         let settled = settled(&last, &current);
-        for a in &current.axes {
-            if last.axis(a.id).is_none() && !self.undo.born.iter().any(|b| b.id == a.id) {
-                self.undo.born.push(ValueAxis {
-                    shown: None,
-                    ..a.clone()
-                });
+        for p in &current.panes {
+            for a in &p.axes {
+                if last.axis(a.id).is_none() && !self.undo.born.iter().any(|b| b.1.id == a.id) {
+                    let first = ValueAxis {
+                        shown: None,
+                        ..a.clone()
+                    };
+                    self.undo.born.push((p.id, first));
+                }
             }
         }
         if let Some(change) = changed(&last, &current) {
@@ -363,21 +392,39 @@ impl Plot {
             t.slot = ts.slot;
             t.visible = ts.visible;
             t.axis = ts.axis;
+            t.pane = ts.pane;
             t.stats = ts.stats.clone();
             self.traces.push(t);
         }
         for t in old {
             self.park(t);
         }
-        // Axes still there carry on from the range drawn.
-        let shown: Vec<(u32, Option<(f64, f64)>)> =
-            self.axes.iter().map(|a| (a.id, a.shown)).collect();
-        self.axes = (s.axes.iter().cloned())
-            .map(|mut a| {
-                a.shown = shown.iter().find(|(id, _)| *id == a.id).and_then(|s| s.1);
-                a
+        // Panes and axes still there carry on as drawn: the axes from
+        // their ranges, a pane with its axis picked out.
+        let old = std::mem::take(&mut self.panes);
+        let shown: Vec<(u32, Option<(f64, f64)>)> = (old.iter().flat_map(|p| &p.axes))
+            .map(|a| (a.id, a.shown))
+            .collect();
+        self.panes = (s.panes.iter())
+            .map(|ps| {
+                let axes = (ps.axes.iter().cloned())
+                    .map(|mut a| {
+                        a.shown = shown.iter().find(|(id, _)| *id == a.id).and_then(|s| s.1);
+                        a
+                    })
+                    .collect();
+                let mut pane = Pane::with_axes(ps.id, ps.weight, axes);
+                if let Some(was) = old.iter().find(|p| p.id == ps.id) {
+                    pane.axis_highlight = was.axis_highlight;
+                }
+                pane
             })
             .collect();
+        if self.panes.is_empty() {
+            self.panes = old;
+            self.panes.truncate(1);
+            self.panes[0].axes.clear();
+        }
         self.prune_axes();
         self.window = s.window;
         self.home_span = s.home_span;
@@ -431,9 +478,10 @@ impl Plot {
         } = &mut self.undo;
         let steps = || done.iter().chain(undone.iter());
         parked.retain(|p| steps().any(|s| s.state.trace(p.id).is_some()));
-        let axes = &self.axes;
-        born.retain(|b| {
-            axes.iter().any(|a| a.id == b.id) || steps().any(|s| s.state.axis(b.id).is_some())
+        let panes = &self.panes;
+        born.retain(|(_, b)| {
+            panes.iter().any(|p| p.axis(b.id).is_some())
+                || steps().any(|s| s.state.axis(b.id).is_some())
         });
     }
 
@@ -465,18 +513,45 @@ impl Plot {
                     continue;
                 };
                 st.axis = Some(id);
+                st.pane = t.pane;
                 // An axis kept for it (from a view) is not kept any more.
-                s.axes
-                    .retain(|a| a.id == id || a.used || a.reserved != Some(t.id));
-                match s.axes.iter_mut().find(|a| a.id == id) {
+                for p in &mut s.panes {
+                    p.axes
+                        .retain(|a| a.id == id || a.used || a.reserved != Some(t.id));
+                }
+                match s
+                    .panes
+                    .iter_mut()
+                    .flat_map(|p| &mut p.axes)
+                    .find(|a| a.id == id)
+                {
                     Some(a) => {
                         a.used = true;
                         a.reserved = None;
                     }
                     None => {
-                        let first = born.iter().find(|a| a.id == id).or(after.axis(id));
-                        if let Some(a) = first {
-                            s.axes.push(ValueAxis {
+                        let now = (after.panes.iter())
+                            .find_map(|p| p.axes.iter().find(|a| a.id == id).map(|a| (p.id, a)));
+                        let first = (born.iter())
+                            .find(|(_, a)| a.id == id)
+                            .map(|(p, a)| (*p, a))
+                            .or(now);
+                        if let Some((pane, a)) = first {
+                            // Its pane too, where the step has none (it
+                            // opened as the trace settled).
+                            let k = match s.panes.iter().position(|p| p.id == pane) {
+                                Some(k) => k,
+                                None => {
+                                    let weight = after.pane(pane).map_or(1.0, |p| p.weight);
+                                    s.panes.push(PaneState {
+                                        id: pane,
+                                        weight,
+                                        axes: Vec::new(),
+                                    });
+                                    s.panes.len() - 1
+                                }
+                            };
+                            s.panes[k].axes.push(ValueAxis {
                                 shown: None,
                                 used: true,
                                 reserved: None,
@@ -518,12 +593,8 @@ impl Plot {
             [(_, t)] => {
                 // The axis as it was named when the trace was dropped on
                 // it (as last drawn), else as it is named now (a new one).
-                let named = |names: &[(u32, String)]| {
-                    names.iter().find(|(id, _)| Some(*id) == t.axis).cloned()
-                };
-                let to = named(&self.axis_names).or_else(|| named(&self.name_axes()));
-                return match to {
-                    Some((_, name)) => format!("move {} to {name}", t.label()),
+                return match t.axis.and_then(|id| self.axis_name(id)) {
+                    Some(name) => format!("move {} to {name}", t.label()),
                     None => format!("move {}", t.label()),
                 };
             }
@@ -542,7 +613,7 @@ impl Plot {
         if pairs.iter().any(|(b, a)| b.color != a.color) {
             return "change colours".into();
         }
-        let axes: Vec<(&ValueAxis, &ValueAxis)> = (after.axes.iter())
+        let axes: Vec<(&ValueAxis, &ValueAxis)> = (after.axes())
             .filter_map(|a| before.axis(a.id).map(|b| (b, a)))
             .collect();
         if let Some((_, a)) = axes.iter().find(|(b, a)| b.name != a.name) {
@@ -609,12 +680,14 @@ fn changed(before: &Snapshot, after: &Snapshot) -> Option<Change> {
                 || b.slot != a.slot
                 || b.visible != a.visible
                 || (b.axis.is_some() && b.axis != a.axis)
+                // A pane given by hand, not taken as it settles.
+                || (b.pane != a.pane && (b.pane.is_some() || a.axis.is_none()))
         });
     if traces || before.default_log != after.default_log {
         return Some(Change::Other);
     }
     let mut navigate = before.window != after.window || before.home_span != after.home_span;
-    for a in &after.axes {
+    for a in after.axes() {
         let Some(b) = before.axis(a.id) else {
             continue;
         };

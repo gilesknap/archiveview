@@ -53,39 +53,42 @@ pub struct Renaming {
 }
 
 impl Plot {
-    /// The axes' own clicks, and a chip dropped on one. Runs once the
-    /// frame is laid out, so after the plot's own interaction: the axes
-    /// take clicks there, and leave drags to the plot.
-    pub(super) fn axis_interact(&mut self, ui: &egui::Ui, f: &mut Frame) {
+    /// Pane `k`'s axes' own clicks, and a chip dropped on one. Runs once
+    /// the frame (`f`) is laid out, so after the plot's own interaction:
+    /// the axes take clicks there, and leave drags to the plot.
+    pub(super) fn axis_interact(&mut self, k: usize, ui: &egui::Ui, f: &mut Frame) {
         let pointer = ui.input(|i| i.pointer.latest_pos());
         if let Some(trace) = self.chip_drag {
+            let inside = pointer.is_some_and(|p| f.outer.contains(p));
             let over = pointer.and_then(|p| f.axis_at(p));
-            if let Some(k) = over {
-                f.set_highlight(k);
+            if let Some(n) = over {
+                f.set_highlight(n);
             }
-            if !ui.input(|i| i.pointer.any_down()) {
+            // Dropped: here if over this pane (the last pane lets go of
+            // a chip dropped on none).
+            let last = k + 1 == self.panes.len();
+            if !ui.input(|i| i.pointer.any_down()) && (inside || last) {
                 self.chip_drag = None;
                 match over {
-                    Some(k) => {
-                        if let Some(id) = self.drawn.get(k).copied() {
-                            self.move_trace(trace, Some(id));
+                    Some(n) => {
+                        if let Some(id) = self.panes[k].drawn.get(n).copied() {
+                            self.dropped = Some((trace, Some(id)));
                         }
                     }
                     // On the plot but no axis: an axis of its own.
-                    None if pointer.is_some_and(|p| f.outer.contains(p)) => {
-                        self.move_trace(trace, None);
-                    }
+                    None if inside => self.dropped = Some((trace, None)),
                     None => {}
                 }
             }
         }
-        for k in 0..f.axis_count() {
-            let (Some(id), Some(rect)) = (self.drawn.get(k).copied(), f.axis_rect(k)) else {
+        for n in 0..f.axis_count() {
+            let (Some(id), Some(rect)) = (self.panes[k].drawn.get(n).copied(), f.axis_rect(n))
+            else {
                 continue;
             };
             let r = ui.interact(rect, self.id.with(("axis", id)), Sense::click());
             let on_name = f
-                .title_rect(k)
+                .title_rect(n)
                 .zip(pointer)
                 .is_some_and(|(t, p)| t.expand2(Vec2::new(4.0, 0.0)).contains(p));
             // No tooltip over the name editor or a menu.
@@ -98,15 +101,16 @@ impl Plot {
             } else {
                 r.on_hover_text_at_pointer(HINT)
             };
+            let pane = &mut self.panes[k];
             if r.double_clicked() && on_name {
                 // Its first click picked the axis out (or not): undone.
-                if let Some(before) = self.highlight_before.take() {
-                    self.axis_highlight = before;
+                if let Some(before) = pane.highlight_before.take() {
+                    pane.axis_highlight = before;
                 }
                 self.start_rename(id);
             } else if r.clicked() {
-                self.highlight_before = Some(self.axis_highlight);
-                self.axis_highlight = (self.axis_highlight != Some(id)).then_some(id);
+                pane.highlight_before = Some(pane.axis_highlight);
+                pane.axis_highlight = (pane.axis_highlight != Some(id)).then_some(id);
             }
             egui::Popup::context_menu(&r).show(|ui| self.axis_scale_menu(ui, id));
         }
@@ -122,12 +126,7 @@ impl Plot {
             }
         }
         AxisCard {
-            name: self
-                .axis_names
-                .iter()
-                .find(|(a, _)| *a == id)
-                .map(|(_, n)| n.clone())
-                .unwrap_or_default(),
+            name: self.axis_name(id).unwrap_or_default(),
             units: units.join(" · "),
             traces: on
                 .iter()
@@ -138,7 +137,7 @@ impl Plot {
 
     /// An axis' own menu: its log scale, autoscale and name.
     fn axis_scale_menu(&mut self, ui: &mut egui::Ui, id: u32) {
-        let Some(a) = self.axes.iter_mut().find(|a| a.id == id) else {
+        let Some(a) = self.axis_mut(id) else {
             return;
         };
         if ui.checkbox(&mut a.log, "Log scale").changed() {
@@ -158,12 +157,7 @@ impl Plot {
     }
 
     fn start_rename(&mut self, id: u32) {
-        let text = self
-            .axis_names
-            .iter()
-            .find(|(a, _)| *a == id)
-            .map(|(_, n)| n.clone())
-            .unwrap_or_default();
+        let text = self.axis_name(id).unwrap_or_default();
         self.renaming = Some(Renaming {
             axis: id,
             text,
@@ -173,16 +167,18 @@ impl Plot {
 
     /// The text box for an axis name being edited, over the name: Enter
     /// (or clicking away) keeps it, Esc does not; an empty name goes back
-    /// to the one the axis gives itself.
-    pub(super) fn rename_box(&mut self, ui: &egui::Ui, f: &Frame) {
+    /// to the one the axis gives itself. `frames`: the panes'.
+    pub(super) fn rename_box(&mut self, ui: &egui::Ui, frames: &[Frame]) {
         let Some(edit) = &mut self.renaming else {
             return;
         };
-        let Some(k) = self.drawn.iter().position(|d| *d == edit.axis) else {
+        let found = (self.panes.iter().zip(frames))
+            .find_map(|(p, f)| p.drawn.iter().position(|d| *d == edit.axis).map(|n| (f, n)));
+        let Some((f, n)) = found else {
             self.renaming = None;
             return;
         };
-        let Some(title) = f.title_rect(k) else {
+        let Some(title) = f.title_rect(n) else {
             return;
         };
         let width = 180.0;
@@ -218,7 +214,7 @@ impl Plot {
         match done {
             Some(keep) => {
                 let edit = self.renaming.take().expect("renaming");
-                if keep && let Some(a) = self.axes.iter_mut().find(|a| a.id == edit.axis) {
+                if keep && let Some(a) = self.axis_mut(edit.axis) {
                     let name = edit.text.trim();
                     a.name = (!name.is_empty()).then(|| name.to_string());
                 }
@@ -235,8 +231,9 @@ impl Plot {
         };
         let on = t.axis;
         let alone = on.is_some() && self.traces.iter().filter(|x| x.axis == on).count() == 1;
+        let k = self.home(t);
         ui.label(egui::RichText::new("Value axis").small().weak());
-        for (id, name) in self.axis_names.clone() {
+        for (id, name) in self.panes[k].axis_names.clone() {
             if ui.selectable_label(on == Some(id), name).clicked() {
                 self.move_trace(trace, Some(id));
                 ui.close();

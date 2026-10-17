@@ -13,20 +13,35 @@ use super::{Plot, format_value, precision, units};
 /// (points).
 const SNAP_PX: f32 = 8.0;
 
-/// Where the crosshair goes: the pointer, snapped to a nearby sample of
-/// the first visible trace, and the time there. `None` when the pointer
-/// is not over the data.
-pub fn hairline(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>]) -> Option<(Pos2, f64)> {
+/// Which pane a crosshair is drawn in, and what it has there.
+#[derive(Clone, Copy, Debug)]
+pub struct Place {
+    /// The pane (index).
+    pub pane: usize,
+    /// The pointer is in it: its card follows the pointer and has the
+    /// time.
+    pub pointer: bool,
+    /// It has the time labels, where the time tag goes.
+    pub time_axis: bool,
+}
+
+/// Where the crosshair goes, from pane `k` (with frame `f`): the pointer,
+/// snapped to a nearby sample of the pane's first visible trace, and the
+/// time there. `None` when the pointer is not over the pane's data.
+pub fn hairline(
+    plot: &Plot,
+    ui: &egui::Ui,
+    k: usize,
+    f: &Frame,
+    data: &[Vec<Pt>],
+) -> Option<(Pos2, f64)> {
     let mut p = ui.input(|i| i.pointer.hover_pos())?;
     if !f.data.contains(p) || !ui.rect_contains_pointer(f.outer) {
         return None;
     }
     let mut t = f.time_at(p.x);
-    let first = plot
-        .traces
-        .iter()
-        .zip(data)
-        .find(|(trace, pts)| trace.visible && !pts.is_empty());
+    let first = (plot.traces.iter().zip(data))
+        .find(|(trace, pts)| trace.visible && !pts.is_empty() && plot.home(trace) == k);
     if let Some(i) = first.and_then(|(_, pts)| nearest(pts, t).map(|i| pts[i].t))
         && (f.xs.pos(i) - p.x).abs() <= SNAP_PX
     {
@@ -36,9 +51,10 @@ pub fn hairline(plot: &Plot, ui: &egui::Ui, f: &Frame, data: &[Vec<Pt>]) -> Opti
     Some((p, t))
 }
 
-/// A vertical hairline at `hair` (from [`hairline`]), a dot on each trace
-/// where its line is, a time tag on the axis, and a floating card of the
-/// values the lines show there ("—" for a trace with none).
+/// In the pane at `place` (with frame `f`): a vertical hairline at
+/// `hair` (from [`hairline`]), a dot on each of its traces where its line
+/// is, a time tag on the time axis, and a floating card of the values the
+/// lines show there ("—" for a trace with none).
 pub fn crosshair(
     plot: &Plot,
     ui: &egui::Ui,
@@ -46,6 +62,7 @@ pub fn crosshair(
     data: &[Vec<Pt>],
     dark: bool,
     (p, t): (Pos2, f64),
+    place: Place,
 ) {
     let painter = ui.painter_at(f.outer);
     let v = ui.visuals();
@@ -56,7 +73,10 @@ pub fn crosshair(
         ],
         Stroke::new(1.0, v.text_color().gamma_multiply(0.35)),
     );
-    time_tag(&painter, f, p.x, t, v);
+    if place.time_axis {
+        time_tag(&painter, f, p.x, t, v);
+    }
+    let pane = &plot.panes[place.pane];
 
     struct Row {
         color: Color32,
@@ -66,8 +86,9 @@ pub fn crosshair(
     }
     let mut rows = Vec::new();
     for (n, (trace, pts)) in plot.traces.iter().zip(data).enumerate() {
-        // Arrays are not plotted: their chip has the value.
-        if !trace.visible || trace.is_array() {
+        // Arrays are not plotted: their chip has the value. Each pane
+        // lists its own traces (those not settled, the first).
+        if !trace.visible || trace.is_array() || plot.home(trace) != place.pane {
             continue;
         }
         let color = plot.color(trace, dark);
@@ -85,7 +106,7 @@ pub fn crosshair(
         // mean at the bin's centre.
         let x = if pt.step { p.x } else { f.xs.pos(pt.t) };
         // A trace not yet on an axis is not drawn: no dot.
-        let axis = plot.axis_of.get(n).copied().flatten();
+        let axis = pane.axis_of.get(n).copied().flatten();
         let at = Pos2::new(x, axis.map_or(f32::NAN, |k| f.scale(k).pos(pt.v)));
         if axis.is_some() && pt.v.is_finite() && f.data.expand(4.0).contains(at) {
             painter.circle(at, 4.0, color, Stroke::new(1.5, v.extreme_bg_color));
@@ -117,11 +138,16 @@ pub fn crosshair(
     // The card: the time, then a row per trace.
     let font = FontId::proportional(12.5);
     let small = FontId::proportional(11.0);
-    let header = painter.layout_no_wrap(
-        readout_time(t, f.xs.hi - f.xs.lo),
-        small.clone(),
-        v.weak_text_color(),
-    );
+    // The time once, in the pointer's pane.
+    let header = place.pointer.then(|| {
+        painter.layout_no_wrap(
+            readout_time(t, f.xs.hi - f.xs.lo),
+            small.clone(),
+            v.weak_text_color(),
+        )
+    });
+    let header_h = header.as_ref().map_or(0.0, |h| h.size().y + 6.0);
+    let header_w = header.as_ref().map_or(0.0, |h| h.size().x);
     let galleys: Vec<_> = rows
         .iter()
         .map(|r| {
@@ -142,10 +168,9 @@ pub fn crosshair(
         .fold(0.0, f32::max);
     let row_h = 18.0;
     let pad = 10.0;
-    let width = (pad + 14.0 + name_w + 16.0 + value_w + pad).max(header.size().x + 2.0 * pad);
+    let width = (pad + 14.0 + name_w + 16.0 + value_w + pad).max(header_w + 2.0 * pad);
     let height = pad
-        + header.size().y
-        + 6.0
+        + header_h
         + galleys
             .iter()
             .map(|g| row_h + if g.2.is_some() { 13.0 } else { 0.0 })
@@ -157,8 +182,13 @@ pub fn crosshair(
         x = p.x - 16.0 - width;
     }
     // Above the time axis strip, so it never covers the crosshair's own
-    // time tag there.
-    let y = (p.y - height / 2.0).clamp(
+    // time tag there; by the pointer, or in the middle of another pane.
+    let mid = if place.pointer {
+        p.y
+    } else {
+        f.data.center().y
+    };
+    let y = (mid - height / 2.0).clamp(
         f.outer.top() + 4.0,
         (f.data.bottom() - height - 4.0).max(f.outer.top() + 4.0),
     );
@@ -174,7 +204,7 @@ pub fn crosshair(
     };
     let top = ui.painter().clone().with_layer_id(egui::LayerId::new(
         egui::Order::Tooltip,
-        plot.id.with("crosshair"),
+        plot.id.with(("crosshair", place.pane)),
     ));
     top.add(shadow.as_shape(card, 8.0));
     top.rect(
@@ -185,13 +215,14 @@ pub fn crosshair(
         egui::StrokeKind::Inside,
     );
     let mut cy = card.top() + pad;
-    let hh = header.size().y;
-    top.galley(
-        Pos2::new(card.left() + pad, cy),
-        header,
-        v.weak_text_color(),
-    );
-    cy += hh + 6.0;
+    if let Some(header) = header {
+        top.galley(
+            Pos2::new(card.left() + pad, cy),
+            header,
+            v.weak_text_color(),
+        );
+    }
+    cy += header_h;
     for (row, (name, value, range)) in rows.iter().zip(galleys) {
         let mid = cy + row_h / 2.0 - 2.0;
         top.circle_filled(Pos2::new(card.left() + pad + 4.0, mid), 4.0, row.color);

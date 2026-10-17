@@ -182,9 +182,15 @@ pub struct Trace {
     pub visible: bool,
     pub history: Option<History>,
     pub fetch: FetchState,
-    /// Its value axis (an id in `Plot::axes`): `None` until it settles on
-    /// one, when its first data arrives; then it moves only by hand.
+    /// Its value axis (an id among its pane's axes): `None` until it
+    /// settles on one, when its first data arrives; then it moves only by
+    /// hand.
     pub axis: Option<u32>,
+    /// Its pane (an id in `Plot::panes`): the one its axis is in. `None`
+    /// for a trace not settled, nor put in a pane by hand or by a view:
+    /// it settles in whichever pane suits it, and shows in the first
+    /// until then.
+    pub pane: Option<u32>,
     /// When (seconds since 1970) it was first up to settle, and first
     /// had data to show, while it waits to settle.
     pub seen_at: Option<f64>,
@@ -224,6 +230,7 @@ impl Trace {
             history: None,
             fetch: FetchState::default(),
             axis: None,
+            pane: None,
             seen_at: None,
             data_since: None,
             stats: None,

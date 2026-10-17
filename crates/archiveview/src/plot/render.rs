@@ -27,6 +27,8 @@ pub struct Frame {
     font: FontId,
     /// The value axes' names: larger than the tick labels, to read.
     title_font: FontId,
+    /// The time labels go under the data (the bottom pane's alone).
+    time_labels: bool,
 }
 
 /// A value axis beside the data.
@@ -85,6 +87,14 @@ impl Default for AxisSpec {
 }
 
 impl Frame {
+    /// The room left and right of the data.
+    pub fn inset(&self) -> (f32, f32) {
+        (
+            self.data.left() - self.outer.left(),
+            self.outer.right() - self.data.right(),
+        )
+    }
+
     /// The number of value axes.
     pub fn axis_count(&self) -> usize {
         self.axes.len()
@@ -141,6 +151,65 @@ impl Frame {
 const PAD: f32 = 8.0;
 const TICK_GAP: f32 = 6.0;
 
+/// How much more height the time labels take under the data than a pane
+/// without them leaves there.
+pub fn time_strip(painter: &egui::Painter, font: &FontId) -> f32 {
+    let label_h = text_size(painter, "0", font).y;
+    (PAD + label_h + TICK_GAP) - (PAD + label_h) / 2.0
+}
+
+/// Lay out panes stacked in `rects` (top to bottom) for times `from..to`,
+/// each with its value `axes`: the time labels under the bottom one
+/// only, and the data of each as wide as the narrowest, so their times
+/// line up.
+pub fn frames(
+    painter: &egui::Painter,
+    rects: &[Rect],
+    range: (f64, f64),
+    axes: &[Vec<AxisSpec>],
+    font: &FontId,
+    title_font: &FontId,
+) -> Vec<Frame> {
+    let last = rects.len().saturating_sub(1);
+    let lay = |inset: Option<(f32, f32)>| -> Vec<Frame> {
+        (rects.iter().zip(axes).enumerate())
+            .map(|(k, (rect, axes))| {
+                let opts = Layout {
+                    time_labels: k == last,
+                    inset,
+                };
+                frame(painter, *rect, range, axes, font, title_font, opts)
+            })
+            .collect()
+    };
+    let frames = lay(None);
+    if frames.len() < 2 {
+        return frames;
+    }
+    let inset = (frames.iter().map(Frame::inset))
+        .fold((0.0f32, 0.0f32), |(l, r), (a, b)| (l.max(a), r.max(b)));
+    lay(Some(inset))
+}
+
+/// How a frame is laid out beyond its axes.
+#[derive(Clone, Copy, Debug)]
+pub struct Layout {
+    /// Time labels under the data.
+    pub time_labels: bool,
+    /// The room left and right of the data, to line up with other panes;
+    /// `None`: as its own axes need.
+    pub inset: Option<(f32, f32)>,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            time_labels: true,
+            inset: None,
+        }
+    }
+}
+
 /// Lay out the plot in `rect` for times `from..to` and the value `axes`
 /// (at least one is drawn: a blank 0..1 without any).
 ///
@@ -156,11 +225,17 @@ pub fn frame(
     axes: &[AxisSpec],
     font: &FontId,
     title_font: &FontId,
+    opts: Layout,
 ) -> Frame {
     let label_h = text_size(painter, "0", font).y;
     // An upright name takes its line height across.
     let title_h = text_size(painter, "0", title_font).y;
-    let bottom = rect.bottom() - PAD - label_h - TICK_GAP;
+    let bottom = if opts.time_labels {
+        rect.bottom() - PAD - label_h - TICK_GAP
+    } else {
+        // Room for half the lowest value label.
+        rect.bottom() - (PAD + label_h) / 2.0
+    };
     let top = rect.top() + PAD + label_h / 2.0;
     let blank = [AxisSpec::default()];
     let specs = if axes.is_empty() { &blank[..] } else { axes };
@@ -212,12 +287,15 @@ pub fn frame(
         PAD / 2.0 + title + a.label_w + TICK_GAP
     };
     let sum = |right: bool| -> f32 { list.iter().filter(|a| a.right == right).map(width).sum() };
-    let left = rect.left() + PAD / 2.0 + sum(false);
-    let right = if list.iter().any(|a| a.right) {
+    let mut left = rect.left() + PAD / 2.0 + sum(false);
+    let mut right = if list.iter().any(|a| a.right) {
         rect.right() - PAD / 2.0 - sum(true)
     } else {
         rect.right() - PAD * 2.0
     };
+    if let Some((l, r)) = opts.inset {
+        (left, right) = (rect.left() + l, rect.right() - r);
+    }
     let data = Rect::from_min_max(
         Pos2::new(left, top),
         Pos2::new(right.max(left + 1.0), bottom),
@@ -272,6 +350,7 @@ pub fn frame(
         axes: list,
         font: font.clone(),
         title_font: title_font.clone(),
+        time_labels: opts.time_labels,
     }
 }
 
@@ -349,7 +428,8 @@ pub fn paint(
 
     // Time labels below, the first with its date.
     let mut right_of = f32::NEG_INFINITY;
-    for (i, t) in t_ticks.iter().enumerate() {
+    let labelled = if f.time_labels { &t_ticks[..] } else { &[] };
+    for (i, t) in labelled.iter().enumerate() {
         let x = f.xs.pos(*t);
         let label = time_label(*t, t_step, i == 0);
         let galley = painter.layout_no_wrap(label, f.font.clone(), weak);
@@ -425,8 +505,16 @@ fn paint_axis(painter: &egui::Painter, f: &Frame, a: &Axis, visuals: &egui::Visu
 
 /// A thin dashed line at `now` with a small tag, when it is in view. In
 /// neutral grey: red is a trace colour (and an alarm), and the Live pill's
-/// dot alone says the plot follows now.
-pub fn now_marker(painter: &egui::Painter, f: &Frame, now: f64, v: &egui::Visuals, font: &FontId) {
+/// dot alone says the plot follows now. The tag only with `tag` (the top
+/// pane's).
+pub fn now_marker(
+    painter: &egui::Painter,
+    f: &Frame,
+    now: f64,
+    v: &egui::Visuals,
+    font: &FontId,
+    tag: bool,
+) {
     if now < f.xs.lo || now > f.xs.hi + (f.xs.hi - f.xs.lo) * 1e-3 {
         return;
     }
@@ -439,6 +527,9 @@ pub fn now_marker(painter: &egui::Painter, f: &Frame, now: f64, v: &egui::Visual
         4.0,
         4.0,
     ));
+    if !tag {
+        return;
+    }
     let galley = painter.layout_no_wrap("now".into(), font.clone(), color);
     let size = galley.size() + Vec2::new(10.0, 2.0);
     let tag = Rect::from_min_size(
@@ -796,7 +887,16 @@ mod tests {
                 ..AxisSpec::default()
             };
             let font = FontId::proportional(11.0);
-            let f = frame(painter, ui.max_rect(), (0.0, 19.0), &[axis], &font, &font);
+            let opts = Layout::default();
+            let f = frame(
+                painter,
+                ui.max_rect(),
+                (0.0, 19.0),
+                &[axis],
+                &font,
+                &font,
+                opts,
+            );
             paint(painter, &f, &lines, ui.visuals(), None);
         });
         // Bands are meshes, lines are paths: both bands, then both lines.
