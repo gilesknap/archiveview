@@ -222,12 +222,17 @@ egui::Window::new(plot.title())
 <span class="boring">}</span></code></pre></pre>
 <p>What the widget does, and doesn't, assume:</p>
 <ul>
-<li><strong>It uses the host's PV context.</strong> <code>Plot::new</code> takes the host's
+<li>
+<p><strong>It uses the host's PV context.</strong> <code>Plot::new</code> takes the host's
 <code>pv::PvManager</code>, subscribes through it, and runs archive requests on that
-manager's tokio runtime. It starts no runtime or threads of its own.</li>
-<li><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
-bobview's trend window. <code>set_archiver</code> changes it later.</li>
-<li><strong>The archiver is the host's unless it says otherwise.</strong> The archiver
+manager's tokio runtime. It starts no runtime or threads of its own.</p>
+</li>
+<li>
+<p><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
+bobview's trend window. <code>set_archiver</code> changes it later.</p>
+</li>
+<li>
+<p><strong>The archiver is the host's unless it says otherwise.</strong> The archiver
 pill always shows whether the archiver can be reached
 (<code>plot.archiver_status()</code>), but by default it is a status display only,
 and <code>set_view</code> ignores a view's <code>archiver</code>, so a layout restored later
@@ -237,16 +242,41 @@ and makes <code>set_view</code> follow a view's archiver. The plot then switches
 itself, and <code>plot.take_archiver_change()</code> is true once afterwards so the
 host can remember the choice; give it the host's remembered archivers
 with <code>plot.set_recent_archivers(..)</code>. Persisting them is the host's job:
-the widget writes no files.</li>
-<li><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
+the widget writes no files.</p>
+</li>
+<li>
+<p><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
 be open at once. <code>Plot::new</code> salts its ids with a running count;
 <code>Plot::with_id_salt(&amp;pvs, archiver, "trend-1")</code> uses the host's own salt,
-which keeps them stable when the host rebuilds its plots.</li>
-<li><strong>The host owns the look.</strong> The plot follows <code>ui.visuals()</code> (light or dark)
-and the host's fonts; it never sets the theme or installs fonts.</li>
-<li><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
+which keeps them stable when the host rebuilds its plots.</p>
+</li>
+<li>
+<p><strong>The host owns the look.</strong> The plot follows <code>ui.visuals()</code> (light or dark)
+and the host's fonts; it never sets the theme or installs fonts.</p>
+</li>
+<li>
+<p><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
 last drawn in, so a plot in its own native window is repainted, not the
-root one) and, while following now, at the pace the time axis scrolls.</li>
+root one) and, while following now, at the pace the time axis scrolls.</p>
+</li>
+<li>
+<p><strong>It reads no clipboard.</strong> Ctrl+V over the plot works on its own (egui
+delivers the clipboard as a paste event). For middle-click, the host
+reads the primary selection: <code>plot.take_middle_click()</code> says where a
+middle-click landed, and the host answers with the selection's text,
+<code>plot.paste_pvs(&amp;text)</code> on the plot or <code>plot.paste_into_search(&amp;text)</code> in
+the search box. <code>plot.take_search_selection()</code> gives text the user
+selected in the search box, for the host to make the primary selection,
+and <code>plot.take_pasted()</code> says what a paste added (<code>.message()</code> for a
+toast). A middle-click stays in <code>take_middle_click()</code> until taken (a
+later one replaces it); <code>paste_pvs</code> and <code>paste_into_search</code> ask for a
+repaint themselves, so the host can answer between frames, from another
+thread's result. Read the selection off the UI thread: X11 asks its
+owner, which can take seconds. The standalone app does all this in
+<code>app.rs</code>, with <code>archiveview::selection</code> (a <code>Worker</code> thread, a 2 s limit,
+and setting the primary only once a selection has been steady for
+150 ms).</p>
+</li>
 </ul>
 <p>To save a plot in the host's own layout files, store <code>plot.view()</code> (it is
 <code>serde</code>-serialisable) and restore it with <code>plot.set_view(&amp;view)</code>. A view

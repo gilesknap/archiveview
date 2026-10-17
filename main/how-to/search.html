@@ -240,6 +240,53 @@ not archived; it plots live only. A PV Access or simulated name
 (<code>pva://name</code>, <code>sim://sine</code>), or several names separated by spaces or
 commas, can only be added as typed, so that row comes first and <code>Enter</code>
 adds it straight away.</p>
+<h2 id="add-pvs-from-another-window"><a class="header" href="#add-pvs-from-another-window">Add PVs from another window</a></h2>
+<p>Select a PV name anywhere, then <strong>middle-click</strong> the plot or its legend: the
+PV is added, and a note at the bottom says so. This is the X11 and Wayland
+primary selection, the way EDM and MEDM pass PV names around:</p>
+<ul>
+<li>In bobview, middle-click a widget to select its PV name.</li>
+<li>In a terminal, an editor or a web page, select the name with the mouse
+(double-click selects a whole name in most terminals).</li>
+</ul>
+<p>Several names separated by spaces, commas, semicolons or new lines add
+several PVs. Quotes and brackets around a name are dropped. A word can be a
+PV name if, after an optional <code>ca://</code> or <code>pva://</code>, it has only the
+characters EPICS record names use (letters, digits, <code>_ - + : [ ] &lt; &gt; { } $</code>,
+and <code>.</code> before a field, as in <code>BL01T:X.VAL</code>) and at least one letter.
+Numbers, times and dates (<code>12:30:00</code>, <code>2026-10-17T13:41:52Z</code>),
+<code>host:port</code> (<code>localhost:5064</code>, <code>ioc.example.org:5075</code>), <code>a::b</code>, Python log
+lines among other words (<code>INFO:root:Connected</code>), URLs, command-line flags
+(<code>-a</code>) and words ending in <code>.</code> or <code>:</code> are left out. Numbered names such as
+<code>SR:BPM:01</code> and <code>DLS:01</code> are names, and a <code>ca://</code> or <code>pva://</code> name is
+always taken as it is.</p>
+<ul>
+<li><strong>A single word</strong> is added if it can be a name, so names with no
+structure at all (<code>TEMP1</code>, <code>BEAMCURRENT</code>) work: double-click one in a
+terminal and middle-click.</li>
+<li><strong>Several words</strong> add only those with a scheme or some structure: a <code>:</code>,
+<code>-</code>, <code>_</code>, braces, a digit or a <code>.FIELD</code>. So a line of prose, a shell
+command or code selected with the names adds just the names
+(<code>$ caget -a SR:X</code> adds <code>SR:X</code>).</li>
+</ul>
+<p>If nothing is left, the note says so.</p>
+<p>One paste adds at most 20 PVs. If the selection names more (most likely a
+screenful selected by accident), nothing is added and the note says how
+many it named; select fewer.</p>
+<p>Middle-click in the search box pastes the selection there instead, where
+you click, so you can edit it or search with it. Text you select in the
+search box becomes the primary selection, so you can middle-click it into a
+terminal (the box selecting all its text when you click into it doesn't
+count).</p>
+<p><code>Ctrl+V</code> with the pointer over the plot (and the search box not focused)
+adds the PVs in the clipboard, on every platform. Where there is no primary
+selection at all (macOS, Windows, a Wayland desktop without the protocol),
+middle-click uses the clipboard instead. With nothing selected it adds
+nothing, rather than something copied long ago.</p>
+<p>The selection is read in the background. If the application that owns it
+doesn't answer within 2 seconds, the note says it could not be read.</p>
+<p>Over <code>ssh -X</code> the selection goes through your X server, so selecting a name
+in a local window and middle-clicking the remote archiveview works.</p>
 <h2 id="add-pvs-from-the-command-line"><a class="header" href="#add-pvs-from-the-command-line">Add PVs from the command line</a></h2>
 <p>Name them after the options:</p>
 <pre><code class="language-bash">archiveview --archiver http://archiver:17668 SR-DI-DCCT-01:SIGNAL SR-DI-DCCT-01:LIFETIME

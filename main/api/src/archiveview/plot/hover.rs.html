@@ -160,7 +160,7 @@
 <a href=#160 id=160 data-nosnippet>160</a>    // time tag there.
 <a href=#161 id=161 data-nosnippet>161</a>    </span><span class="kw">let </span>y = (p.y - height / <span class="number">2.0</span>).clamp(
 <a href=#162 id=162 data-nosnippet>162</a>        f.outer.top() + <span class="number">4.0</span>,
-<a href=#163 id=163 data-nosnippet>163</a>        (f.data.bottom() - height - <span class="number">4.0</span>).max(f.outer.top()),
+<a href=#163 id=163 data-nosnippet>163</a>        (f.data.bottom() - height - <span class="number">4.0</span>).max(f.outer.top() + <span class="number">4.0</span>),
 <a href=#164 id=164 data-nosnippet>164</a>    );
 <a href=#165 id=165 data-nosnippet>165</a>    <span class="kw">let </span>card = Rect::from_min_size(
 <a href=#166 id=166 data-nosnippet>166</a>        Pos2::new(x.max(f.outer.left() + <span class="number">4.0</span>), y),

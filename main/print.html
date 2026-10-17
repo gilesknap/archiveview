@@ -468,6 +468,53 @@ not archived; it plots live only. A PV Access or simulated name
 (<code>pva://name</code>, <code>sim://sine</code>), or several names separated by spaces or
 commas, can only be added as typed, so that row comes first and <code>Enter</code>
 adds it straight away.</p>
+<h2 id="add-pvs-from-another-window"><a class="header" href="#add-pvs-from-another-window">Add PVs from another window</a></h2>
+<p>Select a PV name anywhere, then <strong>middle-click</strong> the plot or its legend: the
+PV is added, and a note at the bottom says so. This is the X11 and Wayland
+primary selection, the way EDM and MEDM pass PV names around:</p>
+<ul>
+<li>In bobview, middle-click a widget to select its PV name.</li>
+<li>In a terminal, an editor or a web page, select the name with the mouse
+(double-click selects a whole name in most terminals).</li>
+</ul>
+<p>Several names separated by spaces, commas, semicolons or new lines add
+several PVs. Quotes and brackets around a name are dropped. A word can be a
+PV name if, after an optional <code>ca://</code> or <code>pva://</code>, it has only the
+characters EPICS record names use (letters, digits, <code>_ - + : [ ] &lt; &gt; { } $</code>,
+and <code>.</code> before a field, as in <code>BL01T:X.VAL</code>) and at least one letter.
+Numbers, times and dates (<code>12:30:00</code>, <code>2026-10-17T13:41:52Z</code>),
+<code>host:port</code> (<code>localhost:5064</code>, <code>ioc.example.org:5075</code>), <code>a::b</code>, Python log
+lines among other words (<code>INFO:root:Connected</code>), URLs, command-line flags
+(<code>-a</code>) and words ending in <code>.</code> or <code>:</code> are left out. Numbered names such as
+<code>SR:BPM:01</code> and <code>DLS:01</code> are names, and a <code>ca://</code> or <code>pva://</code> name is
+always taken as it is.</p>
+<ul>
+<li><strong>A single word</strong> is added if it can be a name, so names with no
+structure at all (<code>TEMP1</code>, <code>BEAMCURRENT</code>) work: double-click one in a
+terminal and middle-click.</li>
+<li><strong>Several words</strong> add only those with a scheme or some structure: a <code>:</code>,
+<code>-</code>, <code>_</code>, braces, a digit or a <code>.FIELD</code>. So a line of prose, a shell
+command or code selected with the names adds just the names
+(<code>$ caget -a SR:X</code> adds <code>SR:X</code>).</li>
+</ul>
+<p>If nothing is left, the note says so.</p>
+<p>One paste adds at most 20 PVs. If the selection names more (most likely a
+screenful selected by accident), nothing is added and the note says how
+many it named; select fewer.</p>
+<p>Middle-click in the search box pastes the selection there instead, where
+you click, so you can edit it or search with it. Text you select in the
+search box becomes the primary selection, so you can middle-click it into a
+terminal (the box selecting all its text when you click into it doesn't
+count).</p>
+<p><code>Ctrl+V</code> with the pointer over the plot (and the search box not focused)
+adds the PVs in the clipboard, on every platform. Where there is no primary
+selection at all (macOS, Windows, a Wayland desktop without the protocol),
+middle-click uses the clipboard instead. With nothing selected it adds
+nothing, rather than something copied long ago.</p>
+<p>The selection is read in the background. If the application that owns it
+doesn't answer within 2 seconds, the note says it could not be read.</p>
+<p>Over <code>ssh -X</code> the selection goes through your X server, so selecting a name
+in a local window and middle-clicking the remote archiveview works.</p>
 <h2 id="add-pvs-from-the-command-line"><a class="header" href="#add-pvs-from-the-command-line">Add PVs from the command line</a></h2>
 <p>Name them after the options:</p>
 <pre><code class="language-bash">archiveview --archiver http://archiver:17668 SR-DI-DCCT-01:SIGNAL SR-DI-DCCT-01:LIFETIME
@@ -779,12 +826,17 @@ egui::Window::new(plot.title())
 <span class="boring">}</span></code></pre></pre>
 <p>What the widget does, and doesn't, assume:</p>
 <ul>
-<li><strong>It uses the host's PV context.</strong> <code>Plot::new</code> takes the host's
+<li>
+<p><strong>It uses the host's PV context.</strong> <code>Plot::new</code> takes the host's
 <code>pv::PvManager</code>, subscribes through it, and runs archive requests on that
-manager's tokio runtime. It starts no runtime or threads of its own.</li>
-<li><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
-bobview's trend window. <code>set_archiver</code> changes it later.</li>
-<li><strong>The archiver is the host's unless it says otherwise.</strong> The archiver
+manager's tokio runtime. It starts no runtime or threads of its own.</p>
+</li>
+<li>
+<p><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
+bobview's trend window. <code>set_archiver</code> changes it later.</p>
+</li>
+<li>
+<p><strong>The archiver is the host's unless it says otherwise.</strong> The archiver
 pill always shows whether the archiver can be reached
 (<code>plot.archiver_status()</code>), but by default it is a status display only,
 and <code>set_view</code> ignores a view's <code>archiver</code>, so a layout restored later
@@ -794,16 +846,41 @@ and makes <code>set_view</code> follow a view's archiver. The plot then switches
 itself, and <code>plot.take_archiver_change()</code> is true once afterwards so the
 host can remember the choice; give it the host's remembered archivers
 with <code>plot.set_recent_archivers(..)</code>. Persisting them is the host's job:
-the widget writes no files.</li>
-<li><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
+the widget writes no files.</p>
+</li>
+<li>
+<p><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
 be open at once. <code>Plot::new</code> salts its ids with a running count;
 <code>Plot::with_id_salt(&amp;pvs, archiver, "trend-1")</code> uses the host's own salt,
-which keeps them stable when the host rebuilds its plots.</li>
-<li><strong>The host owns the look.</strong> The plot follows <code>ui.visuals()</code> (light or dark)
-and the host's fonts; it never sets the theme or installs fonts.</li>
-<li><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
+which keeps them stable when the host rebuilds its plots.</p>
+</li>
+<li>
+<p><strong>The host owns the look.</strong> The plot follows <code>ui.visuals()</code> (light or dark)
+and the host's fonts; it never sets the theme or installs fonts.</p>
+</li>
+<li>
+<p><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
 last drawn in, so a plot in its own native window is repainted, not the
-root one) and, while following now, at the pace the time axis scrolls.</li>
+root one) and, while following now, at the pace the time axis scrolls.</p>
+</li>
+<li>
+<p><strong>It reads no clipboard.</strong> Ctrl+V over the plot works on its own (egui
+delivers the clipboard as a paste event). For middle-click, the host
+reads the primary selection: <code>plot.take_middle_click()</code> says where a
+middle-click landed, and the host answers with the selection's text,
+<code>plot.paste_pvs(&amp;text)</code> on the plot or <code>plot.paste_into_search(&amp;text)</code> in
+the search box. <code>plot.take_search_selection()</code> gives text the user
+selected in the search box, for the host to make the primary selection,
+and <code>plot.take_pasted()</code> says what a paste added (<code>.message()</code> for a
+toast). A middle-click stays in <code>take_middle_click()</code> until taken (a
+later one replaces it); <code>paste_pvs</code> and <code>paste_into_search</code> ask for a
+repaint themselves, so the host can answer between frames, from another
+thread's result. Read the selection off the UI thread: X11 asks its
+owner, which can take seconds. The standalone app does all this in
+<code>app.rs</code>, with <code>archiveview::selection</code> (a <code>Worker</code> thread, a 2 s limit,
+and setting the primary only once a selection has been steady for
+150 ms).</p>
+</li>
 </ul>
 <p>To save a plot in the host's own layout files, store <code>plot.view()</code> (it is
 <code>serde</code>-serialisable) and restore it with <code>plot.set_view(&amp;view)</code>. A view
@@ -1060,7 +1137,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <div style="break-before: page; page-break-before: always;"></div><h1 id="gestures-and-keys"><a class="header" href="#gestures-and-keys">Gestures and keys</a></h1>
 <h2 id="the-bar"><a class="header" href="#the-bar">The bar</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>control</th><th>what it does</th></tr></thead><tbody>
-<tr><td>search box</td><td>find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. See <a href="reference/../how-to/search.html">Find and add PVs</a></td></tr>
+<tr><td>search box</td><td>find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. Middle-click pastes the primary selection. See <a href="reference/../how-to/search.html">Find and add PVs</a></td></tr>
 <tr><td><code>.*</code> (in the search box, shown while it has the focus)</td><td>search with a regular expression instead of a glob</td></tr>
 <tr><td>✕ (in the search box)</td><td>clear it</td></tr>
 <tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
@@ -1087,6 +1164,8 @@ only its dot, and ⤢ and ⌂ move into the ≡ menu.</p>
 <tr><td>hover a value axis' name</td><td>its full name, units and traces (with their colours), and the gestures</td></tr>
 <tr><td>double-click a value axis' name</td><td>rename it (Enter keeps, Esc cancels, empty is automatic)</td></tr>
 <tr><td>right-click a value axis</td><td>its menu: Log scale, Autoscale, Rename…</td></tr>
+<tr><td>middle-click (here or on the legend)</td><td>add the PVs in the primary selection (the text last selected anywhere), or in the clipboard where there is no primary selection (macOS, Windows). At most 20 at once. See <a href="reference/../how-to/search.html#add-pvs-from-another-window">Add PVs from another window</a></td></tr>
+<tr><td><code>Ctrl+V</code> (pointer over the plot)</td><td>add the PVs in the clipboard</td></tr>
 <tr><td>hover</td><td>crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap)</td></tr>
 </tbody></table>
 </div>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ArchiverState"],"fn":["now","parse_span"],"struct":["ArchiverStatus","Plot"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_PASTE"],"enum":["ArchiverState","MiddleClick"],"fn":["now","parse_span","pv_names"],"struct":["ArchiverStatus","Pasted","Plot"]};
