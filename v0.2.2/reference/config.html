@@ -1,0 +1,333 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Config files and the view format - archiveview</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="A modern plotter for archived and live EPICS PVs">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/grid.css">
+        <link rel="stylesheet" href="../theme/sidebar.css">
+
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="../tutorials/quickstart.html"><strong aria-hidden="true">1.</strong> Quick start</a></li><li class="chapter-item expanded affix "><li class="part-title">How-to guides</li><li class="chapter-item expanded "><a href="../how-to/install.html"><strong aria-hidden="true">2.</strong> Install archiveview</a></li><li class="chapter-item expanded "><a href="../how-to/connect.html"><strong aria-hidden="true">3.</strong> Connect to an archiver and IOCs</a></li><li class="chapter-item expanded "><a href="../how-to/search.html"><strong aria-hidden="true">4.</strong> Find and add PVs</a></li><li class="chapter-item expanded "><a href="../how-to/navigate.html"><strong aria-hidden="true">5.</strong> Navigate the plot</a></li><li class="chapter-item expanded "><a href="../how-to/axes.html"><strong aria-hidden="true">6.</strong> Work with value axes</a></li><li class="chapter-item expanded "><a href="../how-to/views.html"><strong aria-hidden="true">7.</strong> Save and load views</a></li><li class="chapter-item expanded "><a href="../how-to/software-rendering.html"><strong aria-hidden="true">8.</strong> Run over ssh</a></li><li class="chapter-item expanded "><a href="../how-to/snapshots.html"><strong aria-hidden="true">9.</strong> Take snapshots</a></li><li class="chapter-item expanded "><a href="../how-to/embed.html"><strong aria-hidden="true">10.</strong> Embed the plot in an egui app</a></li><li class="chapter-item expanded "><a href="../how-to/build.html"><strong aria-hidden="true">11.</strong> Build from source</a></li><li class="chapter-item expanded "><a href="../how-to/release.html"><strong aria-hidden="true">12.</strong> Make a release</a></li><li class="chapter-item expanded affix "><li class="part-title">Explanations</li><li class="chapter-item expanded "><a href="../explanations/scope.html"><strong aria-hidden="true">13.</strong> Scope, and how it differs from the Data Browser</a></li><li class="chapter-item expanded "><a href="../explanations/architecture.html"><strong aria-hidden="true">14.</strong> Architecture</a></li><li class="chapter-item expanded affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="../reference/cli.html"><strong aria-hidden="true">15.</strong> Command line</a></li><li class="chapter-item expanded "><a href="../reference/controls.html"><strong aria-hidden="true">16.</strong> Gestures and keys</a></li><li class="chapter-item expanded "><a href="../reference/environment.html"><strong aria-hidden="true">17.</strong> Environment variables</a></li><li class="chapter-item expanded "><a href="../reference/config.html" class="active"><strong aria-hidden="true">18.</strong> Config files and the view format</a></li><li class="chapter-item expanded "><a href="../reference/archiver-api.html"><strong aria-hidden="true">19.</strong> The archiver URL and API</a></li><li class="chapter-item expanded "><a href="../reference/mockarchiver.html"><strong aria-hidden="true">20.</strong> Mock archiver</a></li><li class="chapter-item expanded "><a href="../reference/api.html"><strong aria-hidden="true">21.</strong> Rust API</a></li><li class="chapter-item expanded "><a href="../reference/licences.html"><strong aria-hidden="true">22.</strong> Licences</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">archiveview</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/gilesknap/archiveview" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/gilesknap/archiveview/edit/main/docs/src/reference/config.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="config-files-and-the-view-format"><a class="header" href="#config-files-and-the-view-format">Config files and the view format</a></h1>
+<p>archiveview keeps its files in <code>$XDG_CONFIG_HOME/archiveview</code> when
+<code>XDG_CONFIG_HOME</code> is set, otherwise <code>~/.config/archiveview</code>:</p>
+<pre><code>~/.config/archiveview/
+├── settings.json
+├── history.json
+└── views/
+    ├── default.json
+    └── beam.json
+</code></pre>
+<p>All are pretty-printed JSON, written atomically (to a hidden temporary file,
+then renamed), so a crash never leaves half a file. Missing fields take
+their defaults, so files can be edited by hand; fields archiveview doesn't
+know are kept when it saves <code>settings.json</code>. A <code>settings.json</code> that is not
+valid JSON gives the defaults for that run, with a warning, and is not
+saved over until it is fixed.</p>
+<h2 id="settingsjson"><a class="header" href="#settingsjson">settings.json</a></h2>
+<pre><code class="language-json">{
+  "archiver_url": "http://archiver.example.org:17668/retrieval",
+  "recent_archivers": [
+    "http://archiver.example.org:17668/retrieval",
+    "http://127.0.0.1:17668/retrieval"
+  ],
+  "theme": "system",
+  "save_default_on_exit": true,
+  "ui_zoom": 1.25
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>default</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when neither <code>--archiver</code> nor the view opened at start-up names one. Written by <code>--archiver</code>, and by switching to another archiver in the pill or by opening a view (not by <strong>No archiver</strong>).</td></tr>
+<tr><td><code>recent_archivers</code></td><td>none</td><td>archivers used recently, newest first (at most 8), offered by the archiver pill</td></tr>
+<tr><td><code>theme</code></td><td><code>"system"</code></td><td><code>"system"</code> (follow the OS), <code>"light"</code> or <code>"dark"</code>; set from the ≡ menu</td></tr>
+<tr><td><code>ui_zoom</code></td><td><code>1</code></td><td>the interface zoom set in the ≡ menu or with <code>Ctrl+=</code>/<code>Ctrl+−</code>/<code>Ctrl+0</code>, from <code>0.5</code> to <code>3</code>; left out at <code>1</code>. <code>--ui-scale</code> and <code>ARCHIVEVIEW_UI_SCALE</code> win over it. For now there is one for the app; once archiveview has windows and layouts, each window keeps its own in its layout.</td></tr>
+<tr><td><code>save_default_on_exit</code></td><td><code>true</code></td><td>save the plot as the <code>default</code> view on quit, so the next start (with no PVs or <code>--view</code>) reopens where you left off</td></tr>
+</tbody></table>
+</div>
+<p>A missing or unreadable <code>settings.json</code> gives the defaults (an unreadable
+one logs a warning).</p>
+<h2 id="historyjson"><a class="header" href="#historyjson">history.json</a></h2>
+<p>The search box's <a href="../how-to/search.html#reuse-a-recent-search">recent searches</a>,
+newest first, saved each time they change:</p>
+<pre><code class="language-json">{
+  "searches": [
+    { "text": "BL16I-EA-*" },
+    { "text": "SR01C-DI-EBPM-01:SA:.*", "regex": true }
+  ]
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>searches[].text</code></td><td>the text as typed</td></tr>
+<tr><td><code>searches[].regex</code></td><td><code>true</code> when the <code>.*</code> toggle was on; default <code>false</code></td></tr>
+</tbody></table>
+</div>
+<p>At most 50 are kept. A missing or unreadable file means no recent searches
+(an unreadable one logs a warning, and is replaced the next time a search
+is remembered). Delete it, or use <strong>Clear search history</strong> in the ≡ menu,
+to forget them.</p>
+<h2 id="viewsnamejson"><a class="header" href="#viewsnamejson">views/NAME.json</a></h2>
+<pre><code class="language-json">{
+  "version": 1,
+  "pvs": [
+    { "name": "SR-DI-DCCT-01:SIGNAL", "axis": 0 },
+    { "name": "SR-DI-DCCT-01:LIFETIME", "axis": 1 },
+    { "name": "pva://bl01t:SUM", "color": "#d62728", "visible": false, "axis": 1 }
+  ],
+  "range": { "kind": "relative", "secs": 28800 },
+  "y": { "autoscale": true },
+  "axes": [ { "autoscale": false, "min": 1, "max": 100, "log": true, "name": "Lifetime" } ],
+  "archiver": "http://archiver.example.org:17668/retrieval"
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>version</code></td><td>the format version, <code>1</code>. A file with a newer version than the program knows is refused.</td></tr>
+<tr><td><code>pvs</code></td><td>the traces, in chip order</td></tr>
+<tr><td><code>pvs[].name</code></td><td>the PV as typed: <code>NAME</code>, <code>ca://NAME</code>, <code>pva://NAME</code>, <code>sim://sine</code>, ...</td></tr>
+<tr><td><code>pvs[].color</code></td><td><code>#rrggbb</code>; when absent, the palette colour for its position</td></tr>
+<tr><td><code>pvs[].visible</code></td><td><code>false</code> for a hidden trace; default <code>true</code></td></tr>
+<tr><td><code>pvs[].axis</code></td><td>its value axis: <code>0</code> for <code>y</code>, <code>1</code> for the first of <code>axes</code>, ... When absent (as in files from before there were several axes), the trace picks an axis when its data arrives</td></tr>
+<tr><td><code>range</code></td><td><code>{"kind": "relative", "secs": S}</code>: the last <code>S</code> seconds, following now; or <code>{"kind": "absolute", "start": "...", "end": "..."}</code> with RFC 3339 UTC times such as <code>"2026-10-17T09:00:00Z"</code></td></tr>
+<tr><td><code>y</code></td><td>the first value axis</td></tr>
+<tr><td><code>axes</code></td><td>the value axes after the first, in order; omitted when there is one</td></tr>
+<tr><td><code>y.autoscale</code>, <code>axes[].autoscale</code></td><td>default <code>true</code></td></tr>
+<tr><td><code>y.min</code>, <code>y.max</code></td><td>the value range when <code>autoscale</code> is <code>false</code></td></tr>
+<tr><td><code>archiver</code></td><td>the retrieval URL in use when the view was saved; opening the view switches to it. Optional: older files lack it, and the format version is still <code>1</code>.</td></tr>
+<tr><td><code>y.log</code></td><td><code>true</code> for a log value axis; default <code>false</code></td></tr>
+<tr><td><code>y.name</code></td><td>the name typed for the axis; when absent it names itself</td></tr>
+</tbody></table>
+</div>
+<p>The value-axis fields were added without changing <code>version</code>: older files
+load (their traces pick axes as they are added; <code>y</code> stays with the first
+visible PV, and <code>y.log</code> applies to every axis), and an older archiveview
+reads newer files with every trace on its unit's axis.</p>
+<p>View names can't be empty, start with <code>.</code>, or contain <code>/</code> or <code>\</code>. The view
+called <code>default</code> opens at startup when no PVs and no <code>--view</code> are given.</p>
+<p>A host app that embeds the plot gets the same structure from
+<code>Plot::view()</code> and can store it in its own files; see
+<a href="../how-to/embed.html">Embed the plot</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../reference/environment.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../reference/archiver-api.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../reference/environment.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../reference/archiver-api.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/switcher.js"></script>
+
+
+    </div>
+    </body>
+</html>
