@@ -19,6 +19,17 @@ use std::fmt;
 mod decode;
 #[cfg(not(target_arch = "wasm32"))]
 mod http;
+
+/// No blocking HTTP in a browser: every request fails at once.
+#[cfg(target_arch = "wasm32")]
+impl ArchiverClient {
+    fn get(&self, url: &str) -> Result<String> {
+        let _ = self.timeout_secs;
+        Err(Error::Transport(format!(
+            "{url}: no blocking HTTP in a browser"
+        )))
+    }
+}
 mod json;
 mod time;
 
@@ -476,7 +487,10 @@ impl ArchiverClient {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+// The requests block, so call them from a worker thread. In a browser
+// (wasm32) there is no blocking HTTP: they fail at once with
+// `Error::Transport`, and a browser build would fetch the `*_url` URLs
+// itself and hand the bodies to `parse_*`.
 impl ArchiverClient {
     /// Fetch and decode one PV's data. `Ok(None)` when the archiver has no
     /// data in the range (a `[ ]` response); `Err(Http{404})` when the PV is

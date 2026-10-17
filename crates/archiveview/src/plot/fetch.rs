@@ -307,11 +307,12 @@ impl Fetcher {
         };
         #[cfg(not(target_arch = "wasm32"))]
         drop(pvs.runtime().spawn_blocking(task));
+        // No runtime in a browser, and no blocking HTTP: the request
+        // fails at once (see `archiver`), so its trace goes live only.
         #[cfg(target_arch = "wasm32")]
         {
-            // No blocking HTTP in a browser (yet): live only.
-            let _ = (pvs, panicked);
-            drop(task);
+            let _ = pvs;
+            task();
         }
     }
 }
