@@ -32,6 +32,7 @@ mod undo;
 mod window;
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use archiver::{ArchiverClient, Operator, ValueKind};
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
@@ -107,6 +108,8 @@ pub struct Plot {
     home_span: f64,
     /// The range drawn, easing toward `window`'s.
     shown: Option<(f64, f64)>,
+    /// When (seconds since 1970) `shown` was worked out.
+    shown_at: f64,
     /// The value axes, in the order they are laid out (those with no
     /// visible trace aside).
     axes: Vec<ValueAxis>,
@@ -147,6 +150,9 @@ pub struct Plot {
     live_since: Option<f64>,
     /// The Live pill's dot pulses this frame.
     pulse: bool,
+    /// The shortest wait before a repaint the plot asks for itself
+    /// ([`Plot::set_min_repaint_interval`]).
+    min_repaint: Duration,
     /// egui's time at the last frame, for animation steps.
     last_frame: Option<f64>,
     /// Draw the next frame without easing (direct manipulation).
@@ -312,6 +318,7 @@ impl Plot {
             window: Window::live(3600.0),
             home_span: 3600.0,
             shown: None,
+            shown_at: 0.0,
             axes: Vec::new(),
             next_axis: 0,
             default_log: false,
@@ -330,6 +337,7 @@ impl Plot {
             repaint: None,
             live_since: None,
             pulse: false,
+            min_repaint: Duration::ZERO,
             last_frame: None,
             snap: true,
             glide: 0.0,
@@ -716,6 +724,27 @@ impl Plot {
                 }))
     }
 
+    /// Wait at least `interval` before each repaint the plot schedules
+    /// itself: scrolling while live, the Live pill's pulse, the spinners
+    /// while fetching or probing, and the waits for the fetch and search
+    /// debounces and the next probe. Zero, the default, keeps the plot's
+    /// own pace (live scrolling at up to 15 fps, the pulse and spinners
+    /// smoother). Easing and gliding after the user's own pans and zooms,
+    /// and the repaint when a fetch finishes, are not held back. For a
+    /// host whose every repaint redraws more than the plot (bobview's
+    /// browser build draws it in the root viewport).
+    pub fn set_min_repaint_interval(&mut self, interval: Duration) {
+        self.min_repaint = interval;
+    }
+
+    /// Ask for a repaint `after` from now, or later for
+    /// [`Plot::set_min_repaint_interval`]: for the repaints the plot
+    /// schedules itself, during a frame (so of the viewport drawn).
+    #[track_caller]
+    fn repaint_after(&self, ctx: &egui::Context, after: Duration) {
+        ctx.request_repaint_after(after.max(self.min_repaint));
+    }
+
     /// Draw the whole widget (top bar, plot, legend chips) into the space
     /// `ui` offers, handle its input, and schedule its own repaints.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -916,15 +945,20 @@ impl Plot {
             let tol = self.window.span * 1e-3;
             (a - target.0).abs() <= tol && (b - target.1).abs() <= tol
         });
-        if self.glide != 0.0 || !settled || self.pending {
+        // Easing and gliding follow the user's hand, so at full speed;
+        // waiting out the fetch debounce is held to the host's minimum.
+        if self.glide != 0.0 || !settled {
             ctx.request_repaint();
+        } else if self.pending {
+            self.repaint_after(&ctx, Duration::ZERO);
         } else if self.window.live {
             let per_pixel = self.window.span / f.data.width().max(1.0) as f64;
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                per_pixel.clamp(1.0 / 15.0, 1.0),
-            ));
+            self.repaint_after(
+                &ctx,
+                Duration::from_secs_f64(per_pixel.clamp(1.0 / 15.0, 1.0)),
+            );
             if self.pulse {
-                ctx.request_repaint_after(std::time::Duration::from_millis(66));
+                self.repaint_after(&ctx, Duration::from_millis(66));
             }
         }
     }
@@ -966,9 +1000,21 @@ impl Plot {
     fn shown_range(&mut self, now: f64, dt: f64) -> (f64, f64) {
         let (from, to) = self.window.range(now);
         let (mut a, mut b) = match self.shown {
-            Some(s) if !std::mem::take(&mut self.snap) => s,
+            // With a minimum repaint interval, time passing while live
+            // moves what is drawn as it moves the window, rather than
+            // easing after it: easing each step would spend the frames the
+            // host asked to save.
+            Some((a, b)) if !std::mem::take(&mut self.snap) => {
+                let passed = if self.window.live && !self.min_repaint.is_zero() {
+                    now - self.shown_at
+                } else {
+                    0.0
+                };
+                (a + passed, b + passed)
+            }
             _ => (from, to),
         };
+        self.shown_at = now;
         let span = to - from;
         window::ease(&mut a, from, dt, span);
         window::ease(&mut b, to, dt, span);
@@ -1419,10 +1465,9 @@ impl Plot {
             // Wake for the next probe even in an idle window.
             let next = self.monitor.probed_at + self.monitor.reprobe - now;
             if let Some(r) = &self.repaint {
-                r.ctx.request_repaint_after_for(
-                    std::time::Duration::from_secs_f64(next.clamp(0.05, status::REPROBE)),
-                    r.viewport,
-                );
+                let after = Duration::from_secs_f64(next.clamp(0.05, status::REPROBE));
+                r.ctx
+                    .request_repaint_after_for(after.max(self.min_repaint), r.viewport);
             }
         }
     }
@@ -2208,6 +2253,9 @@ mod tests {
         mods: egui::Modifiers,
         /// The window's width (points).
         width: f32,
+        /// How soon (seconds, to the millisecond) the last frame asked to
+        /// be drawn again; `None` for not until something happens.
+        repaint: Option<f64>,
     }
 
     impl Harness {
@@ -2218,13 +2266,17 @@ mod tests {
                 t: 0.0,
                 mods: egui::Modifiers::NONE,
                 width: 1000.0,
+                repaint: None,
             };
             h.frame(vec![]);
             h
         }
 
         fn frame(&mut self, mut events: Vec<egui::Event>) {
-            events.insert(0, egui::Event::ModifiersChanged(self.mods));
+            // Not into an idle frame: egui repaints at once after input.
+            if !events.is_empty() || !self.mods.is_none() {
+                events.insert(0, egui::Event::ModifiersChanged(self.mods));
+            }
             let input = egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     Pos2::ZERO,
@@ -2238,6 +2290,10 @@ mod tests {
             let Self { ctx, plot, .. } = self;
             let mut out = ctx.run_ui(input, |ui| plot.ui(ui));
             out.textures_delta.clear();
+            // egui takes the next frame's predicted time off the delay.
+            let delay = out.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            self.repaint = (delay != Duration::MAX)
+                .then(|| ((delay.as_secs_f64() + 1.0 / 60.0) * 1000.0).round() / 1000.0);
         }
 
         fn key(&mut self, key: egui::Key) {
@@ -4439,5 +4495,87 @@ mod tests {
         h.frame(vec![]);
         assert_eq!(h.plot.undo.len(), (3, 0));
         assert_eq!(h.plot.names().len(), 6);
+    }
+
+    /// A settled live plot of `sim://sine`, the pointer away from it and
+    /// the Live pill's pulse over.
+    fn idle_live_sine() -> Harness {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.add_pvs(&names(&["sim://sine"]));
+        let mut h = Harness::new(p);
+        h.until(|p| p.traces.iter().all(|t| t.axis.is_some()));
+        h.t += PULSE_SECS;
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        assert!(h.plot.window.live && !h.plot.pulse);
+        h
+    }
+
+    #[test]
+    fn a_live_plot_scrolls_at_its_own_pace_by_default() {
+        let mut h = idle_live_sine();
+        // An hour over 1000 points: a pixel every 3.6 s, but once a second
+        // at least.
+        assert_eq!(h.repaint, Some(1.0));
+        // Ten seconds: as fast as 15 fps.
+        h.plot.window = Window::live(10.0);
+        h.plot.snap = true;
+        h.frame(vec![]);
+        assert_eq!(h.repaint, Some(0.067));
+    }
+
+    #[test]
+    fn the_host_floors_the_repaints_the_plot_schedules() {
+        let mut h = idle_live_sine();
+        h.plot.set_min_repaint_interval(Duration::from_millis(250));
+        h.plot.window = Window::live(10.0);
+        h.plot.snap = true;
+        h.frame(vec![]);
+        assert_eq!(h.repaint, Some(0.25));
+        // Longer waits are kept.
+        h.plot.window = Window::live(3600.0);
+        h.plot.snap = true;
+        h.frame(vec![]);
+        assert_eq!(h.repaint, Some(1.0));
+        // The pulse (as when following now starts) is slowed too.
+        h.plot.live_since = None;
+        h.frame(vec![]);
+        assert!(h.plot.pulse);
+        assert_eq!(h.repaint, Some(0.25));
+        // A plot that is not live asks for none.
+        h.plot.window = Window {
+            span: 3600.0,
+            end: now(),
+            live: false,
+        };
+        h.plot.snap = true;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.repaint, None);
+    }
+
+    #[test]
+    fn with_a_floor_time_passing_scrolls_without_easing() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.window = Window::live(10.0);
+        const NOW: f64 = 1_000_000.0;
+        p.shown_range(NOW, 0.1);
+        p.snap = false;
+        // By default a step of time is eased after, so drawn for several
+        // frames.
+        let target = p.window.range(NOW + 0.25);
+        assert_ne!(p.shown_range(NOW + 0.25, 0.1), target);
+        // With a floor, the drawn range moves with it.
+        p.set_min_repaint_interval(Duration::from_millis(250));
+        p.shown = None;
+        p.shown_range(NOW, 0.1);
+        p.snap = false;
+        assert_eq!(p.shown_range(NOW + 0.25, 0.1), target);
+        // The user's own changes still ease.
+        p.window.span = 5.0;
+        assert_ne!(p.shown_range(NOW + 0.5, 0.1), p.window.range(NOW + 0.5));
     }
 }
