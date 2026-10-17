@@ -61,6 +61,32 @@ fn search_and_metadata_urls() {
         client().metadata_url("bl01t:SUM"),
         "http://arch:17668/retrieval/bpl/getMetadata?pv=bl01t%3ASUM"
     );
+    assert_eq!(
+        client().version_url(),
+        "http://arch:17668/retrieval/bpl/getVersion"
+    );
+}
+
+#[test]
+fn hosts_for_display() {
+    let host = |u: &str| ArchiverClient::new(u).unwrap().host().to_string();
+    assert_eq!(
+        host("pbraw://archappl.diamond.ac.uk/retrieval"),
+        "archappl.diamond.ac.uk"
+    );
+    assert_eq!(host("http://127.0.0.1:17668"), "127.0.0.1:17668");
+    assert_eq!(host("https://h/arch"), "h");
+}
+
+#[test]
+fn versions() {
+    assert_eq!(
+        parse_version(r#"{"version":"Archiver Appliance Version 1.1.0"}"#).unwrap(),
+        "Archiver Appliance Version 1.1.0"
+    );
+    assert!(parse_version("{}").is_err());
+    assert!(parse_version("[]").is_err());
+    assert!(parse_version("<html>").is_err());
 }
 
 #[test]

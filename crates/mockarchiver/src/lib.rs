@@ -18,6 +18,8 @@
 //!   sorted; 404 with neither parameter.
 //! - `GET /retrieval/bpl/getMetadata?pv=..` — `DBRType`, `elementCount`,
 //!   `units`, `precision`, ... as strings.
+//! - `GET /retrieval/bpl/getVersion` — `{"version": "Archiver Appliance
+//!   Version <mock version>"}`.
 //! - `GET /mgmt/bpl/getAllPVs?pv=<glob>[,<glob>]&regex=..&limit=N` — unsorted.
 //!
 //! Every endpoint is served on one port (like the single-container
@@ -360,6 +362,7 @@ pub(crate) fn route(url: &str, clock: &Clock) -> Reply {
         "/retrieval/data/getData.json" => data::get_data(&params, clock),
         "/retrieval/bpl/getMatchingPVs" => bpl::get_matching_pvs(&params),
         "/retrieval/bpl/getMetadata" => bpl::get_metadata(&params),
+        "/retrieval/bpl/getVersion" => bpl::get_version(),
         "/mgmt/bpl/getAllPVs" => bpl::get_all_pvs(&params),
         _ => Reply::error(404, "Not Found", &format!("{path} is not served here")),
     }
