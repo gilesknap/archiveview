@@ -46,6 +46,7 @@ pub struct MockArchiver {
     addr: SocketAddr,
     server: Arc<tiny_http::Server>,
     stop: Arc<AtomicBool>,
+    metadata: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -60,18 +61,25 @@ impl MockArchiver {
             .ok_or_else(|| io::Error::other("not an IP listener"))?;
         let clock = Arc::new(Clock::started_now());
         let stop = Arc::new(AtomicBool::new(false));
+        let metadata = Arc::new(AtomicBool::new(true));
         let threads = (0..WORKERS)
             .map(|i| {
-                let (server, clock, stop) = (server.clone(), clock.clone(), stop.clone());
+                let (server, clock, stop, metadata) = (
+                    server.clone(),
+                    clock.clone(),
+                    stop.clone(),
+                    metadata.clone(),
+                );
                 std::thread::Builder::new()
                     .name(format!("mockarchiver-{i}"))
-                    .spawn(move || serve(&server, &clock, &stop))
+                    .spawn(move || serve(&server, &clock, &stop, &metadata))
             })
             .collect::<io::Result<Vec<_>>>()?;
         Ok(Self {
             addr,
             server,
             stop,
+            metadata,
             threads,
         })
     }
@@ -88,6 +96,12 @@ impl MockArchiver {
     /// `http://127.0.0.1:PORT`, what to pass as `--archiver`.
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    /// Whether `bpl/getMetadata` is served (the default) or answers 404,
+    /// like a proxy that passes on only data and search requests.
+    pub fn serve_metadata(&self, on: bool) {
+        self.metadata.store(on, Ordering::SeqCst);
     }
 
     /// Serve until the process is killed (the binary).
@@ -110,11 +124,17 @@ impl Drop for MockArchiver {
     }
 }
 
-fn serve(server: &tiny_http::Server, clock: &Clock, stop: &AtomicBool) {
+fn serve(server: &tiny_http::Server, clock: &Clock, stop: &AtomicBool, metadata: &AtomicBool) {
     loop {
         match server.recv() {
             Ok(rq) => {
-                let reply = route(rq.url(), clock);
+                let reply = if !metadata.load(Ordering::SeqCst)
+                    && rq.url().starts_with("/retrieval/bpl/getMetadata")
+                {
+                    Reply::error(404, "Not Found", "getMetadata is not served here")
+                } else {
+                    route(rq.url(), clock)
+                };
                 log::debug!("{} {} -> {}", rq.method(), rq.url(), reply.status);
                 let _ = rq.respond(reply.into_response());
             }
