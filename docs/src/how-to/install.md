@@ -47,11 +47,11 @@ With a stable Rust toolchain ([rustup](https://rustup.rs)), build the
 plotter and the mock archiver from crates.io into `~/.cargo/bin`:
 
 ```bash
-cargo install archiveview archiveview-mockarchiver
+cargo install --locked archiveview archiveview-mockarchiver
 ```
 
 This builds for the machine it runs on, so it suits platforms with no
-release build. `archiveview-ssh` comes only with the release tarball.
+release build; `--locked` builds with the dependency versions CI tested. `archiveview-ssh` comes only with the release tarball.
 
 ## Put it on your PATH
 

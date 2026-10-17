@@ -26,25 +26,27 @@ jobs pass. The `publish` job uses crates.io
 [trusted publishing](https://crates.io/docs/trusted-publishing), so no token
 is stored in GitHub.
 
-Trusted publishing can only be set up for a crate that already exists, so
-the first release is published by hand from a clean checkout of the tag, with
-an API token from <https://crates.io/settings/tokens>. `Cargo.toml` is not
-bumped in the repository, so set the tag's version first as CI does:
+Each crate on crates.io has a trusted publisher: GitHub, owner `gilesknap`,
+repository `archiveview`, workflow `ci.yml` and environment `release`.
+
+If the job fails after publishing some of the crates, a re-run fails on the
+version already published. Publish the rest by hand instead, from a checkout
+of the tag with an API token from <https://crates.io/settings/tokens>, after
+setting the tag's version as CI does (`Cargo.toml` is not bumped in the
+repository):
 
 ```bash
 git checkout v0.2.0
 V=0.2.0 perl -0pi -e 's/^version = .*$/version = "$ENV{V}"/m;' \
     -e 's/^(archiver = \{.*version = ")[^"]*/$1$ENV{V}/m' Cargo.toml
 cargo login
-cargo publish --workspace --allow-dirty
-git checkout Cargo.toml
+cargo publish -p archiveview --allow-dirty   # each crate not yet published
+git checkout Cargo.toml Cargo.lock
 ```
 
-Then, for each of the three crates, open its Settings on crates.io and add a
-trusted publisher: GitHub, owner `gilesknap`, repository `archiveview`,
-workflow `ci.yml` and environment `release`. The first tag's `publish` job
-fails, as the crates are already published; from the next tag on it
-publishes them.
+A new crate added to the workspace is published by hand the same way the
+first time, since trusted publishing can only be set up for a crate that
+already exists; then add its trusted publisher as above.
 
 ## Docs
 
