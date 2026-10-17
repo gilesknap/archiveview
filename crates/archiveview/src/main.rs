@@ -51,7 +51,8 @@ struct Cli {
     /// Open the saved view NAME
     #[arg(long, value_name = "NAME")]
     view: Option<String>,
-    /// Show this span up to now, e.g. 1h, 90m, 7d, "2 days"
+    /// Show this span up to now, e.g. 1h, 90m, 7d, 3w, 6mo, 1y, "2 days"
+    /// (m is minutes, mo 30 days, y 365 days)
     #[arg(short, long, value_name = "SPAN", value_parser = parse_range)]
     range: Option<f64>,
     /// Colour scheme (default: settings.json, else the system's)
@@ -89,7 +90,7 @@ struct Cli {
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_range(text: &str) -> Result<f64, String> {
     archiveview::plot::parse_span(text)
-        .ok_or_else(|| format!("expected a span such as 1h, 90m or 7d, not {text:?}"))
+        .ok_or_else(|| format!("expected a span such as 1h, 90m, 7d or 1y, not {text:?}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

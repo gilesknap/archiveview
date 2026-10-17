@@ -5,14 +5,16 @@ list is in [Gestures and keys](../reference/controls.md).
 
 ## Choose a time range
 
-The pill in the bar holds the presets **1h**, **8h**, **1d** and **7d**. A
+The pill in the bar holds the presets **1h**, **8h**, **1d** and **1w**. A
 preset shows that span ending now, following the current time.
 
 The **⋯** segment opens a small popover for anything else. Its **Last**
 field has the keyboard, with the current span selected: type a span such as
-`90m`, `2 days` or `1 hour 30 min` and press Enter to show it ending now,
-following the current time. The chips beside the label, **2h**, **12h**,
-**3d** and **30d**, show those spans in one click.
+`90m`, `2 days`, `3w` or `1 hour 30 min` and press Enter to show it ending
+now, following the current time. The units are `s`, `m` (minutes), `h`,
+`d`, `w`, `mo` (30 days) and `y` (365 days), or their names (`min`, `hour`,
+`week`, `month`, `year`, ...). The chips beside the label, **2h**, **12h**,
+**3d**, **4w** and **1y**, show those spans in one click.
 
 For a fixed range, fill in **From** and **To** as `YYYY-MM-DD HH:MM` (local
 time, seconds optional) and press Enter in either. Tab moves from From to To.

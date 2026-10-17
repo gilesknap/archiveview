@@ -10,7 +10,7 @@ pub const PRESETS: &[(f64, &str)] = &[
     (3600.0, "1h"),
     (8.0 * 3600.0, "8h"),
     (86_400.0, "1d"),
-    (7.0 * 86_400.0, "7d"),
+    (7.0 * 86_400.0, "1w"),
 ];
 
 /// Panning to within this fraction of the span of now follows now again.

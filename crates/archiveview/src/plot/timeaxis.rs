@@ -226,8 +226,9 @@ pub fn tag_time(t: f64, span: f64) -> String {
     d.format(format).to_string()
 }
 
-/// A span typed into the custom range field, such as `90m`, `1 hour 30 min`
-/// or `2 days`, in seconds (bobview's strip chart `parse_span`).
+/// A span typed into the custom range field, such as `90m`, `1 hour 30 min`,
+/// `2 days`, `3w` or `1y`, in seconds (bobview's strip chart `parse_span`).
+/// A month is 30 days and a year 365; plain `m` is minutes.
 pub fn parse_span(text: &str) -> Option<f64> {
     let mut total = 0.0;
     let mut words = text.split_whitespace().peekable();
@@ -250,6 +251,8 @@ pub fn parse_span(text: &str) -> Option<f64> {
             "h" | "hr" | "hour" => 3600.0,
             "d" | "day" => 86_400.0,
             "w" | "wk" | "week" => 7.0 * 86_400.0,
+            "mo" | "month" => 30.0 * 86_400.0,
+            "y" | "yr" | "year" => 365.0 * 86_400.0,
             _ => return None,
         };
         total += n * secs;
@@ -258,15 +261,23 @@ pub fn parse_span(text: &str) -> Option<f64> {
     (any && total > 0.0).then_some(total)
 }
 
-/// A span as short text: "45s", "3h 20m", "1d", "7d 12h".
+/// A span as short text: "45s", "3h 20m", "1d", "1w 12h", "1y 3w".
 pub fn format_span(secs: f64) -> String {
-    let s = secs.round().max(1.0) as u64;
-    let (d, h, m, sec) = (s / 86_400, s % 86_400 / 3600, s % 3600 / 60, s % 60);
-    let parts: Vec<String> = [(d, "d"), (h, "h"), (m, "m"), (sec, "s")]
-        .iter()
-        .filter(|(n, _)| *n > 0)
-        .map(|(n, u)| format!("{n}{u}"))
-        .collect();
+    let mut s = secs.round().max(1.0) as u64;
+    let mut parts = Vec::new();
+    for (size, unit) in [
+        (365 * 86_400, "y"),
+        (7 * 86_400, "w"),
+        (86_400, "d"),
+        (3600, "h"),
+        (60, "m"),
+        (1, "s"),
+    ] {
+        if s >= size {
+            parts.push(format!("{}{unit}", s / size));
+            s %= size;
+        }
+    }
     // The two largest units are plenty.
     parts.into_iter().take(2).collect::<Vec<_>>().join(" ")
 }
@@ -480,17 +491,35 @@ mod tests {
 
     #[test]
     fn spans_parse_and_print() {
-        assert_eq!(parse_span("1 minute"), Some(60.0));
-        assert_eq!(parse_span("90m"), Some(5400.0));
-        assert_eq!(parse_span("1 hour 30 minutes"), Some(5400.0));
-        assert_eq!(parse_span("2 days"), Some(172_800.0));
-        assert_eq!(parse_span("1w"), Some(604_800.0));
+        const D: f64 = 86_400.0;
+        // Typed text, its seconds, and how that span prints.
+        let table = [
+            ("45s", 45.0, "45s"),
+            ("1 minute", 60.0, "1m"),
+            ("90m", 5400.0, "1h 30m"),
+            ("1 hour 30 minutes", 5400.0, "1h 30m"),
+            ("12000", 12_000.0, "3h 20m"),
+            ("2 days", 2.0 * D, "2d"),
+            ("7d", 7.0 * D, "1w"),
+            ("1w", 7.0 * D, "1w"),
+            ("2 weeks", 14.0 * D, "2w"),
+            ("5w 2d", 37.0 * D, "5w 2d"),
+            ("7d 12h 1m", 7.5 * D + 60.0, "1w 12h"),
+            ("1mo", 30.0 * D, "4w 2d"),
+            ("2 months", 60.0 * D, "8w 4d"),
+            ("1y", 365.0 * D, "1y"),
+            ("1 year 3 weeks", 386.0 * D, "1y 3w"),
+            ("2yrs", 730.0 * D, "2y"),
+        ];
+        for (text, secs, shown) in table {
+            assert_eq!(parse_span(text), Some(secs), "{text}");
+            assert_eq!(format_span(secs), shown, "{text}");
+            // What prints parses back, to within the units dropped.
+            let back = parse_span(shown).unwrap();
+            assert!(back <= secs && secs - back < D, "{text}: {shown}");
+        }
         assert_eq!(parse_span("soon"), None);
         assert_eq!(parse_span(""), None);
-        assert_eq!(format_span(3600.0), "1h");
-        assert_eq!(format_span(12_000.0), "3h 20m");
-        assert_eq!(format_span(7.0 * 86_400.0 + 43_200.0 + 61.0), "7d 12h");
-        assert_eq!(format_span(45.0), "45s");
     }
 
     #[test]

@@ -56,7 +56,7 @@ chip for each sits along the bottom with its latest value.
   As you zoom out, the archiver sends the data thinned to the plot's width;
   where a pixel holds many samples you see the line's mean with a shaded
   min-to-max band.
-- Click **7d** in the time-range pill to see the whole week, then
+- Click **1w** in the time-range pill to see the whole week, then
   **double-click** the plot to return to where you started.
 - The pill reading **● 127.0.0.1:17668** is the archiver: its dot is green
   while the archiver answers. Hover over it for details.
