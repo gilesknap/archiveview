@@ -307,243 +307,244 @@
 <a href=#307 id=307 data-nosnippet>307</a>        };
 <a href=#308 id=308 data-nosnippet>308</a>        <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
 <a href=#309 id=309 data-nosnippet>309</a>        </span>drop(pvs.runtime().spawn_blocking(task));
-<a href=#310 id=310 data-nosnippet>310</a>        <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
-<a href=#311 id=311 data-nosnippet>311</a>        </span>{
-<a href=#312 id=312 data-nosnippet>312</a>            <span class="comment">// No blocking HTTP in a browser (yet): live only.
-<a href=#313 id=313 data-nosnippet>313</a>            </span><span class="kw">let _ </span>= (pvs, panicked);
-<a href=#314 id=314 data-nosnippet>314</a>            drop(task);
-<a href=#315 id=315 data-nosnippet>315</a>        }
-<a href=#316 id=316 data-nosnippet>316</a>    }
-<a href=#317 id=317 data-nosnippet>317</a>}
-<a href=#318 id=318 data-nosnippet>318</a>
-<a href=#319 id=319 data-nosnippet>319</a><span class="doccomment">/// Keep a probe's answer for the plot, unless one about a newer archiver
-<a href=#320 id=320 data-nosnippet>320</a>/// is waiting: an answer about an earlier archiver arriving late must not
-<a href=#321 id=321 data-nosnippet>321</a>/// hide the current one's (the plot may not have been drawn in between).
-<a href=#322 id=322 data-nosnippet>322</a></span><span class="kw">fn </span>store_probe(slot: <span class="kw-2">&amp;</span>Mutex&lt;<span class="prelude-ty">Option</span>&lt;Probed&gt;&gt;, probed: Probed) {
-<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">let </span><span class="kw-2">mut </span>slot = slot.lock();
-<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">if </span>slot.as_ref().is_none_or(|(epoch, <span class="kw">_</span>)| probed.<span class="number">0 </span>&gt;= <span class="kw-2">*</span>epoch) {
-<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw-2">*</span>slot = <span class="prelude-val">Some</span>(probed);
-<a href=#326 id=326 data-nosnippet>326</a>    }
-<a href=#327 id=327 data-nosnippet>327</a>}
-<a href=#328 id=328 data-nosnippet>328</a>
-<a href=#329 id=329 data-nosnippet>329</a><span class="doccomment">/// Probe `client`: its version, or `None` when it answers HTTP but not to
-<a href=#330 id=330 data-nosnippet>330</a>/// `getVersion` (a proxy passing on only data and search, or refusing it
-<a href=#331 id=331 data-nosnippet>331</a>/// with 401 or 403), as long as a search answers.
-<a href=#332 id=332 data-nosnippet>332</a></span><span class="kw">fn </span>probe(client: <span class="kw-2">&amp;</span>ArchiverClient) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;String&gt;, archiver::Error&gt; {
-<a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">let </span>e = <span class="kw">match </span>client.version() {
-<a href=#334 id=334 data-nosnippet>334</a>        <span class="prelude-val">Ok</span>(v) =&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(v)),
-<a href=#335 id=335 data-nosnippet>335</a>        <span class="prelude-val">Err</span>(e @ archiver::Error::Http { status, .. }) <span class="kw">if </span>!(<span class="number">502</span>..=<span class="number">504</span>).contains(<span class="kw-2">&amp;</span>status) =&gt; e,
-<a href=#336 id=336 data-nosnippet>336</a>        <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(e),
-<a href=#337 id=337 data-nosnippet>337</a>    };
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="macro">log::debug!</span>(<span class="string">"{}: no getVersion: {e}"</span>, client.base());
-<a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">match </span>client.search(<span class="kw-2">&amp;</span>Search::exact(<span class="string">"archiveview"</span>, <span class="number">1</span>)) {
-<a href=#340 id=340 data-nosnippet>340</a>        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
-<a href=#341 id=341 data-nosnippet>341</a>        <span class="comment">// 404 for both: nothing is served here.
-<a href=#342 id=342 data-nosnippet>342</a>        </span><span class="prelude-val">Err</span>(check) <span class="kw">if </span>check.is_not_archived() &amp;&amp; e.is_not_archived() =&gt; <span class="prelude-val">Err</span>(
-<a href=#343 id=343 data-nosnippet>343</a>            archiver::Error::BadUrl(<span class="macro">format!</span>(<span class="string">"{}: not an archiver (HTTP 404)"</span>, client.base())),
-<a href=#344 id=344 data-nosnippet>344</a>        ),
-<a href=#345 id=345 data-nosnippet>345</a>        <span class="prelude-val">Err</span>(check) <span class="kw">if </span><span class="kw">super</span>::status::archiver_fault(<span class="kw-2">&amp;</span>check, <span class="bool-val">false</span>) =&gt; <span class="prelude-val">Err</span>(check),
-<a href=#346 id=346 data-nosnippet>346</a>        <span class="comment">// Something answers, if not to these.
-<a href=#347 id=347 data-nosnippet>347</a>        </span><span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
-<a href=#348 id=348 data-nosnippet>348</a>    }
-<a href=#349 id=349 data-nosnippet>349</a>}
-<a href=#350 id=350 data-nosnippet>350</a>
-<a href=#351 id=351 data-nosnippet>351</a><span class="doccomment">/// A 404 means "not archived" only when the archiver itself said so. With
-<a href=#352 id=352 data-nosnippet>352</a>/// a wrong `--archiver` base (port or context path) Tomcat answers 404 to
-<a href=#353 id=353 data-nosnippet>353</a>/// every URL, so check with a search for the exact name, which any
-<a href=#354 id=354 data-nosnippet>354</a>/// archiver answers: only if that is a 404 too is the URL wrong, and that
-<a href=#355 id=355 data-nosnippet>355</a>/// is reported as an error. Any other failure of the check (a timeout, a
-<a href=#356 id=356 data-nosnippet>356</a>/// server error) proves nothing, so the PV stays "not archived".
-<a href=#357 id=357 data-nosnippet>357</a></span><span class="kw">fn </span>check_404(client: <span class="kw-2">&amp;</span>ArchiverClient, pv: <span class="kw-2">&amp;</span>str, e: archiver::Error) -&gt; archiver::Error {
-<a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">match </span>client.search(<span class="kw-2">&amp;</span>Search::exact(pv, <span class="number">1</span>)) {
-<a href=#359 id=359 data-nosnippet>359</a>        <span class="prelude-val">Err</span>(check) <span class="kw">if </span>check.is_not_archived() =&gt; {
-<a href=#360 id=360 data-nosnippet>360</a>            <span class="macro">log::debug!</span>(<span class="string">"{pv}: {e}; the PV search: {check}"</span>);
-<a href=#361 id=361 data-nosnippet>361</a>            archiver::Error::BadUrl(<span class="macro">format!</span>(
-<a href=#362 id=362 data-nosnippet>362</a>                <span class="string">"{}: not an archiver (HTTP 404 for data and search)"</span>,
-<a href=#363 id=363 data-nosnippet>363</a>                client.base()
-<a href=#364 id=364 data-nosnippet>364</a>            ))
-<a href=#365 id=365 data-nosnippet>365</a>        }
-<a href=#366 id=366 data-nosnippet>366</a>        <span class="prelude-val">Err</span>(check) =&gt; {
-<a href=#367 id=367 data-nosnippet>367</a>            <span class="macro">log::debug!</span>(<span class="string">"{pv}: {e}; the PV search failed too: {check}"</span>);
-<a href=#368 id=368 data-nosnippet>368</a>            e
-<a href=#369 id=369 data-nosnippet>369</a>        }
-<a href=#370 id=370 data-nosnippet>370</a>        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; e,
-<a href=#371 id=371 data-nosnippet>371</a>    }
-<a href=#372 id=372 data-nosnippet>372</a>}
-<a href=#373 id=373 data-nosnippet>373</a>
-<a href=#374 id=374 data-nosnippet>374</a><span class="doccomment">/// The window to fetch for a visible `from..to`: padded by [`PAD`] of the
-<a href=#375 id=375 data-nosnippet>375</a>/// span either side.
-<a href=#376 id=376 data-nosnippet>376</a></span><span class="kw">pub fn </span>padded(from: f64, to: f64) -&gt; (f64, f64) {
-<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">let </span>pad = (to - from) * PAD;
-<a href=#378 id=378 data-nosnippet>378</a>    (from - pad, to + pad)
-<a href=#379 id=379 data-nosnippet>379</a>}
-<a href=#380 id=380 data-nosnippet>380</a>
-<a href=#381 id=381 data-nosnippet>381</a><span class="doccomment">/// The operator for a plot `width_px` device pixels wide showing part of a
-<a href=#382 id=382 data-nosnippet>382</a>/// padded window: about one bin per device pixel of the padded window (at
-<a href=#383 id=383 data-nosnippet>383</a>/// most `MAX_BINS`), or raw. Finer bins only alias: the means zig-zag into
-<a href=#384 id=384 data-nosnippet>384</a>/// a solid block where the envelope already shows the extremes.
-<a href=#385 id=385 data-nosnippet>385</a></span><span class="kw">pub fn </span>operator(width_px: f32, raw: bool) -&gt; Operator {
-<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">if </span>raw {
-<a href=#387 id=387 data-nosnippet>387</a>        Operator::Raw
-<a href=#388 id=388 data-nosnippet>388</a>    } <span class="kw">else </span>{
-<a href=#389 id=389 data-nosnippet>389</a>        Operator::for_width(width_px.max(<span class="number">1.0</span>) * (<span class="number">1.0 </span>+ <span class="number">2.0 </span>* PAD <span class="kw">as </span>f32))
-<a href=#390 id=390 data-nosnippet>390</a>    }
-<a href=#391 id=391 data-nosnippet>391</a>}
-<a href=#392 id=392 data-nosnippet>392</a>
-<a href=#393 id=393 data-nosnippet>393</a><span class="doccomment">/// The longest span fetched raw, for traces that cannot be binned
-<a href=#394 id=394 data-nosnippet>394</a>/// (waveforms, text, enums): a week of a busy waveform could be gigabytes.
-<a href=#395 id=395 data-nosnippet>395</a>/// Wider windows show only the latest part of their history.
-<a href=#396 id=396 data-nosnippet>396</a></span><span class="kw">pub const </span>RAW_MAX_SPAN: f64 = <span class="number">86_400.0</span>;
-<a href=#397 id=397 data-nosnippet>397</a>
-<a href=#398 id=398 data-nosnippet>398</a><span class="doccomment">/// The start of the history a trace needs for a visible `from..to`: all of
-<a href=#399 id=399 data-nosnippet>399</a>/// it, or for a raw-only trace no more than [`RAW_MAX_SPAN`].
-<a href=#400 id=400 data-nosnippet>400</a></span><span class="kw">pub fn </span>needed_from(from: f64, to: f64, raw: bool) -&gt; f64 {
-<a href=#401 id=401 data-nosnippet>401</a>    <span class="kw">if </span>raw {
-<a href=#402 id=402 data-nosnippet>402</a>        from.max(to - RAW_MAX_SPAN)
-<a href=#403 id=403 data-nosnippet>403</a>    } <span class="kw">else </span>{
-<a href=#404 id=404 data-nosnippet>404</a>        from
-<a href=#405 id=405 data-nosnippet>405</a>    }
-<a href=#406 id=406 data-nosnippet>406</a>}
-<a href=#407 id=407 data-nosnippet>407</a>
-<a href=#408 id=408 data-nosnippet>408</a><span class="doccomment">/// Refresh binned history no more often than every this many bin widths
-<a href=#409 id=409 data-nosnippet>409</a>/// while following now.
-<a href=#410 id=410 data-nosnippet>410</a></span><span class="kw">const </span>BINS_PER_REFRESH: f64 = <span class="number">3.0</span>;
-<a href=#411 id=411 data-nosnippet>411</a>
-<a href=#412 id=412 data-nosnippet>412</a><span class="doccomment">/// How long after fetching `got` with `op` to refresh it while following
-<a href=#413 id=413 data-nosnippet>413</a>/// now: `base` for raw history (only its tail is fetched, which is
-<a href=#414 id=414 data-nosnippet>414</a>/// cheap), but for bins no sooner than [`BINS_PER_REFRESH`] bin widths.
-<a href=#415 id=415 data-nosnippet>415</a>/// Refetching a week of bins every 30 s would load the appliance for no
-<a href=#416 id=416 data-nosnippet>416</a>/// visible change: a bin is minutes wide, and the right edge is drawn from
-<a href=#417 id=417 data-nosnippet>417</a>/// live data anyway.
-<a href=#418 id=418 data-nosnippet>418</a></span><span class="kw">pub fn </span>refresh_after(base: f64, got: (f64, f64), op: Operator, binned: bool) -&gt; f64 {
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">match </span>op {
-<a href=#420 id=420 data-nosnippet>420</a>        Operator::Optimized(n) <span class="kw">if </span>binned &amp;&amp; n &gt; <span class="number">0 </span>=&gt; {
-<a href=#421 id=421 data-nosnippet>421</a>            <span class="kw">let </span>bin = (got.<span class="number">1 </span>- got.<span class="number">0</span>) / f64::from(n);
-<a href=#422 id=422 data-nosnippet>422</a>            (BINS_PER_REFRESH * bin).max(base)
-<a href=#423 id=423 data-nosnippet>423</a>        }
-<a href=#424 id=424 data-nosnippet>424</a>        <span class="kw">_ </span>=&gt; base,
-<a href=#425 id=425 data-nosnippet>425</a>    }
-<a href=#426 id=426 data-nosnippet>426</a>}
-<a href=#427 id=427 data-nosnippet>427</a>
-<a href=#428 id=428 data-nosnippet>428</a><span class="doccomment">/// Whether raw history fetched as `optimized_N` (because there were at
-<a href=#429 id=429 data-nosnippet>429</a>/// most N samples) has grown, through live tail refreshes, past N samples:
-<a href=#430 id=430 data-nosnippet>430</a>/// then it should be fetched whole again, to come back binned, rather than
-<a href=#431 id=431 data-nosnippet>431</a>/// grow without end.
-<a href=#432 id=432 data-nosnippet>432</a></span><span class="kw">pub fn </span>outgrown(op: <span class="prelude-ty">Option</span>&lt;Operator&gt;, len: usize) -&gt; bool {
-<a href=#433 id=433 data-nosnippet>433</a>    <span class="macro">matches!</span>(op, <span class="prelude-val">Some</span>(Operator::Optimized(n)) <span class="kw">if </span>len &gt; n <span class="kw">as </span>usize)
-<a href=#434 id=434 data-nosnippet>434</a>}
-<a href=#435 id=435 data-nosnippet>435</a>
-<a href=#436 id=436 data-nosnippet>436</a><span class="doccomment">/// How long to wait before asking again after `failures` errors in a row:
-<a href=#437 id=437 data-nosnippet>437</a>/// `base`, doubling each time, at most five minutes.
-<a href=#438 id=438 data-nosnippet>438</a></span><span class="kw">pub fn </span>backoff(base: f64, failures: u32) -&gt; f64 {
-<a href=#439 id=439 data-nosnippet>439</a>    (base * <span class="number">2f64</span>.powi(failures.saturating_sub(<span class="number">1</span>).min(<span class="number">10</span>) <span class="kw">as </span>i32)).min(<span class="number">300.0</span>)
-<a href=#440 id=440 data-nosnippet>440</a>}
-<a href=#441 id=441 data-nosnippet>441</a>
-<a href=#442 id=442 data-nosnippet>442</a><span class="doccomment">/// Whether data fetched for `got` (and binned or not) still serves the
-<a href=#443 id=443 data-nosnippet>443</a>/// visible `from..to`: it covers it, and (for bins) it is not zoomed in so
-<a href=#444 id=444 data-nosnippet>444</a>/// far that the bins show as steps.
-<a href=#445 id=445 data-nosnippet>445</a></span><span class="kw">pub fn </span>covers(got: (f64, f64), binned: bool, from: f64, to: f64) -&gt; bool {
-<a href=#446 id=446 data-nosnippet>446</a>    <span class="kw">let </span>(a, b) = got;
-<a href=#447 id=447 data-nosnippet>447</a>    <span class="kw">let </span>inside = a &lt;= from &amp;&amp; b &gt;= to;
-<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">let </span>fine_enough = !binned || (to - from) / (b - a) &gt;= <span class="number">0.35</span>;
-<a href=#449 id=449 data-nosnippet>449</a>    inside &amp;&amp; fine_enough
-<a href=#450 id=450 data-nosnippet>450</a>}
-<a href=#451 id=451 data-nosnippet>451</a>
-<a href=#452 id=452 data-nosnippet>452</a><span class="doccomment">/// For an array PV (more than one element, by its metadata): an empty
-<a href=#453 id=453 data-nosnippet>453</a>/// waveform series standing for its history, which is not fetched.
-<a href=#454 id=454 data-nosnippet>454</a></span><span class="kw">fn </span>array_series(pv: <span class="kw-2">&amp;</span>str, info: <span class="kw-2">&amp;</span>PvInfo) -&gt; <span class="prelude-ty">Option</span>&lt;TimeSeries&gt; {
-<a href=#455 id=455 data-nosnippet>455</a>    info.element_count
-<a href=#456 id=456 data-nosnippet>456</a>        .is_some_and(|n| n &gt; <span class="number">1</span>)
-<a href=#457 id=457 data-nosnippet>457</a>        .then(|| TimeSeries {
-<a href=#458 id=458 data-nosnippet>458</a>            meta: archiver::Meta {
-<a href=#459 id=459 data-nosnippet>459</a>                name: pv.to_string(),
-<a href=#460 id=460 data-nosnippet>460</a>                egu: info.units.clone(),
-<a href=#461 id=461 data-nosnippet>461</a>                prec: info.precision,
-<a href=#462 id=462 data-nosnippet>462</a>                ..Default::default()
-<a href=#463 id=463 data-nosnippet>463</a>            },
-<a href=#464 id=464 data-nosnippet>464</a>            kind: archiver::ValueKind::Waveform,
-<a href=#465 id=465 data-nosnippet>465</a>            binned: <span class="bool-val">false</span>,
-<a href=#466 id=466 data-nosnippet>466</a>            samples: Vec::new(),
-<a href=#467 id=467 data-nosnippet>467</a>        })
-<a href=#468 id=468 data-nosnippet>468</a>}
-<a href=#469 id=469 data-nosnippet>469</a>
-<a href=#470 id=470 data-nosnippet>470</a><span class="attr">#[cfg(test)]
-<a href=#471 id=471 data-nosnippet>471</a></span><span class="kw">mod </span>tests {
-<a href=#472 id=472 data-nosnippet>472</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#473 id=473 data-nosnippet>473</a>
-<a href=#474 id=474 data-nosnippet>474</a>    <span class="attr">#[test]
-<a href=#475 id=475 data-nosnippet>475</a>    </span><span class="kw">fn </span>windows_are_padded_and_binned_to_the_width() {
-<a href=#476 id=476 data-nosnippet>476</a>        <span class="macro">assert_eq!</span>(padded(<span class="number">100.0</span>, <span class="number">200.0</span>), (<span class="number">75.0</span>, <span class="number">225.0</span>));
-<a href=#477 id=477 data-nosnippet>477</a>        <span class="comment">// 1000 visible pixels in a window 1.5 times as wide: 1500 bins,
-<a href=#478 id=478 data-nosnippet>478</a>        // one per pixel of the padded window.
-<a href=#479 id=479 data-nosnippet>479</a>        </span><span class="macro">assert_eq!</span>(operator(<span class="number">1000.0</span>, <span class="bool-val">false</span>), Operator::Optimized(<span class="number">1500</span>));
-<a href=#480 id=480 data-nosnippet>480</a>        <span class="macro">assert_eq!</span>(operator(<span class="number">4000.0</span>, <span class="bool-val">false</span>), Operator::Optimized(<span class="number">4000</span>));
-<a href=#481 id=481 data-nosnippet>481</a>        <span class="macro">assert_eq!</span>(operator(<span class="number">1000.0</span>, <span class="bool-val">true</span>), Operator::Raw);
-<a href=#482 id=482 data-nosnippet>482</a>    }
-<a href=#483 id=483 data-nosnippet>483</a>
-<a href=#484 id=484 data-nosnippet>484</a>    <span class="attr">#[test]
-<a href=#485 id=485 data-nosnippet>485</a>    </span><span class="kw">fn </span>refetch_when_out_of_cover_or_too_coarse() {
-<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">let </span>got = padded(<span class="number">100.0</span>, <span class="number">200.0</span>);
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="macro">assert!</span>(covers(got, <span class="bool-val">true</span>, <span class="number">100.0</span>, <span class="number">200.0</span>));
-<a href=#488 id=488 data-nosnippet>488</a>        <span class="comment">// Panned within the padding.
-<a href=#489 id=489 data-nosnippet>489</a>        </span><span class="macro">assert!</span>(covers(got, <span class="bool-val">true</span>, <span class="number">120.0</span>, <span class="number">220.0</span>));
-<a href=#490 id=490 data-nosnippet>490</a>        <span class="macro">assert!</span>(!covers(got, <span class="bool-val">true</span>, <span class="number">150.0</span>, <span class="number">250.0</span>));
-<a href=#491 id=491 data-nosnippet>491</a>        <span class="comment">// Zoomed in on bins: refetch for finer ones; raw data never needs it.
-<a href=#492 id=492 data-nosnippet>492</a>        </span><span class="macro">assert!</span>(!covers(got, <span class="bool-val">true</span>, <span class="number">140.0</span>, <span class="number">160.0</span>));
-<a href=#493 id=493 data-nosnippet>493</a>        <span class="macro">assert!</span>(covers(got, <span class="bool-val">false</span>, <span class="number">140.0</span>, <span class="number">160.0</span>));
-<a href=#494 id=494 data-nosnippet>494</a>    }
-<a href=#495 id=495 data-nosnippet>495</a>
-<a href=#496 id=496 data-nosnippet>496</a>    <span class="attr">#[test]
-<a href=#497 id=497 data-nosnippet>497</a>    </span><span class="kw">fn </span>raw_history_is_capped_and_errors_back_off() {
-<a href=#498 id=498 data-nosnippet>498</a>        <span class="kw">let </span>week = <span class="number">7.0 </span>* <span class="number">86_400.0</span>;
-<a href=#499 id=499 data-nosnippet>499</a>        <span class="macro">assert_eq!</span>(needed_from(<span class="number">0.0</span>, week, <span class="bool-val">false</span>), <span class="number">0.0</span>);
-<a href=#500 id=500 data-nosnippet>500</a>        <span class="macro">assert_eq!</span>(needed_from(<span class="number">0.0</span>, week, <span class="bool-val">true</span>), week - RAW_MAX_SPAN);
-<a href=#501 id=501 data-nosnippet>501</a>        <span class="macro">assert_eq!</span>(needed_from(<span class="number">100.0</span>, <span class="number">200.0</span>, <span class="bool-val">true</span>), <span class="number">100.0</span>);
-<a href=#502 id=502 data-nosnippet>502</a>        <span class="macro">assert_eq!</span>(backoff(<span class="number">10.0</span>, <span class="number">1</span>), <span class="number">10.0</span>);
-<a href=#503 id=503 data-nosnippet>503</a>        <span class="macro">assert_eq!</span>(backoff(<span class="number">10.0</span>, <span class="number">3</span>), <span class="number">40.0</span>);
-<a href=#504 id=504 data-nosnippet>504</a>        <span class="macro">assert_eq!</span>(backoff(<span class="number">10.0</span>, <span class="number">40</span>), <span class="number">300.0</span>);
-<a href=#505 id=505 data-nosnippet>505</a>    }
-<a href=#506 id=506 data-nosnippet>506</a>
-<a href=#507 id=507 data-nosnippet>507</a>    <span class="attr">#[test]
-<a href=#508 id=508 data-nosnippet>508</a>    </span><span class="kw">fn </span>binned_history_refreshes_at_the_bin_pace() {
-<a href=#509 id=509 data-nosnippet>509</a>        <span class="kw">let </span>week = padded(<span class="number">0.0</span>, <span class="number">7.0 </span>* <span class="number">86_400.0</span>);
-<a href=#510 id=510 data-nosnippet>510</a>        <span class="comment">// 1500 bins over 10.5 days: 605 s each, refreshed every 3 of them.
-<a href=#511 id=511 data-nosnippet>511</a>        </span><span class="kw">let </span>every = refresh_after(<span class="number">30.0</span>, week, Operator::Optimized(<span class="number">1500</span>), <span class="bool-val">true</span>);
-<a href=#512 id=512 data-nosnippet>512</a>        <span class="macro">assert!</span>((every - <span class="number">1814.4</span>).abs() &lt; <span class="number">1e-6</span>, <span class="string">"{every}"</span>);
-<a href=#513 id=513 data-nosnippet>513</a>        <span class="comment">// Fine bins, raw history, and raw answers to `optimized`: 30 s.
-<a href=#514 id=514 data-nosnippet>514</a>        </span><span class="kw">let </span>hour = padded(<span class="number">0.0</span>, <span class="number">3600.0</span>);
-<a href=#515 id=515 data-nosnippet>515</a>        <span class="macro">assert_eq!</span>(
-<a href=#516 id=516 data-nosnippet>516</a>            refresh_after(<span class="number">30.0</span>, hour, Operator::Optimized(<span class="number">1500</span>), <span class="bool-val">true</span>),
-<a href=#517 id=517 data-nosnippet>517</a>            <span class="number">30.0
-<a href=#518 id=518 data-nosnippet>518</a>        </span>);
-<a href=#519 id=519 data-nosnippet>519</a>        <span class="macro">assert_eq!</span>(refresh_after(<span class="number">30.0</span>, week, Operator::Raw, <span class="bool-val">false</span>), <span class="number">30.0</span>);
-<a href=#520 id=520 data-nosnippet>520</a>        <span class="macro">assert_eq!</span>(
-<a href=#521 id=521 data-nosnippet>521</a>            refresh_after(<span class="number">30.0</span>, week, Operator::Optimized(<span class="number">1500</span>), <span class="bool-val">false</span>),
-<a href=#522 id=522 data-nosnippet>522</a>            <span class="number">30.0
-<a href=#523 id=523 data-nosnippet>523</a>        </span>);
-<a href=#524 id=524 data-nosnippet>524</a>    }
-<a href=#525 id=525 data-nosnippet>525</a>
-<a href=#526 id=526 data-nosnippet>526</a>    <span class="attr">#[test]
-<a href=#527 id=527 data-nosnippet>527</a>    </span><span class="kw">fn </span>a_late_probe_answer_does_not_hide_a_newer_one() {
-<a href=#528 id=528 data-nosnippet>528</a>        <span class="kw">let </span>slot = Mutex::new(<span class="prelude-val">None</span>);
-<a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">let </span>down = || <span class="prelude-val">Err</span>(archiver::Error::Transport(<span class="string">"down"</span>.into()));
-<a href=#530 id=530 data-nosnippet>530</a>        <span class="comment">// Archiver 2's answer waits; archiver 1's comes late.
-<a href=#531 id=531 data-nosnippet>531</a>        </span>store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="string">"v2"</span>.into()))));
-<a href=#532 id=532 data-nosnippet>532</a>        store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">1</span>, down()));
-<a href=#533 id=533 data-nosnippet>533</a>        <span class="macro">assert_eq!</span>(slot.lock().take(), <span class="prelude-val">Some</span>((<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="string">"v2"</span>.into())))));
-<a href=#534 id=534 data-nosnippet>534</a>        <span class="comment">// In order, the newer replaces the older.
-<a href=#535 id=535 data-nosnippet>535</a>        </span>store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">1</span>, down()));
-<a href=#536 id=536 data-nosnippet>536</a>        store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)));
-<a href=#537 id=537 data-nosnippet>537</a>        <span class="macro">assert_eq!</span>(slot.lock().take(), <span class="prelude-val">Some</span>((<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>))));
-<a href=#538 id=538 data-nosnippet>538</a>    }
-<a href=#539 id=539 data-nosnippet>539</a>
-<a href=#540 id=540 data-nosnippet>540</a>    <span class="attr">#[test]
-<a href=#541 id=541 data-nosnippet>541</a>    </span><span class="kw">fn </span>raw_history_past_n_samples_is_rebinned() {
-<a href=#542 id=542 data-nosnippet>542</a>        <span class="kw">let </span>op = <span class="prelude-val">Some</span>(Operator::Optimized(<span class="number">100</span>));
-<a href=#543 id=543 data-nosnippet>543</a>        <span class="macro">assert!</span>(!outgrown(op, <span class="number">100</span>));
-<a href=#544 id=544 data-nosnippet>544</a>        <span class="macro">assert!</span>(outgrown(op, <span class="number">101</span>));
-<a href=#545 id=545 data-nosnippet>545</a>        <span class="macro">assert!</span>(!outgrown(<span class="prelude-val">Some</span>(Operator::Raw), <span class="number">1_000_000</span>));
-<a href=#546 id=546 data-nosnippet>546</a>        <span class="macro">assert!</span>(!outgrown(<span class="prelude-val">None</span>, <span class="number">1_000_000</span>));
-<a href=#547 id=547 data-nosnippet>547</a>    }
-<a href=#548 id=548 data-nosnippet>548</a>}
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="comment">// No runtime in a browser, and no blocking HTTP: the request
+<a href=#311 id=311 data-nosnippet>311</a>        // fails at once (see `archiver`), so its trace goes live only.
+<a href=#312 id=312 data-nosnippet>312</a>        </span><span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#313 id=313 data-nosnippet>313</a>        </span>{
+<a href=#314 id=314 data-nosnippet>314</a>            <span class="kw">let _ </span>= pvs;
+<a href=#315 id=315 data-nosnippet>315</a>            task();
+<a href=#316 id=316 data-nosnippet>316</a>        }
+<a href=#317 id=317 data-nosnippet>317</a>    }
+<a href=#318 id=318 data-nosnippet>318</a>}
+<a href=#319 id=319 data-nosnippet>319</a>
+<a href=#320 id=320 data-nosnippet>320</a><span class="doccomment">/// Keep a probe's answer for the plot, unless one about a newer archiver
+<a href=#321 id=321 data-nosnippet>321</a>/// is waiting: an answer about an earlier archiver arriving late must not
+<a href=#322 id=322 data-nosnippet>322</a>/// hide the current one's (the plot may not have been drawn in between).
+<a href=#323 id=323 data-nosnippet>323</a></span><span class="kw">fn </span>store_probe(slot: <span class="kw-2">&amp;</span>Mutex&lt;<span class="prelude-ty">Option</span>&lt;Probed&gt;&gt;, probed: Probed) {
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">let </span><span class="kw-2">mut </span>slot = slot.lock();
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="kw">if </span>slot.as_ref().is_none_or(|(epoch, <span class="kw">_</span>)| probed.<span class="number">0 </span>&gt;= <span class="kw-2">*</span>epoch) {
+<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw-2">*</span>slot = <span class="prelude-val">Some</span>(probed);
+<a href=#327 id=327 data-nosnippet>327</a>    }
+<a href=#328 id=328 data-nosnippet>328</a>}
+<a href=#329 id=329 data-nosnippet>329</a>
+<a href=#330 id=330 data-nosnippet>330</a><span class="doccomment">/// Probe `client`: its version, or `None` when it answers HTTP but not to
+<a href=#331 id=331 data-nosnippet>331</a>/// `getVersion` (a proxy passing on only data and search, or refusing it
+<a href=#332 id=332 data-nosnippet>332</a>/// with 401 or 403), as long as a search answers.
+<a href=#333 id=333 data-nosnippet>333</a></span><span class="kw">fn </span>probe(client: <span class="kw-2">&amp;</span>ArchiverClient) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;String&gt;, archiver::Error&gt; {
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>e = <span class="kw">match </span>client.version() {
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="prelude-val">Ok</span>(v) =&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(v)),
+<a href=#336 id=336 data-nosnippet>336</a>        <span class="prelude-val">Err</span>(e @ archiver::Error::Http { status, .. }) <span class="kw">if </span>!(<span class="number">502</span>..=<span class="number">504</span>).contains(<span class="kw-2">&amp;</span>status) =&gt; e,
+<a href=#337 id=337 data-nosnippet>337</a>        <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(e),
+<a href=#338 id=338 data-nosnippet>338</a>    };
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="macro">log::debug!</span>(<span class="string">"{}: no getVersion: {e}"</span>, client.base());
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">match </span>client.search(<span class="kw-2">&amp;</span>Search::exact(<span class="string">"archiveview"</span>, <span class="number">1</span>)) {
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="comment">// 404 for both: nothing is served here.
+<a href=#343 id=343 data-nosnippet>343</a>        </span><span class="prelude-val">Err</span>(check) <span class="kw">if </span>check.is_not_archived() &amp;&amp; e.is_not_archived() =&gt; <span class="prelude-val">Err</span>(
+<a href=#344 id=344 data-nosnippet>344</a>            archiver::Error::BadUrl(<span class="macro">format!</span>(<span class="string">"{}: not an archiver (HTTP 404)"</span>, client.base())),
+<a href=#345 id=345 data-nosnippet>345</a>        ),
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="prelude-val">Err</span>(check) <span class="kw">if </span><span class="kw">super</span>::status::archiver_fault(<span class="kw-2">&amp;</span>check, <span class="bool-val">false</span>) =&gt; <span class="prelude-val">Err</span>(check),
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="comment">// Something answers, if not to these.
+<a href=#348 id=348 data-nosnippet>348</a>        </span><span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+<a href=#349 id=349 data-nosnippet>349</a>    }
+<a href=#350 id=350 data-nosnippet>350</a>}
+<a href=#351 id=351 data-nosnippet>351</a>
+<a href=#352 id=352 data-nosnippet>352</a><span class="doccomment">/// A 404 means "not archived" only when the archiver itself said so. With
+<a href=#353 id=353 data-nosnippet>353</a>/// a wrong `--archiver` base (port or context path) Tomcat answers 404 to
+<a href=#354 id=354 data-nosnippet>354</a>/// every URL, so check with a search for the exact name, which any
+<a href=#355 id=355 data-nosnippet>355</a>/// archiver answers: only if that is a 404 too is the URL wrong, and that
+<a href=#356 id=356 data-nosnippet>356</a>/// is reported as an error. Any other failure of the check (a timeout, a
+<a href=#357 id=357 data-nosnippet>357</a>/// server error) proves nothing, so the PV stays "not archived".
+<a href=#358 id=358 data-nosnippet>358</a></span><span class="kw">fn </span>check_404(client: <span class="kw-2">&amp;</span>ArchiverClient, pv: <span class="kw-2">&amp;</span>str, e: archiver::Error) -&gt; archiver::Error {
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">match </span>client.search(<span class="kw-2">&amp;</span>Search::exact(pv, <span class="number">1</span>)) {
+<a href=#360 id=360 data-nosnippet>360</a>        <span class="prelude-val">Err</span>(check) <span class="kw">if </span>check.is_not_archived() =&gt; {
+<a href=#361 id=361 data-nosnippet>361</a>            <span class="macro">log::debug!</span>(<span class="string">"{pv}: {e}; the PV search: {check}"</span>);
+<a href=#362 id=362 data-nosnippet>362</a>            archiver::Error::BadUrl(<span class="macro">format!</span>(
+<a href=#363 id=363 data-nosnippet>363</a>                <span class="string">"{}: not an archiver (HTTP 404 for data and search)"</span>,
+<a href=#364 id=364 data-nosnippet>364</a>                client.base()
+<a href=#365 id=365 data-nosnippet>365</a>            ))
+<a href=#366 id=366 data-nosnippet>366</a>        }
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="prelude-val">Err</span>(check) =&gt; {
+<a href=#368 id=368 data-nosnippet>368</a>            <span class="macro">log::debug!</span>(<span class="string">"{pv}: {e}; the PV search failed too: {check}"</span>);
+<a href=#369 id=369 data-nosnippet>369</a>            e
+<a href=#370 id=370 data-nosnippet>370</a>        }
+<a href=#371 id=371 data-nosnippet>371</a>        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; e,
+<a href=#372 id=372 data-nosnippet>372</a>    }
+<a href=#373 id=373 data-nosnippet>373</a>}
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a><span class="doccomment">/// The window to fetch for a visible `from..to`: padded by [`PAD`] of the
+<a href=#376 id=376 data-nosnippet>376</a>/// span either side.
+<a href=#377 id=377 data-nosnippet>377</a></span><span class="kw">pub fn </span>padded(from: f64, to: f64) -&gt; (f64, f64) {
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">let </span>pad = (to - from) * PAD;
+<a href=#379 id=379 data-nosnippet>379</a>    (from - pad, to + pad)
+<a href=#380 id=380 data-nosnippet>380</a>}
+<a href=#381 id=381 data-nosnippet>381</a>
+<a href=#382 id=382 data-nosnippet>382</a><span class="doccomment">/// The operator for a plot `width_px` device pixels wide showing part of a
+<a href=#383 id=383 data-nosnippet>383</a>/// padded window: about one bin per device pixel of the padded window (at
+<a href=#384 id=384 data-nosnippet>384</a>/// most `MAX_BINS`), or raw. Finer bins only alias: the means zig-zag into
+<a href=#385 id=385 data-nosnippet>385</a>/// a solid block where the envelope already shows the extremes.
+<a href=#386 id=386 data-nosnippet>386</a></span><span class="kw">pub fn </span>operator(width_px: f32, raw: bool) -&gt; Operator {
+<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">if </span>raw {
+<a href=#388 id=388 data-nosnippet>388</a>        Operator::Raw
+<a href=#389 id=389 data-nosnippet>389</a>    } <span class="kw">else </span>{
+<a href=#390 id=390 data-nosnippet>390</a>        Operator::for_width(width_px.max(<span class="number">1.0</span>) * (<span class="number">1.0 </span>+ <span class="number">2.0 </span>* PAD <span class="kw">as </span>f32))
+<a href=#391 id=391 data-nosnippet>391</a>    }
+<a href=#392 id=392 data-nosnippet>392</a>}
+<a href=#393 id=393 data-nosnippet>393</a>
+<a href=#394 id=394 data-nosnippet>394</a><span class="doccomment">/// The longest span fetched raw, for traces that cannot be binned
+<a href=#395 id=395 data-nosnippet>395</a>/// (waveforms, text, enums): a week of a busy waveform could be gigabytes.
+<a href=#396 id=396 data-nosnippet>396</a>/// Wider windows show only the latest part of their history.
+<a href=#397 id=397 data-nosnippet>397</a></span><span class="kw">pub const </span>RAW_MAX_SPAN: f64 = <span class="number">86_400.0</span>;
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a><span class="doccomment">/// The start of the history a trace needs for a visible `from..to`: all of
+<a href=#400 id=400 data-nosnippet>400</a>/// it, or for a raw-only trace no more than [`RAW_MAX_SPAN`].
+<a href=#401 id=401 data-nosnippet>401</a></span><span class="kw">pub fn </span>needed_from(from: f64, to: f64, raw: bool) -&gt; f64 {
+<a href=#402 id=402 data-nosnippet>402</a>    <span class="kw">if </span>raw {
+<a href=#403 id=403 data-nosnippet>403</a>        from.max(to - RAW_MAX_SPAN)
+<a href=#404 id=404 data-nosnippet>404</a>    } <span class="kw">else </span>{
+<a href=#405 id=405 data-nosnippet>405</a>        from
+<a href=#406 id=406 data-nosnippet>406</a>    }
+<a href=#407 id=407 data-nosnippet>407</a>}
+<a href=#408 id=408 data-nosnippet>408</a>
+<a href=#409 id=409 data-nosnippet>409</a><span class="doccomment">/// Refresh binned history no more often than every this many bin widths
+<a href=#410 id=410 data-nosnippet>410</a>/// while following now.
+<a href=#411 id=411 data-nosnippet>411</a></span><span class="kw">const </span>BINS_PER_REFRESH: f64 = <span class="number">3.0</span>;
+<a href=#412 id=412 data-nosnippet>412</a>
+<a href=#413 id=413 data-nosnippet>413</a><span class="doccomment">/// How long after fetching `got` with `op` to refresh it while following
+<a href=#414 id=414 data-nosnippet>414</a>/// now: `base` for raw history (only its tail is fetched, which is
+<a href=#415 id=415 data-nosnippet>415</a>/// cheap), but for bins no sooner than [`BINS_PER_REFRESH`] bin widths.
+<a href=#416 id=416 data-nosnippet>416</a>/// Refetching a week of bins every 30 s would load the appliance for no
+<a href=#417 id=417 data-nosnippet>417</a>/// visible change: a bin is minutes wide, and the right edge is drawn from
+<a href=#418 id=418 data-nosnippet>418</a>/// live data anyway.
+<a href=#419 id=419 data-nosnippet>419</a></span><span class="kw">pub fn </span>refresh_after(base: f64, got: (f64, f64), op: Operator, binned: bool) -&gt; f64 {
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">match </span>op {
+<a href=#421 id=421 data-nosnippet>421</a>        Operator::Optimized(n) <span class="kw">if </span>binned &amp;&amp; n &gt; <span class="number">0 </span>=&gt; {
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="kw">let </span>bin = (got.<span class="number">1 </span>- got.<span class="number">0</span>) / f64::from(n);
+<a href=#423 id=423 data-nosnippet>423</a>            (BINS_PER_REFRESH * bin).max(base)
+<a href=#424 id=424 data-nosnippet>424</a>        }
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">_ </span>=&gt; base,
+<a href=#426 id=426 data-nosnippet>426</a>    }
+<a href=#427 id=427 data-nosnippet>427</a>}
+<a href=#428 id=428 data-nosnippet>428</a>
+<a href=#429 id=429 data-nosnippet>429</a><span class="doccomment">/// Whether raw history fetched as `optimized_N` (because there were at
+<a href=#430 id=430 data-nosnippet>430</a>/// most N samples) has grown, through live tail refreshes, past N samples:
+<a href=#431 id=431 data-nosnippet>431</a>/// then it should be fetched whole again, to come back binned, rather than
+<a href=#432 id=432 data-nosnippet>432</a>/// grow without end.
+<a href=#433 id=433 data-nosnippet>433</a></span><span class="kw">pub fn </span>outgrown(op: <span class="prelude-ty">Option</span>&lt;Operator&gt;, len: usize) -&gt; bool {
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="macro">matches!</span>(op, <span class="prelude-val">Some</span>(Operator::Optimized(n)) <span class="kw">if </span>len &gt; n <span class="kw">as </span>usize)
+<a href=#435 id=435 data-nosnippet>435</a>}
+<a href=#436 id=436 data-nosnippet>436</a>
+<a href=#437 id=437 data-nosnippet>437</a><span class="doccomment">/// How long to wait before asking again after `failures` errors in a row:
+<a href=#438 id=438 data-nosnippet>438</a>/// `base`, doubling each time, at most five minutes.
+<a href=#439 id=439 data-nosnippet>439</a></span><span class="kw">pub fn </span>backoff(base: f64, failures: u32) -&gt; f64 {
+<a href=#440 id=440 data-nosnippet>440</a>    (base * <span class="number">2f64</span>.powi(failures.saturating_sub(<span class="number">1</span>).min(<span class="number">10</span>) <span class="kw">as </span>i32)).min(<span class="number">300.0</span>)
+<a href=#441 id=441 data-nosnippet>441</a>}
+<a href=#442 id=442 data-nosnippet>442</a>
+<a href=#443 id=443 data-nosnippet>443</a><span class="doccomment">/// Whether data fetched for `got` (and binned or not) still serves the
+<a href=#444 id=444 data-nosnippet>444</a>/// visible `from..to`: it covers it, and (for bins) it is not zoomed in so
+<a href=#445 id=445 data-nosnippet>445</a>/// far that the bins show as steps.
+<a href=#446 id=446 data-nosnippet>446</a></span><span class="kw">pub fn </span>covers(got: (f64, f64), binned: bool, from: f64, to: f64) -&gt; bool {
+<a href=#447 id=447 data-nosnippet>447</a>    <span class="kw">let </span>(a, b) = got;
+<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">let </span>inside = a &lt;= from &amp;&amp; b &gt;= to;
+<a href=#449 id=449 data-nosnippet>449</a>    <span class="kw">let </span>fine_enough = !binned || (to - from) / (b - a) &gt;= <span class="number">0.35</span>;
+<a href=#450 id=450 data-nosnippet>450</a>    inside &amp;&amp; fine_enough
+<a href=#451 id=451 data-nosnippet>451</a>}
+<a href=#452 id=452 data-nosnippet>452</a>
+<a href=#453 id=453 data-nosnippet>453</a><span class="doccomment">/// For an array PV (more than one element, by its metadata): an empty
+<a href=#454 id=454 data-nosnippet>454</a>/// waveform series standing for its history, which is not fetched.
+<a href=#455 id=455 data-nosnippet>455</a></span><span class="kw">fn </span>array_series(pv: <span class="kw-2">&amp;</span>str, info: <span class="kw-2">&amp;</span>PvInfo) -&gt; <span class="prelude-ty">Option</span>&lt;TimeSeries&gt; {
+<a href=#456 id=456 data-nosnippet>456</a>    info.element_count
+<a href=#457 id=457 data-nosnippet>457</a>        .is_some_and(|n| n &gt; <span class="number">1</span>)
+<a href=#458 id=458 data-nosnippet>458</a>        .then(|| TimeSeries {
+<a href=#459 id=459 data-nosnippet>459</a>            meta: archiver::Meta {
+<a href=#460 id=460 data-nosnippet>460</a>                name: pv.to_string(),
+<a href=#461 id=461 data-nosnippet>461</a>                egu: info.units.clone(),
+<a href=#462 id=462 data-nosnippet>462</a>                prec: info.precision,
+<a href=#463 id=463 data-nosnippet>463</a>                ..Default::default()
+<a href=#464 id=464 data-nosnippet>464</a>            },
+<a href=#465 id=465 data-nosnippet>465</a>            kind: archiver::ValueKind::Waveform,
+<a href=#466 id=466 data-nosnippet>466</a>            binned: <span class="bool-val">false</span>,
+<a href=#467 id=467 data-nosnippet>467</a>            samples: Vec::new(),
+<a href=#468 id=468 data-nosnippet>468</a>        })
+<a href=#469 id=469 data-nosnippet>469</a>}
+<a href=#470 id=470 data-nosnippet>470</a>
+<a href=#471 id=471 data-nosnippet>471</a><span class="attr">#[cfg(test)]
+<a href=#472 id=472 data-nosnippet>472</a></span><span class="kw">mod </span>tests {
+<a href=#473 id=473 data-nosnippet>473</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#474 id=474 data-nosnippet>474</a>
+<a href=#475 id=475 data-nosnippet>475</a>    <span class="attr">#[test]
+<a href=#476 id=476 data-nosnippet>476</a>    </span><span class="kw">fn </span>windows_are_padded_and_binned_to_the_width() {
+<a href=#477 id=477 data-nosnippet>477</a>        <span class="macro">assert_eq!</span>(padded(<span class="number">100.0</span>, <span class="number">200.0</span>), (<span class="number">75.0</span>, <span class="number">225.0</span>));
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="comment">// 1000 visible pixels in a window 1.5 times as wide: 1500 bins,
+<a href=#479 id=479 data-nosnippet>479</a>        // one per pixel of the padded window.
+<a href=#480 id=480 data-nosnippet>480</a>        </span><span class="macro">assert_eq!</span>(operator(<span class="number">1000.0</span>, <span class="bool-val">false</span>), Operator::Optimized(<span class="number">1500</span>));
+<a href=#481 id=481 data-nosnippet>481</a>        <span class="macro">assert_eq!</span>(operator(<span class="number">4000.0</span>, <span class="bool-val">false</span>), Operator::Optimized(<span class="number">4000</span>));
+<a href=#482 id=482 data-nosnippet>482</a>        <span class="macro">assert_eq!</span>(operator(<span class="number">1000.0</span>, <span class="bool-val">true</span>), Operator::Raw);
+<a href=#483 id=483 data-nosnippet>483</a>    }
+<a href=#484 id=484 data-nosnippet>484</a>
+<a href=#485 id=485 data-nosnippet>485</a>    <span class="attr">#[test]
+<a href=#486 id=486 data-nosnippet>486</a>    </span><span class="kw">fn </span>refetch_when_out_of_cover_or_too_coarse() {
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="kw">let </span>got = padded(<span class="number">100.0</span>, <span class="number">200.0</span>);
+<a href=#488 id=488 data-nosnippet>488</a>        <span class="macro">assert!</span>(covers(got, <span class="bool-val">true</span>, <span class="number">100.0</span>, <span class="number">200.0</span>));
+<a href=#489 id=489 data-nosnippet>489</a>        <span class="comment">// Panned within the padding.
+<a href=#490 id=490 data-nosnippet>490</a>        </span><span class="macro">assert!</span>(covers(got, <span class="bool-val">true</span>, <span class="number">120.0</span>, <span class="number">220.0</span>));
+<a href=#491 id=491 data-nosnippet>491</a>        <span class="macro">assert!</span>(!covers(got, <span class="bool-val">true</span>, <span class="number">150.0</span>, <span class="number">250.0</span>));
+<a href=#492 id=492 data-nosnippet>492</a>        <span class="comment">// Zoomed in on bins: refetch for finer ones; raw data never needs it.
+<a href=#493 id=493 data-nosnippet>493</a>        </span><span class="macro">assert!</span>(!covers(got, <span class="bool-val">true</span>, <span class="number">140.0</span>, <span class="number">160.0</span>));
+<a href=#494 id=494 data-nosnippet>494</a>        <span class="macro">assert!</span>(covers(got, <span class="bool-val">false</span>, <span class="number">140.0</span>, <span class="number">160.0</span>));
+<a href=#495 id=495 data-nosnippet>495</a>    }
+<a href=#496 id=496 data-nosnippet>496</a>
+<a href=#497 id=497 data-nosnippet>497</a>    <span class="attr">#[test]
+<a href=#498 id=498 data-nosnippet>498</a>    </span><span class="kw">fn </span>raw_history_is_capped_and_errors_back_off() {
+<a href=#499 id=499 data-nosnippet>499</a>        <span class="kw">let </span>week = <span class="number">7.0 </span>* <span class="number">86_400.0</span>;
+<a href=#500 id=500 data-nosnippet>500</a>        <span class="macro">assert_eq!</span>(needed_from(<span class="number">0.0</span>, week, <span class="bool-val">false</span>), <span class="number">0.0</span>);
+<a href=#501 id=501 data-nosnippet>501</a>        <span class="macro">assert_eq!</span>(needed_from(<span class="number">0.0</span>, week, <span class="bool-val">true</span>), week - RAW_MAX_SPAN);
+<a href=#502 id=502 data-nosnippet>502</a>        <span class="macro">assert_eq!</span>(needed_from(<span class="number">100.0</span>, <span class="number">200.0</span>, <span class="bool-val">true</span>), <span class="number">100.0</span>);
+<a href=#503 id=503 data-nosnippet>503</a>        <span class="macro">assert_eq!</span>(backoff(<span class="number">10.0</span>, <span class="number">1</span>), <span class="number">10.0</span>);
+<a href=#504 id=504 data-nosnippet>504</a>        <span class="macro">assert_eq!</span>(backoff(<span class="number">10.0</span>, <span class="number">3</span>), <span class="number">40.0</span>);
+<a href=#505 id=505 data-nosnippet>505</a>        <span class="macro">assert_eq!</span>(backoff(<span class="number">10.0</span>, <span class="number">40</span>), <span class="number">300.0</span>);
+<a href=#506 id=506 data-nosnippet>506</a>    }
+<a href=#507 id=507 data-nosnippet>507</a>
+<a href=#508 id=508 data-nosnippet>508</a>    <span class="attr">#[test]
+<a href=#509 id=509 data-nosnippet>509</a>    </span><span class="kw">fn </span>binned_history_refreshes_at_the_bin_pace() {
+<a href=#510 id=510 data-nosnippet>510</a>        <span class="kw">let </span>week = padded(<span class="number">0.0</span>, <span class="number">7.0 </span>* <span class="number">86_400.0</span>);
+<a href=#511 id=511 data-nosnippet>511</a>        <span class="comment">// 1500 bins over 10.5 days: 605 s each, refreshed every 3 of them.
+<a href=#512 id=512 data-nosnippet>512</a>        </span><span class="kw">let </span>every = refresh_after(<span class="number">30.0</span>, week, Operator::Optimized(<span class="number">1500</span>), <span class="bool-val">true</span>);
+<a href=#513 id=513 data-nosnippet>513</a>        <span class="macro">assert!</span>((every - <span class="number">1814.4</span>).abs() &lt; <span class="number">1e-6</span>, <span class="string">"{every}"</span>);
+<a href=#514 id=514 data-nosnippet>514</a>        <span class="comment">// Fine bins, raw history, and raw answers to `optimized`: 30 s.
+<a href=#515 id=515 data-nosnippet>515</a>        </span><span class="kw">let </span>hour = padded(<span class="number">0.0</span>, <span class="number">3600.0</span>);
+<a href=#516 id=516 data-nosnippet>516</a>        <span class="macro">assert_eq!</span>(
+<a href=#517 id=517 data-nosnippet>517</a>            refresh_after(<span class="number">30.0</span>, hour, Operator::Optimized(<span class="number">1500</span>), <span class="bool-val">true</span>),
+<a href=#518 id=518 data-nosnippet>518</a>            <span class="number">30.0
+<a href=#519 id=519 data-nosnippet>519</a>        </span>);
+<a href=#520 id=520 data-nosnippet>520</a>        <span class="macro">assert_eq!</span>(refresh_after(<span class="number">30.0</span>, week, Operator::Raw, <span class="bool-val">false</span>), <span class="number">30.0</span>);
+<a href=#521 id=521 data-nosnippet>521</a>        <span class="macro">assert_eq!</span>(
+<a href=#522 id=522 data-nosnippet>522</a>            refresh_after(<span class="number">30.0</span>, week, Operator::Optimized(<span class="number">1500</span>), <span class="bool-val">false</span>),
+<a href=#523 id=523 data-nosnippet>523</a>            <span class="number">30.0
+<a href=#524 id=524 data-nosnippet>524</a>        </span>);
+<a href=#525 id=525 data-nosnippet>525</a>    }
+<a href=#526 id=526 data-nosnippet>526</a>
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="attr">#[test]
+<a href=#528 id=528 data-nosnippet>528</a>    </span><span class="kw">fn </span>a_late_probe_answer_does_not_hide_a_newer_one() {
+<a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">let </span>slot = Mutex::new(<span class="prelude-val">None</span>);
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">let </span>down = || <span class="prelude-val">Err</span>(archiver::Error::Transport(<span class="string">"down"</span>.into()));
+<a href=#531 id=531 data-nosnippet>531</a>        <span class="comment">// Archiver 2's answer waits; archiver 1's comes late.
+<a href=#532 id=532 data-nosnippet>532</a>        </span>store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="string">"v2"</span>.into()))));
+<a href=#533 id=533 data-nosnippet>533</a>        store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">1</span>, down()));
+<a href=#534 id=534 data-nosnippet>534</a>        <span class="macro">assert_eq!</span>(slot.lock().take(), <span class="prelude-val">Some</span>((<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="string">"v2"</span>.into())))));
+<a href=#535 id=535 data-nosnippet>535</a>        <span class="comment">// In order, the newer replaces the older.
+<a href=#536 id=536 data-nosnippet>536</a>        </span>store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">1</span>, down()));
+<a href=#537 id=537 data-nosnippet>537</a>        store_probe(<span class="kw-2">&amp;</span>slot, (<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)));
+<a href=#538 id=538 data-nosnippet>538</a>        <span class="macro">assert_eq!</span>(slot.lock().take(), <span class="prelude-val">Some</span>((<span class="number">2</span>, <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>))));
+<a href=#539 id=539 data-nosnippet>539</a>    }
+<a href=#540 id=540 data-nosnippet>540</a>
+<a href=#541 id=541 data-nosnippet>541</a>    <span class="attr">#[test]
+<a href=#542 id=542 data-nosnippet>542</a>    </span><span class="kw">fn </span>raw_history_past_n_samples_is_rebinned() {
+<a href=#543 id=543 data-nosnippet>543</a>        <span class="kw">let </span>op = <span class="prelude-val">Some</span>(Operator::Optimized(<span class="number">100</span>));
+<a href=#544 id=544 data-nosnippet>544</a>        <span class="macro">assert!</span>(!outgrown(op, <span class="number">100</span>));
+<a href=#545 id=545 data-nosnippet>545</a>        <span class="macro">assert!</span>(outgrown(op, <span class="number">101</span>));
+<a href=#546 id=546 data-nosnippet>546</a>        <span class="macro">assert!</span>(!outgrown(<span class="prelude-val">Some</span>(Operator::Raw), <span class="number">1_000_000</span>));
+<a href=#547 id=547 data-nosnippet>547</a>        <span class="macro">assert!</span>(!outgrown(<span class="prelude-val">None</span>, <span class="number">1_000_000</span>));
+<a href=#548 id=548 data-nosnippet>548</a>    }
+<a href=#549 id=549 data-nosnippet>549</a>}
 </code></pre></div></section></main></body></html>
