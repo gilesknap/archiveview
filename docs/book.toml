@@ -1,0 +1,20 @@
+[book]
+title = "archiveview"
+description = "A modern plotter for archived and live EPICS PVs"
+authors = ["Giles Knap"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/gilesknap/archiveview"
+edit-url-template = "https://github.com/gilesknap/archiveview/edit/main/docs/{path}"
+# CI sets the site URL of each version, /archiveview/<version>/
+site-url = "/archiveview/main/"
+additional-css = ["theme/grid.css", "theme/sidebar.css"]
+additional-js = ["theme/switcher.js"]
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.fold]
+enable = true
+level = 1

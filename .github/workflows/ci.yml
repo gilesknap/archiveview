@@ -1,0 +1,204 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Check the embeddable library alone (no eframe, png or clap)
+        run: cargo clippy -p archiveview --no-default-features --lib -- -D warnings
+      - run: cargo test --workspace
+      - name: Install bobview-testioc for live PVs
+        # the simulated BL01T beamline from crates.io; rust-cache keeps the
+        # installed binary between runs
+        run: cargo install bobview-testioc --version "^1.8" --locked
+      - name: Snapshot archiveview against the mock archiver and bobview-testioc
+        # history comes from the mock appliance; bl01t:SUM is both archived
+        # by the mock and served live by the test IOC, so its live tail joins
+        # the archive at the right edge. Review these against the UI bar in
+        # DESIGN.md, not just "it rendered".
+        env:
+          EPICS_CA_ADDR_LIST: 127.0.0.1
+          EPICS_CA_AUTO_ADDR_LIST: "NO"
+          EPICS_PVA_ADDR_LIST: 127.0.0.1
+          EPICS_PVA_AUTO_ADDR_LIST: "NO"
+          ARCHIVER: http://127.0.0.1:17668
+        run: |
+          cargo build --workspace
+          target/debug/archiveview-mockarchiver --port 17668 &
+          bobview-testioc &
+          for i in $(seq 50); do
+            curl -sf "${ARCHIVER}/retrieval/bpl/getMatchingPVs?pv=MOCK:*" && break
+            sleep 0.2
+          done
+          echo
+          mkdir -p snapshots
+          av() { target/debug/archiveview --archiver "${ARCHIVER}" --size 1280x800 --wait 5 "$@"; }
+          av --snapshot snapshots/empty.png
+          av --snapshot snapshots/mock-1h.png --range 1h MOCK:SINE MOCK:NOISE MOCK:NAN
+          av --snapshot snapshots/mock-7d.png --range 7d MOCK:SINE MOCK:RAMP MOCK:SLOW
+          av --snapshot snapshots/mock-dark.png --theme dark --range 1d MOCK:SINE MOCK:NOISE MOCK:NAN
+          av --snapshot snapshots/live.png --range 10m bl01t:SUM BL01T-MO-SIMC-01:M1.RBV
+          av --snapshot snapshots/narrow.png --size 480x640 --range 8h MOCK:SINE MOCK:RAMP
+          target/debug/archiveview --snapshot snapshots/no-archiver.png --size 1280x800 --wait 5 bl01t:SUM
+          kill %1 %2
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: snapshots
+          path: snapshots
+
+  build:
+    # release builds for each platform on a native runner, packaged as
+    # archiveview-<arch>-<os>. On Linux cargo-zigbuild links against glibc
+    # 2.28 so the binaries also run on older distributions (e.g. RHEL 8), not
+    # just the runner's Ubuntu 24.04. The macOS builds run on the arm64
+    # runner; x86_64 is cross-built there, so only arm64 is smoke tested.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-24.04
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            os: ubuntu-24.04-arm
+            platform: linux
+            target: aarch64-unknown-linux-gnu
+          - arch: aarch64
+            os: macos-15
+            platform: macos
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            os: macos-15
+            platform: macos
+            target: x86_64-apple-darwin
+            cross: true
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+      GLIBC: "2.28"
+      TARGET_DIR: target/${{ matrix.target }}/release
+      LICENSE_TARGET: ${{ matrix.target }}
+      BINARIES: archiveview archiveview-mockarchiver
+      # the oldest macOS the binaries run on
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        if: matrix.platform == 'linux'
+      - uses: taiki-e/install-action@v2
+        if: matrix.platform == 'linux'
+        with:
+          tool: cargo-zigbuild
+      - name: Take the version from the release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        # perl rather than sed -i, which differs between GNU and BSD (macOS)
+        run: V=${GITHUB_REF_NAME#v} perl -0pi -e 's/^version = .*$/version = "$ENV{V}"/m' Cargo.toml
+      - if: matrix.platform == 'linux'
+        run: cargo zigbuild --release --workspace --target ${TARGET}.${GLIBC}
+      - if: matrix.platform == 'macos'
+        run: cargo build --release --workspace --target ${TARGET}
+      - name: Sign the macOS binaries ad hoc
+        # arm64 macOS will not run unsigned code, and stripping can leave the
+        # linker's signature invalid; ad hoc signing needs no certificate
+        if: matrix.platform == 'macos'
+        run: |
+          for b in ${BINARIES}; do
+            codesign --force --sign - ${TARGET_DIR}/$b
+          done
+      - name: Check the glibc requirement
+        if: matrix.platform == 'linux'
+        run: |
+          for b in ${BINARIES}; do
+            need=$(objdump -T ${TARGET_DIR}/$b | grep -oE "GLIBC_[0-9.]+" | sort -Vu | tail -1)
+            echo "$b needs $need"
+            [ "$(printf "%s\n" "$need" "GLIBC_${GLIBC}" | sort -V | tail -1)" = "GLIBC_${GLIBC}" ]
+          done
+      - name: Check the macOS requirement
+        if: matrix.platform == 'macos'
+        run: |
+          for b in ${BINARIES}; do
+            lipo -archs ${TARGET_DIR}/$b
+            otool -l ${TARGET_DIR}/$b | grep -A3 LC_BUILD_VERSION | grep -q "minos ${MACOSX_DEPLOYMENT_TARGET}"
+            codesign --verify ${TARGET_DIR}/$b
+          done
+      - name: Smoke test the ${{ matrix.arch }}-${{ matrix.platform }} binaries
+        if: ${{ !matrix.cross }}
+        run: |
+          ${TARGET_DIR}/archiveview --version | tee version.txt
+          ${TARGET_DIR}/archiveview-mockarchiver --version | tee -a version.txt
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            grep -qx "archiveview ${GITHUB_REF_NAME#v}" version.txt
+            grep -qx "archiveview-mockarchiver ${GITHUB_REF_NAME#v}" version.txt
+          fi
+          ${TARGET_DIR}/archiveview-mockarchiver --port 17668 &
+          # the mock answers search and data before the plot needs them
+          for i in $(seq 50); do
+            curl -sf "http://127.0.0.1:17668/retrieval/bpl/getMatchingPVs?pv=MOCK:*" && break
+            sleep 0.2
+          done
+          echo
+          mkdir -p snapshots
+          ${TARGET_DIR}/archiveview --archiver http://127.0.0.1:17668 \
+            --snapshot snapshots/mock-${{ matrix.arch }}-${{ matrix.platform }}.png \
+            --size 1280x800 --wait 5 --range 1d MOCK:SINE MOCK:NOISE MOCK:NAN
+          kill %1
+      - uses: actions/upload-artifact@v4
+        if: ${{ !matrix.cross }}
+        with:
+          name: snapshots-${{ matrix.arch }}-${{ matrix.platform }}
+          path: snapshots
+      - name: Package
+        run: ./scripts/package.sh archiveview-${{ matrix.arch }}-${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archiveview-${{ matrix.arch }}-${{ matrix.platform }}
+          path: archiveview-${{ matrix.arch }}-${{ matrix.platform }}.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archiveview-*
+          merge-multiple: true
+      - name: Create the release, or add the binaries to an existing one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # a release made in the GitHub UI creates the tag too, so the
+          # release may already exist when this tag build runs
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" archiveview-*.tar.gz \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" archiveview-*.tar.gz \
+              --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes
+          fi

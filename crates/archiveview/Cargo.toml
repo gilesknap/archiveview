@@ -1,0 +1,42 @@
+[package]
+name = "archiveview"
+description = "A modern archived and live EPICS PV time-series plotter (Archiver Appliance + CA/PVA)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "archiveview"
+
+[[bin]]
+name = "archiveview"
+path = "src/main.rs"
+required-features = ["app"]
+
+[features]
+default = ["app"]
+# The standalone application (window, snapshot mode, command line). An
+# embedding host such as bobview turns it off (`default-features = false`)
+# and gets only `Plot`, with egui and no eframe, png or clap.
+app = ["dep:eframe", "dep:png", "dep:clap"]
+
+[dependencies]
+# Must stay identical to bobview's egui/eframe so bobview can embed `archiveview::Plot`.
+eframe = { version = "0.36.2", optional = true, default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+egui = "0.36.2"
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+log = "0.4.34"
+archiver = { package = "archiveview-archiver", path = "../archiver", version = "0.1.0" }
+pv = { package = "bobview-pv", version = "1.8" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+parking_lot = "0.12.5"
+web-time = "1.1.0"
+png = { version = "0.18.1", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = { version = "4.6.7", optional = true, features = ["derive", "wrap_help"] }
+
+[dev-dependencies]
+archiveview-mockarchiver = { path = "../mockarchiver" }

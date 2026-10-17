@@ -1,0 +1,7 @@
+/target
+*.tar.gz
+/.claude/
+/dist
+/docs/book
+__pycache__/
+/docs/src/api
