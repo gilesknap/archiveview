@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PASTE"],"enum":["ArchiverState","MenuPart","MiddleClick"],"fn":["now","parse_span","pv_names"],"struct":["ArchiverStatus","Pasted","Plot"]};

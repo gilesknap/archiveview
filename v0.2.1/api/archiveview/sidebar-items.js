@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["app","config","history","plot","selection","snapshot","style","view"],"struct":["ArchiverClient"]};

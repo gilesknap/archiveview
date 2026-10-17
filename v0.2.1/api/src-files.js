@@ -1,0 +1,2 @@
+createSrcSidebar('[["archiver",["",[],["decode.rs","http.rs","json.rs","lib.rs","time.rs"]]],["archiveview",["",[["plot",[],["axes.rs","axisui.rs","bar.rs","fetch.rs","hover.rs","legend.rs","paste.rs","render.rs","series.rs","status.rs","timeaxis.rs","undo.rs","window.rs"]]],["app.rs","axis.rs","config.rs","history.rs","icons.rs","lib.rs","plot.rs","selection.rs","snapshot.rs","style.rs","view.rs"]]],["archiveview_mockarchiver",["",[],["main.rs"]]],["mockarchiver",["",[],["bpl.rs","data.rs","lib.rs","signals.rs"]]]]');
+//{"start":19,"fragment_lengths":[73,311,49,68]}
