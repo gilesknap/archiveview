@@ -7,6 +7,13 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/gilesknap/archiveview"
+homepage = "https://gilesknap.github.io/archiveview"
+readme = "README.md"
+
+# The crates publish to crates.io together, so the internal dependency carries
+# the workspace version as well as its path; CI rewrites both from the tag.
+[workspace.dependencies]
+archiver = { package = "archiveview-archiver", path = "crates/archiver", version = "0.1.0" }
 
 [profile.release]
 opt-level = "s"
