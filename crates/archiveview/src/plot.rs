@@ -3739,6 +3739,26 @@ mod tests {
     }
 
     #[test]
+    fn pasted_local_and_simulated_names_are_live_only() {
+        // As bobview copies them from its widgets.
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        let pasted = p.paste_pvs("loc://foo, loc://x(1.5) sim://sine(0, 10, 0.1) sim://ramp");
+        let want = [
+            "loc://foo",
+            "loc://x(1.5)",
+            "sim://sine(0, 10, 0.1)",
+            "sim://ramp",
+        ];
+        assert_eq!(pasted.added, want);
+        assert_eq!(p.names(), want);
+        // No archiver has them, so none is asked.
+        assert!(p.traces.iter().all(|t| t.archive_name().is_none()));
+        // `loc://x` is `loc://x(1.5)`, however it is spelt.
+        assert_eq!(p.paste_pvs("loc://x").present, ["loc://x"]);
+    }
+
+    #[test]
     fn middle_click_pastes_into_the_search_box_and_selecting_reports() {
         let pvs = PvManager::new();
         let mut h = Harness::new(Plot::new(&pvs, None));

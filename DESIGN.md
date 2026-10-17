@@ -344,7 +344,19 @@ then middle-click the plot.
   keyboard shortcuts apply. Pasted PVs go through one `add_pvs` call, as
   the search box's do.
 - **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace, commas
-  and semicolons, drop quotes and brackets around a word. A word can be a
+  and semicolons, but not inside the `(arguments)` of a `scheme://` name
+  (`sim://sine(0, 10, 0.1)` is one word; a `(` never closed is an ordinary
+  character), and drop quotes and brackets around a word. The schemes are
+  those the host's `PvManager` serves, as `pv::PvName::parse` reads them
+  (a match on `pv::Scheme`, so a new one has to be decided on): `ca://`
+  and `pva://` (either case), and `loc://` and `sim://`, which bobview's
+  widgets copy and no archiver has (`Trace::archive_name` is `None`, so
+  nothing is asked of the archiver and they plot live only). Formulas
+  (`=expr`, `eq://expr`) are not taken: their spaces and operators cannot
+  be told from prose (right-click → Trend in bobview adds them). Other
+  schemes (`https://`, `sys://`) are not PVs. After `loc://`/`sim://` a
+  record name may be followed by a `<VType>` and then `(arguments)`, which
+  end it. A word can be a
   name if (after an optional `ca://`/`pva://`) it is only record-name
   characters (plus `{}` and `$`), has a letter, doesn't start with `-`/`+`
   (flags) or start or end with `.`/`:`, and, without a scheme, isn't a

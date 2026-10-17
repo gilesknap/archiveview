@@ -87,6 +87,12 @@ lines among other words (`INFO:root:Connected`), URLs, command-line flags
 `SR:BPM:01` and `DLS:01` are names, and a `ca://` or `pva://` name is
 always taken as it is.
 
+bobview's local and simulated PVs are names too: `loc://foo`,
+`loc://x<VLong>(7)`, `sim://ramp`, `sim://sine(0, 10, 0.1)` (the commas and
+spaces inside the brackets do not split it). No archiver has them, so they
+are plotted live only. Formulas (`=…`, `eq://…`) are not taken from a
+selection; add them from bobview with right-click → Trend.
+
 - **A single word** is added if it can be a name, so names with no
   structure at all (`TEMP1`, `BEAMCURRENT`) work: double-click one in a
   terminal and middle-click.

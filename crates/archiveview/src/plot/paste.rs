@@ -91,13 +91,25 @@ pub(super) struct PasteState {
 }
 
 /// The PV names in `text`, in order and once each. It is split into words
-/// on whitespace, commas and semicolons, and quotes and brackets around a
-/// word are dropped. A word can be a name if, after an optional `ca://` or
-/// `pva://`, it has only characters EPICS record names use (letters,
-/// digits, `_ - + : [ ] < > { } $`, and `.` before a field), at least one
-/// letter, and does not start with `-` or `+` (a command-line flag) or
-/// start or end with `.` or `:`. Unless it has a scheme, shapes that are
-/// something else are left out: times and dates (`12:30:00`,
+/// on whitespace, commas and semicolons, except inside the `(arguments)`
+/// of a `scheme://` name (`sim://sine(0, 10, 0.1)` is one word), and quotes
+/// and brackets around a word are dropped.
+///
+/// The schemes taken are those the host's [`pv::PvManager`] serves, as
+/// [`pv::PvName::parse`] reads them: `ca://` and `pva://` (in either case),
+/// and `loc://` and `sim://`, which no archiver has, so they are plotted
+/// live only. Formulas (`=expr`, `eq://expr`) are not: their text has
+/// spaces and operators, and cannot be told from prose. Any other scheme
+/// (`https://`, `sys://`) is not a PV.
+///
+/// After `ca://` or `pva://`, or with no scheme, a word can be a name if it
+/// has only characters EPICS record names use (letters, digits,
+/// `_ - + : [ ] < > { } $`, and `.` before a field), at least one letter,
+/// and does not start with `-` or `+` (a command-line flag) or start or
+/// end with `.` or `:`. After `loc://` or `sim://` such a name can be
+/// followed by a `<VType>` and then `(arguments)`, which end it:
+/// `loc://x<VLong>(7)`, `sim://ramp`. Unless it has a scheme, shapes that
+/// are something else are left out: times and dates (`12:30:00`,
 /// `2026-10-17T13:41:52Z`), `host:port` (two parts, a host name with a
 /// `.`, `localhost` or lower case, then digits: not `SR:BPM:01` or
 /// `DLS:01`), `a::b` paths, and in running text Python log lines
@@ -109,8 +121,8 @@ pub(super) struct PasteState {
 /// braces, a digit or a `.FIELD`), so prose, shell commands and code
 /// selected with them add nothing.
 pub fn pv_names(text: &str) -> Vec<String> {
-    let words: Vec<&str> = text
-        .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+    let words: Vec<&str> = words(text)
+        .into_iter()
         .map(unwrap)
         .filter(|w| !w.is_empty())
         .collect();
@@ -122,6 +134,68 @@ pub fn pv_names(text: &str) -> Vec<String> {
         }
     }
     names
+}
+
+/// `text` split on whitespace, commas and semicolons, except inside the
+/// parentheses of a word that has a `://` before them: the arguments of
+/// `sim://sine(0, 10, 0.1)` or `loc://s<VString>("a b")`. A `(` that is
+/// never closed is an ordinary character, so it cannot swallow the rest.
+fn words(text: &str) -> Vec<&str> {
+    let sep = |c: char| c.is_whitespace() || c == ',' || c == ';';
+    let mut words = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut i = 0;
+    while let Some(c) = text[i..].chars().next() {
+        if sep(c) {
+            if let Some(s) = start.take() {
+                words.push(&text[s..i]);
+            }
+        } else {
+            let s = *start.get_or_insert(i);
+            if c == '('
+                && text[s..i].contains("://")
+                && let Some(len) = closing(&text[i..])
+            {
+                i += len;
+                continue;
+            }
+        }
+        i += c.len_utf8();
+    }
+    if let Some(s) = start {
+        words.push(&text[s..]);
+    }
+    words
+}
+
+/// The length of `text`, which starts with `(`, up to and including the
+/// `)` that closes it, passing over parentheses in `"strings"`; `None`
+/// when it is never closed.
+fn closing(text: &str) -> Option<usize> {
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    for (i, c) in text.char_indices() {
+        if quoted {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => quoted = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => quoted = true,
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// `word` without the quotes and brackets around it: `"A:B"`, `(A:B)`,
@@ -153,26 +227,51 @@ const LOG_LEVELS: [&str; 8] = [
 /// Whether `word` can be a PV name; `alone` when it is the whole
 /// selection (see [`pv_names`]).
 fn looks_like_pv(word: &str, alone: bool) -> bool {
-    let (prefixed, body) = match word.split_once("://") {
-        Some((scheme, body))
-            if scheme.eq_ignore_ascii_case("ca") || scheme.eq_ignore_ascii_case("pva") =>
-        {
-            (true, body)
-        }
-        Some(_) => return false,
-        None => (false, word),
+    let Some((scheme, body)) = word.split_once("://") else {
+        return record_name(word) && !something_else(word, alone) && (alone || structured(word));
     };
+    // A scheme says it is a PV, whatever it looks like, if the host's
+    // PvManager serves it.
+    match pv::PvName::parse(word).scheme {
+        pv::Scheme::Ca | pv::Scheme::Pva => record_name(body),
+        pv::Scheme::Loc | pv::Scheme::Sim => host_name(body),
+        // Not told from prose (see `pv_names`).
+        pv::Scheme::Formula => false,
+        // `CA://`, `PVA://`, as some lists write them.
+        pv::Scheme::Unsupported => {
+            (scheme.eq_ignore_ascii_case("ca") || scheme.eq_ignore_ascii_case("pva"))
+                && record_name(body)
+        }
+    }
+}
+
+/// Only characters EPICS record names use, at least one letter, and no
+/// flag's `-`/`+` start or `.`/`:` at either end.
+fn record_name(body: &str) -> bool {
     let chars_ok = body.chars().all(|c| {
         c.is_ascii_alphanumeric()
             || matches!(c, '_' | '-' | '+' | ':' | '[' | ']' | '<' | '>')
             || matches!(c, '.' | '{' | '}' | '$')
     });
     let ends_ok = !body.starts_with(['.', ':', '-', '+']) && !body.ends_with(['.', ':']);
-    if !(chars_ok && ends_ok && body.chars().any(|c| c.is_ascii_alphabetic())) {
-        return false;
+    chars_ok && ends_ok && body.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+/// A `loc://` or `sim://` name after its scheme: a record name, then
+/// optionally a `<VType>`, then optionally `(arguments)` that end it.
+fn host_name(body: &str) -> bool {
+    let (base, mut rest) = body.split_at(body.find(['<', '(']).unwrap_or(body.len()));
+    if let Some(after) = rest.strip_prefix('<') {
+        let Some((vtype, after)) = after.split_once('>') else {
+            return false;
+        };
+        if vtype.is_empty() || !vtype.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return false;
+        }
+        rest = after;
     }
-    // A scheme says it is a PV, whatever it looks like.
-    prefixed || (!something_else(body, alone) && (alone || structured(body)))
+    let args_ok = rest.is_empty() || (rest.starts_with('(') && closing(rest) == Some(rest.len()));
+    record_name(base) && args_ok
 }
 
 /// A time, date, `host:port`, `a::b` path or log line, not a PV;
@@ -269,8 +368,9 @@ mod tests {
             "down. Note:",
             ":LEADING .dot",
             "https://archiver.example.com/retrieval",
-            "sim://sine",
             "file:///tmp/x",
+            "sys://time",
+            "Sim://sine",
             "A:B(1)",
             "A:B/C",
             "it's",
@@ -293,6 +393,56 @@ mod tests {
         }
         assert_eq!(pv_names("$ caget -a SR:X"), ["SR:X"]);
         assert!(pv_names("INFO:root:Connected and more").is_empty());
+    }
+
+    #[test]
+    fn local_and_simulated_names_are_names() {
+        for (text, want) in [
+            ("loc://foo", &["loc://foo"][..]),
+            ("loc://x(1.5)", &["loc://x(1.5)"]),
+            ("sim://ramp", &["sim://ramp"]),
+            // The arguments' commas and spaces do not split the name.
+            ("sim://sine(0, 10, 0.1)", &["sim://sine(0, 10, 0.1)"]),
+            (" 'sim://sine(0, 10, 0.1)'\n", &["sim://sine(0, 10, 0.1)"]),
+            ("loc://a<VLong>(7)", &["loc://a<VLong>(7)"]),
+            (
+                r#"loc://s<VString>("a (b), c")"#,
+                &[r#"loc://s<VString>("a (b), c")"#],
+            ),
+            ("loc://a(1, 2)", &["loc://a(1, 2)"]),
+            ("(sim://noise(-5, 5, 0.5))", &["sim://noise(-5, 5, 0.5)"]),
+            (
+                "sim://sine(0, 10, 0.1), SR:X; loc://y(2) ca://Z",
+                &["sim://sine(0, 10, 0.1)", "SR:X", "loc://y(2)", "ca://Z"],
+            ),
+            // Among prose, as any scheme'd name is.
+            (
+                "trend sim://ramp(0, 1, 0.1) and loc://foo please",
+                &["sim://ramp(0, 1, 0.1)", "loc://foo"],
+            ),
+        ] {
+            assert_eq!(pv_names(text), want, "{text:?}");
+        }
+        for text in [
+            "loc://",
+            "loc://(1)",
+            "sim://42",
+            "loc://x(1)junk",
+            "loc://x<>(1)",
+            "loc://x<V Long>(1)",
+            "loc://x<VLong",
+            // Never closed: an ordinary character, so not a name.
+            "sim://sine(0, 10",
+            // Formulas are not told from prose.
+            "eq://a+b",
+            "=a+b",
+            // Parentheses without a scheme still split and are still not names.
+            "A:B(1, 2)",
+        ] {
+            assert!(pv_names(text).is_empty(), "{text:?}: {:?}", pv_names(text));
+        }
+        // An unclosed bracket does not swallow what follows.
+        assert_eq!(pv_names("sim://sine(0, SR:X"), ["SR:X"]);
     }
 
     #[test]
