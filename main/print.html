@@ -911,7 +911,15 @@ and the host's fonts; it never sets the theme or installs fonts.</p>
 <li>
 <p><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
 last drawn in, so a plot in its own native window is repainted, not the
-root one) and, while following now, at the pace the time axis scrolls.</p>
+root one) and, while following now, at the pace the time axis scrolls.
+A host whose every repaint redraws more than the plot can slow it:
+<code>plot.set_min_repaint_interval(Duration::from_millis(250))</code> floors every
+repaint the plot schedules itself (the scroll pace, the Live pill's
+pulse, spinners, debounce and probe waits). Easing after the user's own
+pans and zooms, and the repaint when data arrives, stay immediate; with
+a floor, a live rescale of the value axes moves once per tick. The floor
+does not cover repaints from the host's own <code>PvManager</code> notifier on live
+monitor updates: those are the host's to pace.</p>
 </li>
 <li>
 <p><strong>It reads no clipboard.</strong> Ctrl+V over the plot works on its own (egui
