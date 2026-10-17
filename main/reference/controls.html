@@ -191,13 +191,14 @@
 <tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>, or a 2h 12h 3d 30d chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See <a href="../how-to/navigate.html#choose-a-time-range">Choose a time range</a></td></tr>
 <tr><td><strong>● Live</strong></td><td>red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow</td></tr>
 <tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
+<tr><td><strong>↶</strong> <strong>↷</strong></td><td>undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See <a href="../how-to/navigate.html#undo-and-redo">Undo and redo</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale every value axis</td></tr>
 <tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
 <tr><td><strong>≡</strong></td><td>Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
 </tbody></table>
 </div>
 <p>In a narrow window the presets become a drop-down, the archiver pill shows
-only its dot, and ⤢ and ⌂ move into the ≡ menu.</p>
+only its dot, and ↶ ↷, ⤢ and ⌂ move into the ≡ menu.</p>
 <h2 id="on-the-plot"><a class="header" href="#on-the-plot">On the plot</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
 <tr><td>drag</td><td>pan time, with a glide after a quick release; stops following live</td></tr>
@@ -213,6 +214,7 @@ only its dot, and ⤢ and ⌂ move into the ≡ menu.</p>
 <tr><td>right-click a value axis</td><td>its menu: Log scale, Autoscale, Rename…</td></tr>
 <tr><td>middle-click (here or on the legend)</td><td>add the PVs in the primary selection (the text last selected anywhere), or in the clipboard where there is no primary selection (macOS, Windows). At most 20 at once. See <a href="../how-to/search.html#add-pvs-from-another-window">Add PVs from another window</a></td></tr>
 <tr><td><code>Ctrl+V</code> (pointer over the plot)</td><td>add the PVs in the clipboard</td></tr>
+<tr><td>mouse back and forward buttons</td><td>undo and redo, as in a browser</td></tr>
 <tr><td>hover</td><td>crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap)</td></tr>
 </tbody></table>
 </div>
@@ -241,6 +243,8 @@ the last archive request failed. Hover a chip for details.</p>
 <tr><td><code>L</code></td><td>follow now, or stop following</td></tr>
 <tr><td><code>A</code></td><td>autoscale</td></tr>
 <tr><td><code>Home</code></td><td>reset</td></tr>
+<tr><td><code>Ctrl+Z</code> (<code>⌘Z</code> on a Mac)</td><td>undo</td></tr>
+<tr><td><code>Ctrl+Shift+Z</code> or <code>Ctrl+Y</code></td><td>redo</td></tr>
 </tbody></table>
 </div>
 <p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds (or, on a recent search,

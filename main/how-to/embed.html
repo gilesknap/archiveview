@@ -283,6 +283,18 @@ and setting the primary only once a selection has been steady for
 records the archiver in use; <code>set_view</code> switches to it only with archiver
 switching on.
 <code>plot.is_loading()</code> is true while archive requests are in flight.</p>
+<p>The plot keeps its own undo and redo lists (in memory, about 100 steps),
+with ↶ ↷ buttons in its bar, <code>Ctrl+Z</code> and <code>Ctrl+Shift+Z</code>, and the mouse's
+back and forward buttons. Restoring a layout with <code>set_view</code>, and adding
+PVs with <code>add_pvs</code>, are steps too. A host with an undo of its own can turn
+the plot's controls off with <code>plot.set_undo_controls(false)</code> and drive it
+instead: <code>plot.undo()</code> and <code>plot.redo()</code> return whether there was a step,
+and <code>plot.undo_label()</code> and <code>plot.redo_label()</code> name it ("zoom"). A host
+with no use for them can stop the recording (and the memory it keeps,
+such as removed traces' data) with <code>plot.set_undo_enabled(false)</code>. Give the
+name of the layout shown with <code>plot.set_view_name(..)</code>: each step keeps it,
+so undoing an opened layout gives back the name of the one before
+(<code>plot.view_name()</code>). Undo never switches the archiver back.</p>
 <p>The search box remembers recent searches in memory only. To keep them
 across runs, as the standalone app does in <code>history.json</code>, give the plot
 the saved list with <code>plot.set_search_history(history)</code> and save

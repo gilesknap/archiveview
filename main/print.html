@@ -585,6 +585,36 @@ thinned the data into bins, the card also shows the bin's min and max.</p>
 <h2 id="start-again"><a class="header" href="#start-again">Start again</a></h2>
 <p>Double-click the plot, press <code>Home</code>, or click <strong>⌂</strong>: the time range returns
 to the last preset and autoscale turns on.</p>
+<h2 id="undo-and-redo"><a class="header" href="#undo-and-redo">Undo and redo</a></h2>
+<p>Explore freely: zoom in to look at something, then step back. <strong>↶</strong> and
+<strong>↷</strong> in the bar undo and redo, as do <code>Ctrl+Z</code> and <code>Ctrl+Shift+Z</code> (or
+<code>Ctrl+Y</code>), and the mouse's back and forward buttons, which suit stepping
+through a zoom history. Each button's tooltip names the step, such as "Undo
+zoom" or "Redo move SR-DI-DCCT-01:LIFETIME to Time (h)". In a narrow window
+they are in the <strong>≡</strong> menu.</p>
+<p>What can be undone is everything that changes what the plot shows:</p>
+<ul>
+<li>the time range: zooming and panning however done, presets, a custom
+range, and leaving or returning to Live (undo returns to Live if that is
+where the step started);</li>
+<li>each value axis: its zoom and pan, autoscale, log scale and a fixed range;</li>
+<li>a reset, as one step, so an accidental double-click can be undone;</li>
+<li>traces: adding PVs, removing one (it comes back with its colour, its axis,
+its place in the legend and its history, without fetching it again),
+hiding or showing one, moving one to another axis, and renaming an axis;</li>
+<li>opening a view, <strong>Start empty</strong>, and the restored session (the view's
+name in the ≡ menu comes back too; the archiver does not, so switch it
+back in the archiver pill if the view changed it).</li>
+</ul>
+<p>One gesture is one step: a drag from press to release, or a run of scrolls
+or key presses with no pause longer than about half a second, or an arrow
+key held down. Time moving on
+while Live is not a step. A new change after undoing clears what could be
+redone. About 100 steps are kept, for the session only: they are not saved
+with views.</p>
+<p>Settings and files are not undone: the search text and recent searches, the
+theme and UI zoom, the archiver, saving or deleting a view, the window's size
+and position, and an axis picked out by a click.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="work-with-value-axes"><a class="header" href="#work-with-value-axes">Work with value axes</a></h1>
 <p>You never have to set up a value axis: each PV picks one when its data first
 arrives, and the axes name themselves. When the choice is not the one you
@@ -887,6 +917,18 @@ and setting the primary only once a selection has been steady for
 records the archiver in use; <code>set_view</code> switches to it only with archiver
 switching on.
 <code>plot.is_loading()</code> is true while archive requests are in flight.</p>
+<p>The plot keeps its own undo and redo lists (in memory, about 100 steps),
+with ↶ ↷ buttons in its bar, <code>Ctrl+Z</code> and <code>Ctrl+Shift+Z</code>, and the mouse's
+back and forward buttons. Restoring a layout with <code>set_view</code>, and adding
+PVs with <code>add_pvs</code>, are steps too. A host with an undo of its own can turn
+the plot's controls off with <code>plot.set_undo_controls(false)</code> and drive it
+instead: <code>plot.undo()</code> and <code>plot.redo()</code> return whether there was a step,
+and <code>plot.undo_label()</code> and <code>plot.redo_label()</code> name it ("zoom"). A host
+with no use for them can stop the recording (and the memory it keeps,
+such as removed traces' data) with <code>plot.set_undo_enabled(false)</code>. Give the
+name of the layout shown with <code>plot.set_view_name(..)</code>: each step keeps it,
+so undoing an opened layout gives back the name of the one before
+(<code>plot.view_name()</code>). Undo never switches the archiver back.</p>
 <p>The search box remembers recent searches in memory only. To keep them
 across runs, as the standalone app does in <code>history.json</code>, give the plot
 the saved list with <code>plot.set_search_history(history)</code> and save
@@ -1144,13 +1186,14 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>, or a 2h 12h 3d 30d chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See <a href="reference/../how-to/navigate.html#choose-a-time-range">Choose a time range</a></td></tr>
 <tr><td><strong>● Live</strong></td><td>red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow</td></tr>
 <tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="reference/../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
+<tr><td><strong>↶</strong> <strong>↷</strong></td><td>undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See <a href="reference/../how-to/navigate.html#undo-and-redo">Undo and redo</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale every value axis</td></tr>
 <tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
 <tr><td><strong>≡</strong></td><td>Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
 </tbody></table>
 </div>
 <p>In a narrow window the presets become a drop-down, the archiver pill shows
-only its dot, and ⤢ and ⌂ move into the ≡ menu.</p>
+only its dot, and ↶ ↷, ⤢ and ⌂ move into the ≡ menu.</p>
 <h2 id="on-the-plot"><a class="header" href="#on-the-plot">On the plot</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
 <tr><td>drag</td><td>pan time, with a glide after a quick release; stops following live</td></tr>
@@ -1166,6 +1209,7 @@ only its dot, and ⤢ and ⌂ move into the ≡ menu.</p>
 <tr><td>right-click a value axis</td><td>its menu: Log scale, Autoscale, Rename…</td></tr>
 <tr><td>middle-click (here or on the legend)</td><td>add the PVs in the primary selection (the text last selected anywhere), or in the clipboard where there is no primary selection (macOS, Windows). At most 20 at once. See <a href="reference/../how-to/search.html#add-pvs-from-another-window">Add PVs from another window</a></td></tr>
 <tr><td><code>Ctrl+V</code> (pointer over the plot)</td><td>add the PVs in the clipboard</td></tr>
+<tr><td>mouse back and forward buttons</td><td>undo and redo, as in a browser</td></tr>
 <tr><td>hover</td><td>crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap)</td></tr>
 </tbody></table>
 </div>
@@ -1194,6 +1238,8 @@ the last archive request failed. Hover a chip for details.</p>
 <tr><td><code>L</code></td><td>follow now, or stop following</td></tr>
 <tr><td><code>A</code></td><td>autoscale</td></tr>
 <tr><td><code>Home</code></td><td>reset</td></tr>
+<tr><td><code>Ctrl+Z</code> (<code>⌘Z</code> on a Mac)</td><td>undo</td></tr>
+<tr><td><code>Ctrl+Shift+Z</code> or <code>Ctrl+Y</code></td><td>redo</td></tr>
 </tbody></table>
 </div>
 <p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds (or, on a recent search,

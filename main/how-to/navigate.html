@@ -237,6 +237,36 @@ thinned the data into bins, the card also shows the bin's min and max.</p>
 <h2 id="start-again"><a class="header" href="#start-again">Start again</a></h2>
 <p>Double-click the plot, press <code>Home</code>, or click <strong>⌂</strong>: the time range returns
 to the last preset and autoscale turns on.</p>
+<h2 id="undo-and-redo"><a class="header" href="#undo-and-redo">Undo and redo</a></h2>
+<p>Explore freely: zoom in to look at something, then step back. <strong>↶</strong> and
+<strong>↷</strong> in the bar undo and redo, as do <code>Ctrl+Z</code> and <code>Ctrl+Shift+Z</code> (or
+<code>Ctrl+Y</code>), and the mouse's back and forward buttons, which suit stepping
+through a zoom history. Each button's tooltip names the step, such as "Undo
+zoom" or "Redo move SR-DI-DCCT-01:LIFETIME to Time (h)". In a narrow window
+they are in the <strong>≡</strong> menu.</p>
+<p>What can be undone is everything that changes what the plot shows:</p>
+<ul>
+<li>the time range: zooming and panning however done, presets, a custom
+range, and leaving or returning to Live (undo returns to Live if that is
+where the step started);</li>
+<li>each value axis: its zoom and pan, autoscale, log scale and a fixed range;</li>
+<li>a reset, as one step, so an accidental double-click can be undone;</li>
+<li>traces: adding PVs, removing one (it comes back with its colour, its axis,
+its place in the legend and its history, without fetching it again),
+hiding or showing one, moving one to another axis, and renaming an axis;</li>
+<li>opening a view, <strong>Start empty</strong>, and the restored session (the view's
+name in the ≡ menu comes back too; the archiver does not, so switch it
+back in the archiver pill if the view changed it).</li>
+</ul>
+<p>One gesture is one step: a drag from press to release, or a run of scrolls
+or key presses with no pause longer than about half a second, or an arrow
+key held down. Time moving on
+while Live is not a step. A new change after undoing clears what could be
+redone. About 100 steps are kept, for the session only: they are not saved
+with views.</p>
+<p>Settings and files are not undone: the search text and recent searches, the
+theme and UI zoom, the archiver, saving or deleting a view, the window's size
+and position, and an axis picked out by a click.</p>
 
                     </main>
 
