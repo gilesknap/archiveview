@@ -587,6 +587,16 @@ thinned the data into bins, the card also shows the bin's min and max.</p>
 <h2 id="start-again"><a class="header" href="#start-again">Start again</a></h2>
 <p>Double-click the plot, press <code>Home</code>, or click <strong>⌂</strong>: the time range returns
 to the last preset and autoscale turns on.</p>
+<h2 id="zoom-the-interface"><a class="header" href="#zoom-the-interface">Zoom the interface</a></h2>
+<p>To make the text and controls bigger or smaller (not the data: that is
+zooming time or values), use the <strong>Zoom − 100% +</strong> row at the top of the
+<strong>≡</strong> menu, or <code>Ctrl+=</code> (or <code>Ctrl++</code>), <code>Ctrl+−</code> and <code>Ctrl+0</code>, as in a
+browser. They work even while you type in the search box. Clicking the
+percentage, or <code>Ctrl+0</code>, goes back to 100%. The steps run from 50% to 300%,
+and each change shows "Zoom 125%" briefly.</p>
+<p>The zoom is remembered for the next start (<code>ui_zoom</code> in
+<a href="how-to/../reference/config.html#settingsjson"><code>settings.json</code></a>). <code>--ui-scale 1.25</code>
+or <code>ARCHIVEVIEW_UI_SCALE=1.25</code> starts at 125% whatever was saved.</p>
 <h2 id="undo-and-redo"><a class="header" href="#undo-and-redo">Undo and redo</a></h2>
 <p>Explore freely: zoom in to look at something, then step back. <strong>↶</strong> and
 <strong>↷</strong> in the bar undo and redo, as do <code>Ctrl+Z</code> and <code>Ctrl+Shift+Z</code> (or
@@ -791,7 +801,8 @@ archiveview --snapshot out.png --scale-factor 2 ...      # as on a high-DPI scre
 archiveview --snapshot out.png --theme dark ...
 </code></pre>
 <p><code>--size</code> is in pixels and defaults to <code>1280x800</code>. Snapshots use the light
-theme unless <code>--theme dark</code> is given.</p>
+theme unless <code>--theme dark</code> is given, and 100% interface zoom (not the one
+saved from the ≡ menu) unless <code>--ui-scale</code> is given, e.g. <code>--ui-scale 1.5</code>.</p>
 <h2 id="wait-for-data"><a class="header" href="#wait-for-data">Wait for data</a></h2>
 <p>The snapshot is taken after <code>--wait</code> seconds (default 2), and not before
 every archive request has finished, so history is always drawn. It gives up
@@ -1144,7 +1155,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><code>--view NAME</code></td><td>open the saved view <code>NAME</code> from <code>~/.config/archiveview/views/</code>. Giving PVs as well is a usage error.</td></tr>
 <tr><td><code>-r</code>, <code>--range SPAN</code></td><td>the time span to show, ending now: <code>1h</code>, <code>8h</code>, <code>7d</code>, <code>90m</code>, <code>2 days</code>, <code>1 hour 30 min</code>, <code>3w</code>, <code>6mo</code>, <code>1y</code>; units <code>s</code>, <code>m</code> (minutes), <code>h</code>, <code>d</code>, <code>w</code>, <code>mo</code> (30 days), <code>y</code> (365 days). Default <code>1h</code>.</td></tr>
 <tr><td><code>--theme system|light|dark</code></td><td>the colour theme. Default: <code>theme</code> in <code>settings.json</code>, else <code>system</code> (follow the OS).</td></tr>
-<tr><td><code>--ui-scale F</code></td><td>scale the whole interface by <code>F</code>, e.g. <code>1.25</code>. Default: <code>ARCHIVEVIEW_UI_SCALE</code>, else <code>1</code>.</td></tr>
+<tr><td><code>--ui-scale F</code></td><td>start with the whole interface zoomed by <code>F</code>, e.g. <code>1.25</code> for 125%. Default: <code>ARCHIVEVIEW_UI_SCALE</code>, else the zoom last set in the ≡ menu (<code>ui_zoom</code> in <code>settings.json</code>), else <code>1</code>. Snapshots start at <code>1</code> without it. See <a href="reference/../how-to/navigate.html#zoom-the-interface">Zoom the interface</a>.</td></tr>
 <tr><td><code>--version</code>, <code>--help</code></td><td></td></tr>
 </tbody></table>
 </div>
@@ -1191,7 +1202,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><strong>↶</strong> <strong>↷</strong></td><td>undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See <a href="reference/../how-to/navigate.html#undo-and-redo">Undo and redo</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale every value axis</td></tr>
 <tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
-<tr><td><strong>≡</strong></td><td>Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
+<tr><td><strong>≡</strong></td><td>Zoom <strong>− 100% +</strong> (the whole interface; click the percentage for 100%); Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
 </tbody></table>
 </div>
 <p>In a narrow window the presets become a drop-down, the archiver pill shows
@@ -1245,12 +1256,19 @@ and archive status, and these gestures.</p>
 <tr><td><code>Ctrl+Shift+Z</code> or <code>Ctrl+Y</code></td><td>redo</td></tr>
 </tbody></table>
 </div>
+<p>These work even while a text box has the focus:</p>
+<div class="table-wrapper"><table><thead><tr><th>key</th><th>effect</th></tr></thead><tbody>
+<tr><td><code>Ctrl+=</code> or <code>Ctrl++</code></td><td>zoom the interface in (to 300%)</td></tr>
+<tr><td><code>Ctrl+−</code></td><td>zoom the interface out (to 50%)</td></tr>
+<tr><td><code>Ctrl+0</code></td><td>interface zoom back to 100%</td></tr>
+</tbody></table>
+</div>
 <p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds (or, on a recent search,
 searches for it again).</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="environment-variables"><a class="header" href="#environment-variables">Environment variables</a></h1>
 <div class="table-wrapper"><table><thead><tr><th>variable</th><th>used by</th><th>meaning</th></tr></thead><tbody>
 <tr><td><code>ARCHIVEVIEW_LOG</code></td><td>archiveview</td><td>log level on stderr: <code>error</code>, <code>warn</code> (default), <code>info</code>, <code>debug</code> or <code>trace</code>. Below <code>debug</code>, the egui, eframe, winit and EPICS libraries log warnings only.</td></tr>
-<tr><td><code>ARCHIVEVIEW_UI_SCALE</code></td><td>archiveview</td><td>as <code>--ui-scale</code></td></tr>
+<tr><td><code>ARCHIVEVIEW_UI_SCALE</code></td><td>archiveview</td><td>as <code>--ui-scale</code>: the interface zoom to start at, over the saved one</td></tr>
 <tr><td><code>XDG_CONFIG_HOME</code></td><td>archiveview</td><td>the config folder is <code>$XDG_CONFIG_HOME/archiveview</code> when set, else <code>~/.config/archiveview</code></td></tr>
 <tr><td><code>EPICS_CA_ADDR_LIST</code>, <code>EPICS_CA_AUTO_ADDR_LIST</code>, <code>EPICS_CA_SERVER_PORT</code>, ...</td><td>live PVs</td><td>the standard Channel Access client settings</td></tr>
 <tr><td><code>EPICS_PVA_ADDR_LIST</code>, <code>EPICS_PVA_AUTO_ADDR_LIST</code>, ...</td><td>live PVs</td><td>the standard PV Access client settings, for <code>pva://</code> PVs</td></tr>
@@ -1283,13 +1301,15 @@ saved over until it is fixed.</p>
     "http://127.0.0.1:17668/retrieval"
   ],
   "theme": "system",
-  "save_default_on_exit": true
+  "save_default_on_exit": true,
+  "ui_zoom": 1.25
 }
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>field</th><th>default</th><th>meaning</th></tr></thead><tbody>
 <tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when neither <code>--archiver</code> nor the view opened at start-up names one. Written by <code>--archiver</code>, and by switching to another archiver in the pill or by opening a view (not by <strong>No archiver</strong>).</td></tr>
 <tr><td><code>recent_archivers</code></td><td>none</td><td>archivers used recently, newest first (at most 8), offered by the archiver pill</td></tr>
 <tr><td><code>theme</code></td><td><code>"system"</code></td><td><code>"system"</code> (follow the OS), <code>"light"</code> or <code>"dark"</code>; set from the ≡ menu</td></tr>
+<tr><td><code>ui_zoom</code></td><td><code>1</code></td><td>the interface zoom set in the ≡ menu or with <code>Ctrl+=</code>/<code>Ctrl+−</code>/<code>Ctrl+0</code>, from <code>0.5</code> to <code>3</code>; left out at <code>1</code>. <code>--ui-scale</code> and <code>ARCHIVEVIEW_UI_SCALE</code> win over it. For now there is one for the app; once archiveview has windows and layouts, each window keeps its own in its layout.</td></tr>
 <tr><td><code>save_default_on_exit</code></td><td><code>true</code></td><td>save the plot as the <code>default</code> view on quit, so the next start (with no PVs or <code>--view</code>) reopens where you left off</td></tr>
 </tbody></table>
 </div>

@@ -194,7 +194,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><code>--view NAME</code></td><td>open the saved view <code>NAME</code> from <code>~/.config/archiveview/views/</code>. Giving PVs as well is a usage error.</td></tr>
 <tr><td><code>-r</code>, <code>--range SPAN</code></td><td>the time span to show, ending now: <code>1h</code>, <code>8h</code>, <code>7d</code>, <code>90m</code>, <code>2 days</code>, <code>1 hour 30 min</code>, <code>3w</code>, <code>6mo</code>, <code>1y</code>; units <code>s</code>, <code>m</code> (minutes), <code>h</code>, <code>d</code>, <code>w</code>, <code>mo</code> (30 days), <code>y</code> (365 days). Default <code>1h</code>.</td></tr>
 <tr><td><code>--theme system|light|dark</code></td><td>the colour theme. Default: <code>theme</code> in <code>settings.json</code>, else <code>system</code> (follow the OS).</td></tr>
-<tr><td><code>--ui-scale F</code></td><td>scale the whole interface by <code>F</code>, e.g. <code>1.25</code>. Default: <code>ARCHIVEVIEW_UI_SCALE</code>, else <code>1</code>.</td></tr>
+<tr><td><code>--ui-scale F</code></td><td>start with the whole interface zoomed by <code>F</code>, e.g. <code>1.25</code> for 125%. Default: <code>ARCHIVEVIEW_UI_SCALE</code>, else the zoom last set in the ≡ menu (<code>ui_zoom</code> in <code>settings.json</code>), else <code>1</code>. Snapshots start at <code>1</code> without it. See <a href="../how-to/navigate.html#zoom-the-interface">Zoom the interface</a>.</td></tr>
 <tr><td><code>--version</code>, <code>--help</code></td><td></td></tr>
 </tbody></table>
 </div>

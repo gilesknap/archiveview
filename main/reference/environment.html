@@ -184,7 +184,7 @@
                         <h1 id="environment-variables"><a class="header" href="#environment-variables">Environment variables</a></h1>
 <div class="table-wrapper"><table><thead><tr><th>variable</th><th>used by</th><th>meaning</th></tr></thead><tbody>
 <tr><td><code>ARCHIVEVIEW_LOG</code></td><td>archiveview</td><td>log level on stderr: <code>error</code>, <code>warn</code> (default), <code>info</code>, <code>debug</code> or <code>trace</code>. Below <code>debug</code>, the egui, eframe, winit and EPICS libraries log warnings only.</td></tr>
-<tr><td><code>ARCHIVEVIEW_UI_SCALE</code></td><td>archiveview</td><td>as <code>--ui-scale</code></td></tr>
+<tr><td><code>ARCHIVEVIEW_UI_SCALE</code></td><td>archiveview</td><td>as <code>--ui-scale</code>: the interface zoom to start at, over the saved one</td></tr>
 <tr><td><code>XDG_CONFIG_HOME</code></td><td>archiveview</td><td>the config folder is <code>$XDG_CONFIG_HOME/archiveview</code> when set, else <code>~/.config/archiveview</code></td></tr>
 <tr><td><code>EPICS_CA_ADDR_LIST</code>, <code>EPICS_CA_AUTO_ADDR_LIST</code>, <code>EPICS_CA_SERVER_PORT</code>, ...</td><td>live PVs</td><td>the standard Channel Access client settings</td></tr>
 <tr><td><code>EPICS_PVA_ADDR_LIST</code>, <code>EPICS_PVA_AUTO_ADDR_LIST</code>, ...</td><td>live PVs</td><td>the standard PV Access client settings, for <code>pva://</code> PVs</td></tr>

@@ -205,13 +205,15 @@ saved over until it is fixed.</p>
     "http://127.0.0.1:17668/retrieval"
   ],
   "theme": "system",
-  "save_default_on_exit": true
+  "save_default_on_exit": true,
+  "ui_zoom": 1.25
 }
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>field</th><th>default</th><th>meaning</th></tr></thead><tbody>
 <tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when neither <code>--archiver</code> nor the view opened at start-up names one. Written by <code>--archiver</code>, and by switching to another archiver in the pill or by opening a view (not by <strong>No archiver</strong>).</td></tr>
 <tr><td><code>recent_archivers</code></td><td>none</td><td>archivers used recently, newest first (at most 8), offered by the archiver pill</td></tr>
 <tr><td><code>theme</code></td><td><code>"system"</code></td><td><code>"system"</code> (follow the OS), <code>"light"</code> or <code>"dark"</code>; set from the ≡ menu</td></tr>
+<tr><td><code>ui_zoom</code></td><td><code>1</code></td><td>the interface zoom set in the ≡ menu or with <code>Ctrl+=</code>/<code>Ctrl+−</code>/<code>Ctrl+0</code>, from <code>0.5</code> to <code>3</code>; left out at <code>1</code>. <code>--ui-scale</code> and <code>ARCHIVEVIEW_UI_SCALE</code> win over it. For now there is one for the app; once archiveview has windows and layouts, each window keeps its own in its layout.</td></tr>
 <tr><td><code>save_default_on_exit</code></td><td><code>true</code></td><td>save the plot as the <code>default</code> view on quit, so the next start (with no PVs or <code>--view</code>) reopens where you left off</td></tr>
 </tbody></table>
 </div>

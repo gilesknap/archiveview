@@ -195,7 +195,8 @@ archiveview --snapshot out.png --scale-factor 2 ...      # as on a high-DPI scre
 archiveview --snapshot out.png --theme dark ...
 </code></pre>
 <p><code>--size</code> is in pixels and defaults to <code>1280x800</code>. Snapshots use the light
-theme unless <code>--theme dark</code> is given.</p>
+theme unless <code>--theme dark</code> is given, and 100% interface zoom (not the one
+saved from the ≡ menu) unless <code>--ui-scale</code> is given, e.g. <code>--ui-scale 1.5</code>.</p>
 <h2 id="wait-for-data"><a class="header" href="#wait-for-data">Wait for data</a></h2>
 <p>The snapshot is taken after <code>--wait</code> seconds (default 2), and not before
 every archive request has finished, so history is always drawn. It gives up
