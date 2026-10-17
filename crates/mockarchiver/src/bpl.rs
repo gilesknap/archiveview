@@ -96,6 +96,15 @@ pub(crate) fn get_all_pvs(params: &Params) -> Reply {
     Reply::json(names_json(names))
 }
 
+/// `GET /retrieval/bpl/getVersion`, in the appliance's form.
+pub(crate) fn get_version() -> Reply {
+    let version = format!(
+        "Archiver Appliance Version mock-{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    Reply::json(format!("{{\"version\":{}}}", json_str(&version)))
+}
+
 /// `GET /retrieval/bpl/getMetadata?pv=PV`: a flat object of strings.
 pub(crate) fn get_metadata(params: &Params) -> Reply {
     let Some(pv) = params.get("pv") else {

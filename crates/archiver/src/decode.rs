@@ -493,6 +493,18 @@ pub(crate) fn names(body: &str) -> Result<Vec<String>> {
     }
 }
 
+/// `getVersion`: `{"version": "Archiver Appliance Version 1.1.0"}`.
+pub(crate) fn version(body: &str) -> Result<String> {
+    match json(body)? {
+        Value::Object(obj) => obj
+            .get("version")
+            .and_then(text)
+            .filter(|v| !v.trim().is_empty())
+            .ok_or_else(|| Error::Parse("no version in the answer".into())),
+        _ => Err(Error::Parse("expected a JSON object".into())),
+    }
+}
+
 /// `getMetadata`: a flat object, values usually strings.
 pub(crate) fn metadata(body: &str) -> Result<PvInfo> {
     let Value::Object(obj) = json(body)? else {
