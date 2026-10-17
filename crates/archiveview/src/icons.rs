@@ -18,6 +18,10 @@ pub enum Icon {
     Check,
     /// Forget, clear.
     Cross,
+    /// Undo: an arrow turning back to the left.
+    Undo,
+    /// Redo: the same, to the right.
+    Redo,
 }
 
 impl Icon {
@@ -72,6 +76,8 @@ impl Icon {
                 vec![[4.5, 4.5], [11.5, 11.5]],
                 vec![[11.5, 4.5], [4.5, 11.5]],
             ],
+            Icon::Undo => undo_arrow(false),
+            Icon::Redo => undo_arrow(true),
         }
     }
 
@@ -88,6 +94,20 @@ impl Icon {
             painter.add(Shape::line(points, stroke));
         }
     }
+}
+
+/// The undo arrow: back along the top, turning down and round to the
+/// bottom, its head on the left; mirrored for redo.
+fn undo_arrow(mirror: bool) -> Vec<Vec<[f32; 2]>> {
+    let x = |x: f32| if mirror { 16.0 - x } else { x };
+    let mut turn = vec![[x(3.0), 6.0]];
+    turn.extend((0..=12).map(|i| {
+        let a = (-90.0 + i as f32 * 15.0f32).to_radians();
+        [x(9.5 + 3.5 * a.cos()), 9.5 + 3.5 * a.sin()]
+    }));
+    turn.push([x(6.0), 13.0]);
+    let head = vec![[x(5.5), 3.5], [x(3.0), 6.0], [x(5.5), 8.5]];
+    vec![turn, head]
 }
 
 /// The height of a toolbar button: a line of button text and its padding.

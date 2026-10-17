@@ -196,7 +196,12 @@ pub struct Trace {
 
 impl Trace {
     pub fn new(id: u64, name: &str, pv: Pv) -> Self {
-        let live = Arc::new(Mutex::new(Samples::default()));
+        Self::with_samples(id, name, pv, Samples::default())
+    }
+
+    /// As [`Trace::new`], its live samples starting with `samples`.
+    fn with_samples(id: u64, name: &str, pv: Pv, samples: Samples) -> Self {
+        let live = Arc::new(Mutex::new(samples));
         let into = live.clone();
         let array = Arc::new(AtomicBool::new(false));
         let is_array = array.clone();
@@ -223,6 +228,48 @@ impl Trace {
             data_since: None,
             stats: None,
         }
+    }
+
+    /// Take it off the plot, keeping what it has fetched and learnt so
+    /// an undo can bring it back as it was: its subscription is dropped
+    /// (the channel disconnects), its archived history and live samples
+    /// kept, the latter ending in a gap.
+    pub fn park(self) -> Parked {
+        // Dropping the listener and the PV stops the pushes: nothing else
+        // holds the samples after this.
+        drop(self._listener);
+        let mut samples = std::mem::take(&mut *self.live.lock());
+        samples.push(now(), f64::NAN);
+        Parked {
+            id: self.id,
+            name: self.name,
+            live: samples,
+            array: self.array.load(Ordering::Relaxed),
+            history: self.history,
+            fetch: self.fetch,
+            seen_at: self.seen_at,
+            data_since: self.data_since,
+        }
+    }
+
+    /// A parked trace back on the plot, subscribed again through `pv`,
+    /// with the history and live samples it had: no fetch unless the
+    /// window has moved on. Live samples carry on after the gap.
+    pub fn revive(p: Parked, pv: Pv) -> Self {
+        let mut t = Self::with_samples(p.id, &p.name, pv, p.live);
+        t.array.store(p.array, Ordering::Relaxed);
+        t.history = p.history;
+        t.fetch = p.fetch;
+        if t.fetch.in_flight {
+            // Its answer came while it was parked, and was dropped: ask
+            // again, and drop it should it still come.
+            t.fetch.in_flight = false;
+            t.fetch.requested = None;
+            t.fetch.generation += 1;
+        }
+        t.seen_at = p.seen_at;
+        t.data_since = p.data_since;
+        t
     }
 
     /// The name the archiver knows the PV by: without `ca://` or
@@ -272,6 +319,44 @@ impl Trace {
             f64::NEG_INFINITY
         };
         merge(hist, binned, &live, from, to, hold)
+    }
+}
+
+/// A trace taken off the plot, kept for undo (see [`Trace::park`]): what
+/// it fetched and learnt, without its subscription.
+pub struct Parked {
+    pub id: u64,
+    pub name: String,
+    /// Its live samples, ending where it was parked.
+    live: Samples,
+    array: bool,
+    pub history: Option<History>,
+    pub fetch: FetchState,
+    seen_at: Option<f64>,
+    data_since: Option<f64>,
+}
+
+impl Parked {
+    /// The samples it keeps, archived and live.
+    pub fn samples(&self) -> usize {
+        self.history.as_ref().map_or(0, |h| h.samples.len()) + self.live.points.len()
+    }
+
+    /// Forget all its data, to save memory: its history is fetched again
+    /// if it comes back.
+    pub fn forget_data(&mut self) {
+        self.forget_history();
+        self.live = Samples::default();
+    }
+
+    /// Forget its history (to save memory, or for another archiver): it
+    /// is fetched again if it comes back.
+    pub fn forget_history(&mut self) {
+        self.history = None;
+        self.fetch = FetchState {
+            generation: self.fetch.generation + 1,
+            ..Default::default()
+        };
     }
 }
 

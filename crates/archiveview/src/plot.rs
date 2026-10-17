@@ -14,7 +14,8 @@
 //! - `hover`: the crosshair readout, empty state and status line;
 //! - `axes`: which value axis a trace joins, and the axes' names;
 //! - `status`: whether the archiver can be reached;
-//! - `paste`: adding PVs from the primary selection or the clipboard.
+//! - `paste`: adding PVs from the primary selection or the clipboard;
+//! - `undo`: undo and redo.
 
 mod axes;
 mod axisui;
@@ -27,6 +28,7 @@ mod render;
 mod series;
 mod status;
 mod timeaxis;
+mod undo;
 mod window;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -178,6 +180,10 @@ pub struct Plot {
     edit: bar::ArchiverEdit,
     /// Middle-clicks and pastes, for the host's selection.
     paste: paste::PasteState,
+    /// The undo and redo lists.
+    undo: undo::Undo,
+    /// The host's name for the view shown ([`Plot::set_view_name`]).
+    view_name: Option<String>,
 }
 
 /// Where the axes (strip, name) and chips (whole, dot) were last drawn.
@@ -296,7 +302,7 @@ impl Plot {
         let mut monitor = status::Monitor::default();
         monitor.reset(archiver.is_some());
         let recent = archiver.iter().map(|a| a.base().to_string()).collect();
-        Self {
+        let mut plot = Self {
             pvs: pvs.clone(),
             archiver,
             id,
@@ -341,7 +347,13 @@ impl Plot {
             switch_archivers: false,
             edit: bar::ArchiverEdit::default(),
             paste: paste::PasteState::default(),
-        }
+            undo: undo::Undo::default(),
+            view_name: None,
+        };
+        // What the host does before the first frame (PVs, a view) is the
+        // first step.
+        plot.commit(false);
+        plot
     }
 
     /// Change (or remove) the archiver: refetches every trace's history,
@@ -355,6 +367,7 @@ impl Plot {
         // Searches in flight were for the old archiver: drop their answers
         // and search again.
         self.search.restart();
+        self.forget_parked_histories();
         for t in &mut self.traces {
             t.history = None;
             // The generation carries on, so a late answer from the old
@@ -413,7 +426,10 @@ impl Plot {
 
     /// Add traces (skipping names already plotted, compared by
     /// `pv::PvName::key`): subscribe live and fetch the visible history.
+    /// One undo step ("add X"), however they were picked.
     pub fn add_pvs(&mut self, names: &[String]) {
+        // What came before is a step of its own.
+        self.commit(false);
         for name in names {
             self.add(name);
         }
@@ -507,9 +523,24 @@ impl Plot {
     /// Remove a trace by the name it was added with.
     pub fn remove_pv(&mut self, name: &str) {
         let key = pv::PvName::parse(name).key();
-        self.traces
-            .retain(|t| t.name != name && t.pv.name().key() != key);
-        self.prune_axes();
+        let gone = self
+            .traces
+            .iter()
+            .find(|t| t.name == name || t.pv.name().key() == key)
+            .map(|t| t.id);
+        if let Some(id) = gone {
+            self.remove_trace(id);
+        }
+    }
+
+    /// Remove the trace with id `id`, keeping it for an undo to bring
+    /// back.
+    fn remove_trace(&mut self, id: u64) {
+        if let Some(i) = self.traces.iter().position(|t| t.id == id) {
+            let t = self.traces.remove(i);
+            self.park(t);
+            self.prune_axes();
+        }
     }
 
     /// The plotted PV names, in legend order.
@@ -575,6 +606,11 @@ impl Plot {
     /// switches to it; otherwise, or for a view without one, the archiver
     /// stays as it is.
     pub fn set_view(&mut self, view: &View) {
+        self.name_step(if view.pvs.is_empty() {
+            "clear the plot"
+        } else {
+            "open view"
+        });
         if let Some(url) = view.archiver.as_ref().filter(|_| self.switch_archivers) {
             match ArchiverClient::new(url) {
                 Ok(a) if self.archiver.as_ref() != Some(&a) => self.set_archiver(Some(a)),
@@ -582,7 +618,9 @@ impl Plot {
                 Err(e) => log::warn!("view archiver {url}: {e}"),
             }
         }
-        self.traces.clear();
+        for t in std::mem::take(&mut self.traces) {
+            self.park(t);
+        }
         self.axes = view
             .value_axes()
             .map(|y| {
@@ -701,6 +739,28 @@ impl Plot {
         self.last_frame = Some(time);
         self.take_results(now);
         self.pulse = self.pulsing(ui, time);
+        // What the host changed since the last frame is a step of its own.
+        // A held key (arrows repeating) is a gesture, as a held button is.
+        let (pressed, down) = ui.input(|i| {
+            let key = i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::Key {
+                        pressed: true,
+                        repeat: false,
+                        ..
+                    }
+                )
+            });
+            (
+                i.pointer.any_pressed() || key,
+                i.pointer.any_down() || !i.keys_down.is_empty(),
+            )
+        });
+        self.commit(false);
+        if pressed {
+            self.undo.press += 1;
+        }
         let whole = ui.available_rect_before_wrap();
         self.keyboard(ui, whole, now);
 
@@ -842,6 +902,7 @@ impl Plot {
         legend::paint(self, ui, &chips, &data, dark);
         self.rename_box(ui, &f);
         self.chip_ghost(ui, dark);
+        self.commit(down);
 
         // Keep moving: easing, gliding, and time passing while live.
         let target = self.window.range(now);
@@ -1552,6 +1613,9 @@ impl Plot {
                 Some(Drag::Box(origin)) => {
                     if let Some(p) = ui.input(|i| i.pointer.latest_pos()) {
                         let r = Rect::from_two_pos(origin, p).intersect(data);
+                        if r.width() > 6.0 || r.height() > 6.0 {
+                            self.name_step("zoom to box");
+                        }
                         if r.width() > 6.0 {
                             self.window.set(f.time_at(r.left()), f.time_at(r.right()));
                         }
@@ -1571,14 +1635,26 @@ impl Plot {
         }
 
         if resp.contains_pointer() {
-            let (scroll, zoom, mods, pointer) = ui.input(|i| {
+            let (smooth, wheel, zoom, mods, pointer) = ui.input(|i| {
                 (
                     i.smooth_scroll_delta,
+                    (i.events.iter()).any(|e| matches!(e, egui::Event::MouseWheel { .. })),
                     i.zoom_delta(),
                     i.modifiers,
                     i.pointer.hover_pos(),
                 )
             });
+            // After an undo, the rest of a smoothed scroll is dropped
+            // until the wheel turns again: it would zoom on from the
+            // state undone to.
+            if wheel {
+                self.undo.hold_scroll = false;
+            }
+            let scroll = if self.undo.hold_scroll {
+                Vec2::ZERO
+            } else {
+                smooth
+            };
             let anchor = pointer.map_or(1.0, |p| ((p.x - data.left()) / data.width()) as f64);
             if mods.shift && (scroll.x != 0.0 || scroll.y != 0.0) {
                 // Shift+wheel arrives as horizontal scrolling.
@@ -1603,7 +1679,7 @@ impl Plot {
                     self.snap = true;
                 }
             }
-            if scroll != Vec2::ZERO {
+            if smooth != Vec2::ZERO {
                 // Not for a scroll area around the plot too.
                 ui.ctx().input_mut(|i| i.smooth_scroll_delta = Vec2::ZERO);
             }
@@ -1650,6 +1726,7 @@ impl Plot {
 
     /// Every value axis back to autoscaling.
     fn autoscale(&mut self) {
+        self.name_step("autoscale");
         for a in &mut self.axes {
             a.autoscale = true;
         }
@@ -1685,6 +1762,7 @@ impl Plot {
 
     /// Back to the home span, following now, values fitted.
     fn reset(&mut self) {
+        self.name_step("reset");
         self.window = Window::live(self.home_span);
         self.autoscale();
         self.glide = 0.0;
@@ -1692,6 +1770,11 @@ impl Plot {
 
     /// Toggle following now: pause at the range shown, or jump to now.
     fn toggle_live(&mut self, now: f64) {
+        self.name_step(if self.window.live {
+            "pause"
+        } else {
+            "follow now"
+        });
         if self.window.live {
             let (from, to) = self.window.range(now);
             self.window = Window::fixed(from, to);
@@ -1704,6 +1787,7 @@ impl Plot {
     /// Show a range picked in the bar: a preset, or one from the custom
     /// popover. Its span becomes the one reset goes back to.
     fn pick_range(&mut self, w: Window) {
+        self.name_step(range_label(&w));
         self.window = w;
         self.home_span = w.span;
         self.glide = 0.0;
@@ -1712,11 +1796,41 @@ impl Plot {
     /// The keyboard shortcuts, when the pointer is over the plot or it was
     /// clicked last, and no text field has the keyboard.
     fn keyboard(&mut self, ui: &egui::Ui, whole: Rect, now: f64) {
+        use egui::{Key, Modifiers, PointerButton};
+        let over = ui.rect_contains_pointer(whole);
+        // The mouse's back and forward buttons, as in a browser.
+        if !self.undo.hidden && over {
+            let (back, forward) = ui.input(|i| {
+                (
+                    i.pointer.button_pressed(PointerButton::Extra1),
+                    i.pointer.button_pressed(PointerButton::Extra2),
+                )
+            });
+            if back {
+                self.undo();
+            }
+            if forward {
+                self.redo();
+            }
+        }
         let typing = ui.ctx().memory(|m| m.focused().is_some());
-        if typing || !(self.active || ui.rect_contains_pointer(whole)) {
+        if typing || !(self.active || over) {
             return;
         }
-        use egui::Key;
+        if !self.undo.hidden {
+            // Ctrl+Z would match Ctrl+Shift+Z too: redo first.
+            let (undo, redo) = ui.input_mut(|i| {
+                let redo = i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)
+                    || i.consume_key(Modifiers::COMMAND, Key::Y);
+                (i.consume_key(Modifiers::COMMAND, Key::Z), redo)
+            });
+            if undo {
+                self.undo();
+            }
+            if redo {
+                self.redo();
+            }
+        }
         let pressed = |k: Key| ui.input(|i| i.key_pressed(k) && !i.modifiers.ctrl);
         let span = self.window.span;
         if pressed(Key::Slash) {
@@ -1779,6 +1893,23 @@ fn shown_values<'a>(
     let shown = ease_values(a.shown.unwrap_or(target), target, dt);
     a.shown = Some(shown);
     shown
+}
+
+/// What picking window `w` is called, as an undo step: "show the last
+/// 90m", or "show 09:00 → 12:00" (with the dates when they differ).
+fn range_label(w: &Window) -> String {
+    if w.live {
+        return format!("show the last {}", timeaxis::format_span(w.span));
+    }
+    let (from, to) = w.range(0.0);
+    let (a, b) = (timeaxis::format_local(from), timeaxis::format_local(to));
+    // "2026-10-17 09:00:00": the seconds only when there are some.
+    let short = |t: &str| t.strip_suffix(":00").unwrap_or(t).to_string();
+    let (a, b) = (short(&a), short(&b));
+    match (a.split_once(' '), b.split_once(' ')) {
+        (Some((da, ta)), Some((db, tb))) if da == db => format!("show {ta} → {tb}"),
+        _ => format!("show {a} → {b}"),
+    }
 }
 
 /// Put archiver `url` first in `recent`, at most [`MAX_RECENT`] long.
@@ -2049,6 +2180,8 @@ mod tests {
         t: f64,
         /// The modifier keys held.
         mods: egui::Modifiers,
+        /// The window's width (points).
+        width: f32,
     }
 
     impl Harness {
@@ -2058,6 +2191,7 @@ mod tests {
                 plot,
                 t: 0.0,
                 mods: egui::Modifiers::NONE,
+                width: 1000.0,
             };
             h.frame(vec![]);
             h
@@ -2066,7 +2200,10 @@ mod tests {
         fn frame(&mut self, mut events: Vec<egui::Event>) {
             events.insert(0, egui::Event::ModifiersChanged(self.mods));
             let input = egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0))),
+                screen_rect: Some(Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(self.width, 600.0),
+                )),
                 time: Some(self.t),
                 events,
                 ..Default::default()
@@ -2346,6 +2483,45 @@ mod tests {
         assert_eq!(
             from,
             super::timeaxis::parse_local("2026-10-01 09:00").unwrap()
+        );
+    }
+
+    #[test]
+    fn a_range_picked_in_the_popover_is_one_undo_step() {
+        let mut h = custom_open();
+        h.frame(vec![egui::Event::Text("90m".into())]);
+        h.key(egui::Key::Enter);
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (1, 0), "typing is no step");
+        assert_eq!(h.plot.undo_label(), Some("show the last 1h 30m"));
+        // A fixed range, the same day: its times.
+        super::bar::open_custom(&mut h.plot, now());
+        h.frame(vec![]);
+        h.frame(vec![]);
+        h.plot.custom.from = "2026-10-01 09:00".into();
+        h.plot.custom.to = "2026-10-01 12:00".into();
+        h.key(egui::Key::Tab);
+        h.key(egui::Key::Tab);
+        h.key(egui::Key::Enter);
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (2, 0));
+        assert_eq!(h.plot.undo_label(), Some("show 09:00 → 12:00"));
+        // Undone in turn: the 90 minutes, then the hour, and reset's
+        // span with them.
+        h.plot.undo();
+        assert!(h.plot.window.live);
+        assert_eq!(h.plot.window.span, 5400.0);
+        h.plot.undo();
+        assert_eq!(h.plot.window.span, 3600.0);
+        assert_eq!(h.plot.home_span, 3600.0);
+        // Across days, with the dates.
+        let w = Window::fixed(
+            super::timeaxis::parse_local("2026-10-01 09:00").unwrap(),
+            super::timeaxis::parse_local("2026-10-02 12:00:30").unwrap(),
+        );
+        assert_eq!(
+            range_label(&w),
+            "show 2026-10-01 09:00 → 2026-10-02 12:00:30"
         );
     }
 
@@ -3555,5 +3731,608 @@ mod tests {
         assert_eq!(format_value(f64::NAN, None, "V"), "—");
         assert_eq!(format_value(1468514835.908, Some(3), "Pa"), "1.469e9 Pa");
         assert_eq!(format_value(-2.5e7, Some(1), ""), "-2.5e7");
+    }
+
+    // --- undo ----------------------------------------------------------------
+
+    impl Harness {
+        /// The wheel turned over the middle of the plot, then frames for
+        /// the smooth scrolling to finish.
+        fn wheel(&mut self, dy: f32) {
+            self.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+            self.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, dy),
+                phase: egui::TouchPhase::Move,
+                modifiers: self.mods,
+            }]);
+            for _ in 0..20 {
+                self.frame(vec![]);
+            }
+        }
+
+        /// `key` pressed with `mods` held.
+        fn key_with(&mut self, key: egui::Key, mods: egui::Modifiers) {
+            let held = std::mem::replace(&mut self.mods, mods);
+            let ev = |pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: mods,
+            };
+            self.frame(vec![ev(true)]);
+            self.frame(vec![ev(false)]);
+            self.mods = held;
+        }
+
+        /// A click of mouse button `button` over the plot.
+        fn click_with(&mut self, button: egui::PointerButton) {
+            for pressed in [true, false] {
+                self.frame(vec![egui::Event::PointerButton {
+                    pos: MIDDLE,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+        }
+
+        /// A drag across the plot from `from` to `to` (x), pausing for
+        /// `pause` half way.
+        fn drag(&mut self, from: f32, to: f32, pause: std::time::Duration) {
+            let at = |x: f32| Pos2::new(x, 300.0);
+            self.frame(vec![egui::Event::PointerMoved(at(from))]);
+            self.button(at(from), true);
+            let mid = (from + to) / 2.0;
+            for x in [from + 10.0, mid] {
+                self.frame(vec![egui::Event::PointerMoved(at(x))]);
+            }
+            std::thread::sleep(pause);
+            self.frame(vec![egui::Event::PointerMoved(at(to))]);
+            self.button(at(to), false);
+            self.frame(vec![]);
+        }
+    }
+
+    /// A live plot of `sim://sine` in the harness, its adding undoable.
+    fn sine() -> Harness {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.add_pvs(&names(&["sim://sine"]));
+        let h = Harness::new(p);
+        assert_eq!(h.plot.undo_label(), Some("add sim://sine"));
+        h
+    }
+
+    #[test]
+    fn a_zoom_is_undone_and_redone() {
+        let mut h = sine();
+        let id = h.plot.traces[0].id;
+        h.wheel(200.0);
+        let zoomed = h.plot.window.span;
+        assert!(zoomed < 3600.0 * 0.8);
+        assert_eq!(h.plot.undo.len(), (2, 0));
+        assert_eq!(h.plot.undo_label(), Some("zoom"));
+        assert!(h.plot.undo());
+        assert_eq!(h.plot.window, Window::live(3600.0));
+        assert_eq!(h.plot.redo_label(), Some("zoom"));
+        assert_eq!(h.plot.undo_label(), Some("add sim://sine"));
+        assert_eq!(h.plot.traces[0].id, id, "the same trace, not a new one");
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (1, 1), "undoing is not a step");
+        assert!(h.plot.redo());
+        assert_eq!(h.plot.window.span, zoomed);
+        assert_eq!(h.plot.redo_label(), None);
+        // Back to the start: an empty plot, nothing more to undo.
+        h.plot.undo();
+        h.plot.undo();
+        assert!(h.plot.traces.is_empty());
+        assert!(!h.plot.undo());
+        assert_eq!(h.plot.undo_label(), None);
+        assert!(h.plot.redo());
+        assert_eq!(h.plot.traces[0].id, id, "back with its own id");
+    }
+
+    #[test]
+    fn a_scroll_burst_and_a_drag_are_one_step_each() {
+        let mut h = sine();
+        // Two turns of the wheel close together: one step.
+        h.wheel(100.0);
+        h.wheel(100.0);
+        assert_eq!(h.plot.undo.len(), (2, 0));
+        // After a pause, another.
+        h.plot.undo.age();
+        h.wheel(100.0);
+        assert_eq!(h.plot.undo.len(), (3, 0));
+        // A drag that rests a while half way is still one step.
+        h.plot.undo.age();
+        h.drag(500.0, 700.0, std::time::Duration::from_millis(700));
+        assert!(!h.plot.window.live);
+        assert_eq!(h.plot.undo.len(), (4, 0));
+        assert_eq!(h.plot.undo_label(), Some("pan"));
+        // Undone, it returns to Live: where the step started.
+        h.plot.undo();
+        assert!(h.plot.window.live);
+    }
+
+    #[test]
+    fn live_motion_and_settling_are_not_steps() {
+        let mut h = sine();
+        h.until(|p| p.traces[0].axis.is_some());
+        for _ in 0..10 {
+            h.frame(vec![]);
+        }
+        assert_eq!(h.plot.undo.len(), (1, 0), "only adding it");
+    }
+
+    #[test]
+    fn a_reset_is_one_step_and_undone() {
+        let mut h = sine();
+        h.wheel(200.0);
+        let zoomed = h.plot.window.span;
+        // Values zoomed too, shift+wheel over the data.
+        h.until(|p| p.traces[0].axis.is_some());
+        h.frame(vec![]);
+        h.plot.undo.age();
+        h.mods = egui::Modifiers::SHIFT;
+        h.wheel(100.0);
+        h.mods = egui::Modifiers::NONE;
+        assert!(!h.plot.autoscaling());
+        assert_eq!(h.plot.undo_label(), Some("zoom values"));
+        let range = (h.plot.axes[0].lo, h.plot.axes[0].hi);
+        // A reset right after (no pause): a step of its own.
+        h.key(egui::Key::Home);
+        assert_eq!(h.plot.undo_label(), Some("reset"));
+        assert!(h.plot.autoscaling() && h.plot.window.span == 3600.0);
+        h.plot.undo();
+        assert_eq!(h.plot.window.span, zoomed);
+        assert!(!h.plot.axes[0].autoscale);
+        assert_eq!((h.plot.axes[0].lo, h.plot.axes[0].hi), range);
+        h.plot.undo();
+        assert!(h.plot.autoscaling(), "the values' zoom undone");
+        assert_eq!(h.plot.window.span, zoomed);
+    }
+
+    #[test]
+    fn a_new_change_clears_redo() {
+        let mut h = sine();
+        h.wheel(200.0);
+        h.plot.undo();
+        assert_eq!(h.plot.redo_label(), Some("zoom"));
+        h.plot.undo.age();
+        h.key(egui::Key::ArrowLeft);
+        assert_eq!(h.plot.undo_label(), Some("pan"));
+        assert_eq!(h.plot.redo_label(), None);
+        assert!(!h.plot.redo());
+    }
+
+    #[test]
+    fn the_steps_are_capped() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        for i in 0..150 {
+            p.window = Window::live(60.0 + i as f64);
+            p.undo.age();
+            p.commit(false);
+        }
+        assert_eq!(p.undo.len(), (undo::MAX_STEPS, 0));
+        while p.undo() {}
+        assert_eq!(p.window.span, 60.0 + 49.0, "the oldest are gone");
+    }
+
+    #[test]
+    fn keys_and_mouse_buttons_undo_and_redo() {
+        let mut h = sine();
+        h.wheel(200.0);
+        let zoomed = h.plot.window.span;
+        let ctrl = egui::Modifiers::COMMAND;
+        h.key_with(egui::Key::Z, ctrl);
+        assert_eq!(h.plot.window.span, 3600.0);
+        h.key_with(egui::Key::Z, ctrl | egui::Modifiers::SHIFT);
+        assert_eq!(h.plot.window.span, zoomed);
+        h.key_with(egui::Key::Z, ctrl);
+        h.key_with(egui::Key::Y, ctrl);
+        assert_eq!(h.plot.window.span, zoomed);
+        // As in a browser: back and forward.
+        h.click_with(egui::PointerButton::Extra1);
+        assert_eq!(h.plot.window.span, 3600.0);
+        h.click_with(egui::PointerButton::Extra2);
+        assert_eq!(h.plot.window.span, zoomed);
+        // A host with its own undo: neither.
+        h.plot.set_undo_controls(false);
+        h.key_with(egui::Key::Z, ctrl);
+        h.click_with(egui::PointerButton::Extra1);
+        assert_eq!(h.plot.window.span, zoomed);
+        assert!(h.plot.undo(), "the host may still undo");
+    }
+
+    #[test]
+    fn a_removed_trace_comes_back_as_it_was_without_a_fetch() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&["MOCK:SINE", "MOCK:NOISE", "MOCK:STEP"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading() && p.traces.iter().all(|t| t.axis.is_some()));
+        h.frame(vec![]);
+        h.plot.traces[0].color = Some("#d62728".into());
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo_label(), Some("change colours"));
+        let before = h.plot.view();
+        let ids: Vec<u64> = h.plot.traces.iter().map(|t| t.id).collect();
+        let slots: Vec<usize> = h.plot.traces.iter().map(|t| t.slot).collect();
+        let axes = axis_indices(&h.plot);
+        let samples = h.plot.traces[1].history.as_ref().unwrap().samples.len();
+        h.plot.fetcher.sent.lock().clear();
+
+        // ✕ on the first and the middle chip.
+        for i in [1, 0] {
+            let id = h.plot.traces[i].id;
+            let chip = h.plot.chips_shown.iter().find(|c| c.0 == id).unwrap().1;
+            let x = Pos2::new(chip.right() - 12.0, chip.center().y);
+            h.frame(vec![egui::Event::PointerMoved(x)]);
+            h.button(x, true);
+            h.button(x, false);
+            h.frame(vec![]);
+        }
+        assert_eq!(h.plot.names(), ["MOCK:STEP"]);
+        assert_eq!(h.plot.undo_label(), Some("remove MOCK:SINE"));
+        assert_eq!(h.plot.axes.len(), 1);
+        assert_eq!(h.plot.undo.parked(), 2);
+
+        h.plot.undo();
+        h.plot.undo();
+        for _ in 0..10 {
+            h.frame(vec![]);
+        }
+        assert_eq!(h.plot.view(), before, "colour, axes and order");
+        let t: &Vec<Trace> = &h.plot.traces;
+        assert_eq!(t.iter().map(|t| t.id).collect::<Vec<_>>(), ids);
+        assert_eq!(t.iter().map(|t| t.slot).collect::<Vec<_>>(), slots);
+        assert_eq!(axis_indices(&h.plot), axes);
+        let hist = h.plot.traces[1].history.as_ref().expect("its history kept");
+        assert_eq!(hist.samples.len(), samples);
+        assert!(!h.plot.is_loading());
+        assert!(
+            h.plot.fetcher.sent.lock().is_empty(),
+            "nothing fetched again"
+        );
+        // Redone: gone again, and its trace stays parked for an undo.
+        h.plot.redo();
+        assert_eq!(h.plot.names().len(), 2);
+        assert_eq!(h.plot.undo.parked(), 1);
+    }
+
+    #[test]
+    fn axis_moves_and_renames_are_undone() {
+        let (mut p, data) = plot_of(&[
+            ("SR-DI-DCCT-01:SIGNAL", "mA", &[299.5, 300.0]),
+            ("SR-DI-DCCT-01:LIFETIME", "h", &[5.2, 11.9]),
+            ("SR01C-DI-EBPM-01:SA:X", "mm", &[0.0, 0.04]),
+            ("SR01C-DI-EBPM-01:SA:Y", "mm", &[0.0, 0.6]),
+        ]);
+        p.settle_axes(&data, 0.0);
+        p.commit(false);
+        // Added one by one: a step each.
+        assert_eq!(p.undo.len(), (4, 0));
+        assert_eq!(p.undo_label(), Some("add SR01C-DI-EBPM-01:SA:Y"));
+        let settled = axis_indices(&p);
+        assert_eq!(settled, [Some(0), Some(1), Some(2), Some(2)]);
+
+        // SA:Y to an axis of its own, then onto the lifetime's.
+        let y = p.traces[3].id;
+        p.move_trace(y, None);
+        p.commit(false);
+        assert_eq!(
+            p.undo_label(),
+            Some("move SR01C-DI-EBPM-01:SA:Y to Position Y (mm)")
+        );
+        // Named as drawn before the drop.
+        p.axis_names = p.name_axes();
+        let lifetime = p.traces[1].axis;
+        p.move_trace(y, lifetime);
+        p.commit(false);
+        assert_eq!(
+            p.undo_label(),
+            Some("move SR01C-DI-EBPM-01:SA:Y to Time (h)")
+        );
+        p.undo();
+        assert_eq!(p.axes.len(), 4);
+        assert_eq!(
+            p.redo_label(),
+            Some("move SR01C-DI-EBPM-01:SA:Y to Time (h)")
+        );
+        p.undo();
+        assert_eq!(axis_indices(&p), settled);
+        assert_eq!(p.axes.len(), 3);
+
+        // Renamed, then back.
+        p.axes[1].name = Some("Lifetime".into());
+        p.commit(false);
+        assert_eq!(p.undo_label(), Some("rename axis to “Lifetime”"));
+        p.undo();
+        assert_eq!(p.axes[1].name, None);
+        p.redo();
+        assert_eq!(p.axes[1].name.as_deref(), Some("Lifetime"));
+
+        // Hidden, and its axis' log scale.
+        p.traces[0].visible = false;
+        p.commit(false);
+        assert_eq!(p.undo_label(), Some("hide SR-DI-DCCT-01:SIGNAL"));
+        p.axes[2].log = true;
+        p.commit(false);
+        assert_eq!(p.undo_label(), Some("log scale"));
+        p.undo();
+        p.undo();
+        assert!(p.traces[0].visible && !p.axes[2].log);
+    }
+
+    #[test]
+    fn a_trace_that_settles_after_a_step_stays_settled_through_its_undo() {
+        let (mut p, data) = plot_of(&[("A", "mA", &[300.0]), ("B", "h", &[10.0])]);
+        p.commit(false);
+        // Zoomed before they settle.
+        p.window = Window::live(600.0);
+        p.commit(false);
+        p.settle_axes(&data, 0.0);
+        p.commit(false);
+        assert_eq!(
+            p.undo.len(),
+            (3, 0),
+            "adding A, B, zooming: settling is no step"
+        );
+        let settled = axis_indices(&p);
+        assert_eq!(settled, [Some(0), Some(1)]);
+        p.undo();
+        assert_eq!(p.window.span, 3600.0);
+        assert_eq!(axis_indices(&p), settled, "not settling again");
+        // Back to before they were added, and again: still on their axes.
+        p.undo();
+        p.undo();
+        assert!(p.traces.is_empty() && p.axes.is_empty());
+        p.redo();
+        p.redo();
+        assert_eq!(axis_indices(&p), settled);
+        assert!(p.traces.iter().all(|t| t.stats.is_some()));
+
+        // Settled in the same frame as a zoom: the same.
+        let (mut p, data) = plot_of(&[("A", "mA", &[300.0]), ("B", "h", &[10.0])]);
+        p.commit(false);
+        p.window = Window::live(600.0);
+        p.settle_axes(&data, 0.0);
+        p.commit(false);
+        assert_eq!(p.undo_label(), Some("zoom"));
+        p.undo();
+        assert_eq!(axis_indices(&p), settled);
+    }
+
+    #[test]
+    fn opening_a_view_is_undone() {
+        let mut h = sine();
+        h.until(|p| p.traces[0].axis.is_some());
+        let id = h.plot.traces[0].id;
+        let before = h.plot.view();
+        let other = View {
+            pvs: vec![TraceView {
+                name: "sim://ramp".into(),
+                color: None,
+                visible: true,
+                axis: None,
+            }],
+            range: view::Range::Relative { secs: 8.0 * 3600.0 },
+            ..View::default()
+        };
+        h.plot.set_view(&other);
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo_label(), Some("open view"));
+        h.plot.undo();
+        assert_eq!(h.plot.view(), before);
+        assert_eq!(h.plot.traces[0].id, id);
+        h.plot.set_view(&View::default());
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo_label(), Some("clear the plot"));
+    }
+
+    #[test]
+    fn a_narrow_bar_has_undo_in_its_menu() {
+        let mut h = sine();
+        h.width = 500.0;
+        h.frame(vec![]);
+        // ≡ at the right of the bar.
+        let menu = Pos2::new(500.0 - 16.0, 14.0);
+        h.frame(vec![egui::Event::PointerMoved(menu)]);
+        h.button(menu, true);
+        h.button(menu, false);
+        h.frame(vec![]);
+        let popup = h.ctx.memory(|m| {
+            let layer = m.areas().top_layer_id(egui::Order::Foreground)?;
+            m.area_rect(layer.id)
+        });
+        let popup = popup.expect("the menu opens");
+        // Its first item: "Undo add sim://sine".
+        let first = Pos2::new(popup.center().x, popup.top() + 16.0);
+        h.frame(vec![egui::Event::PointerMoved(first)]);
+        h.button(first, true);
+        h.button(first, false);
+        assert!(h.plot.traces.is_empty(), "undone from the menu");
+        assert_eq!(h.plot.redo_label(), Some("add sim://sine"));
+    }
+
+    #[test]
+    fn a_live_only_trace_comes_back_with_its_data() {
+        let mut h = sine();
+        let start = std::time::Instant::now();
+        while start.elapsed().as_millis() < 1500 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            h.frame(vec![]);
+        }
+        let t = super::now();
+        let before = h.plot.traces[0].points(t - 3600.0, t, t).len();
+        assert!(before > 2, "{before}");
+        h.plot.remove_pv("sim://sine");
+        h.frame(vec![]);
+        h.plot.undo();
+        h.frame(vec![]);
+        let t = super::now();
+        let after = h.plot.traces[0].points(t - 3600.0, t, t);
+        assert!(after.len() >= before, "{} < {before}", after.len());
+        // Where it was off the plot, a gap.
+        assert!(after.iter().any(|p| p.v.is_nan()));
+    }
+
+    #[test]
+    fn an_undo_in_a_scrolls_tail_is_whole_and_keeps_redo() {
+        let mut h = sine();
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, 200.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        h.frame(vec![]);
+        // Ctrl+Z while egui still eases the scroll in.
+        h.key_with(egui::Key::Z, egui::Modifiers::COMMAND);
+        for _ in 0..30 {
+            h.frame(vec![]);
+        }
+        assert_eq!(h.plot.window.span, 3600.0);
+        assert_eq!(h.plot.undo.len(), (1, 1));
+        assert_eq!(h.plot.redo_label(), Some("zoom"));
+        // The wheel turned again zooms as ever.
+        h.wheel(200.0);
+        assert!(h.plot.window.span < 3600.0 * 0.8);
+    }
+
+    #[test]
+    fn a_drag_right_after_a_scroll_is_one_step_however_slow() {
+        let mut h = sine();
+        h.wheel(100.0);
+        // Within the half second: the drag joins the scroll's step, and
+        // resting half way does not split it.
+        h.drag(500.0, 700.0, std::time::Duration::from_millis(700));
+        assert_eq!(h.plot.undo.len(), (2, 0));
+        h.plot.undo();
+        assert_eq!(h.plot.window, Window::live(3600.0));
+    }
+
+    #[test]
+    fn a_held_key_is_one_step() {
+        let mut h = sine();
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        let ev = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(vec![ev(true, false)]);
+        // The OS waits longer than the gap before it repeats.
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        h.frame(vec![ev(true, true)]);
+        h.frame(vec![ev(true, true)]);
+        h.frame(vec![ev(false, false)]);
+        assert_eq!(h.plot.undo.len(), (2, 0));
+        assert_eq!(h.plot.undo_label(), Some("pan"));
+    }
+
+    #[test]
+    fn a_step_learns_of_an_axis_as_it_first_was() {
+        let (mut p, mut data) = plot_of(&[("B", "mA", &[]), ("A", "mA", &[300.0, 301.0])]);
+        p.commit(false);
+        // A settles first (B has no data yet): an axis of its own.
+        p.settle_axes(&data, 0.0);
+        p.commit(false);
+        assert_eq!(axis_indices(&p), [None, Some(0)]);
+        p.axes[0].name = Some("Beam".into());
+        p.commit(false);
+        // B's data comes, and it joins A's axis.
+        data[0] = vec![Pt::raw(0.0, 299.0), Pt::raw(1.0, 300.0)];
+        p.traces[0].history = hist_of("mA", &[299.0, 300.0]);
+        p.settle_axes(&data, 1.0);
+        p.commit(false);
+        assert_eq!(axis_indices(&p), [Some(0), Some(0)]);
+        // Before A was added, B is on that axis as it was then: unnamed.
+        p.undo();
+        assert_eq!(p.undo_label(), Some("add A"));
+        p.undo();
+        assert_eq!(p.names(), ["B"]);
+        assert_eq!(axis_indices(&p), [Some(0)]);
+        assert_eq!(p.axes[0].name, None, "not the later rename");
+    }
+
+    #[test]
+    fn undo_can_be_turned_off() {
+        let mut h = sine();
+        h.plot.set_undo_enabled(false);
+        assert_eq!(h.plot.undo.len(), (0, 0));
+        h.wheel(200.0);
+        h.plot.remove_pv("sim://sine");
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (0, 0));
+        assert_eq!(h.plot.undo.parked(), 0, "nothing kept for it");
+        assert!(!h.plot.undo());
+        assert_eq!(h.plot.undo_label(), None);
+        // On again: from the state then.
+        h.plot.set_undo_enabled(true);
+        h.plot.add_pvs(&names(&["sim://ramp"]));
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo_label(), Some("add sim://ramp"));
+        h.plot.undo();
+        assert!(h.plot.traces.is_empty());
+    }
+
+    #[test]
+    fn undoing_an_opened_view_brings_back_the_name_before() {
+        let mut h = sine();
+        h.plot.set_view_name(Some("mine"));
+        h.frame(vec![]);
+        let other = View {
+            pvs: vec![TraceView {
+                name: "sim://ramp".into(),
+                color: None,
+                visible: true,
+                axis: None,
+            }],
+            ..View::default()
+        };
+        h.plot.set_view(&other);
+        h.plot.set_view_name(Some("other"));
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo_label(), Some("open view"));
+        h.plot.undo();
+        assert_eq!(h.plot.view_name(), Some("mine"));
+        h.plot.redo();
+        assert_eq!(h.plot.view_name(), Some("other"));
+    }
+
+    #[test]
+    fn a_paste_is_one_undo_step_and_into_the_search_box_none() {
+        let mut h = sine();
+        h.plot.paste_pvs("A:B, C:D\nE:F sim://sine");
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (2, 0));
+        assert_eq!(h.plot.undo_label(), Some("add 3 PVs"));
+        h.plot.undo();
+        assert_eq!(h.plot.names(), ["sim://sine"]);
+        h.plot.redo();
+        // Ctrl+V over the plot: one more.
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.frame(vec![egui::Event::Paste("G:H I:J".into())]);
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (3, 0));
+        assert_eq!(h.plot.undo_label(), Some("add 2 PVs"));
+        // Into the search box, by a middle-click or Ctrl+V there: text,
+        // not a step.
+        h.plot.paste_into_search("K:L");
+        h.frame(vec![]);
+        h.key(egui::Key::Slash);
+        h.frame(vec![egui::Event::Paste("M:N".into())]);
+        h.frame(vec![]);
+        assert_eq!(h.plot.undo.len(), (3, 0));
+        assert_eq!(h.plot.names().len(), 6);
     }
 }
