@@ -151,7 +151,8 @@ pub enum ValueKind {
     /// Scalar numbers (doubles, integers or enum indices): plottable.
     #[default]
     Scalar,
-    /// Arrays: element 0 is plotted. Always fetch these raw.
+    /// Arrays (waveforms). Always fetch these raw. Samples carry element
+    /// 0; archiveview does not plot them.
     Waveform,
     /// Strings: not plotted in v1 (samples carry NaN).
     Text,
@@ -497,7 +498,7 @@ impl ArchiverClient {
 /// `PREC`/`LOPR`/`HOPR`, unknown keys, and `fields` objects. A severity-3
 /// sample whose `fields` hold `cnxlostepsecs` becomes a [`Sample::gap`].
 /// A 5-element array `val` on a scalar PV is an `optimized` bin
-/// (`binned = true`); other arrays are waveforms (element 0 plotted).
+/// (`binned = true`); other arrays are waveforms (`val` holds element 0).
 ///
 /// Without knowing the request, a series whose every array value has five
 /// elements with a whole, non-negative count is taken as bins;

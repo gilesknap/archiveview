@@ -4,7 +4,7 @@
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
-use super::series::Pt;
+use super::series::{FetchState, History, Pt};
 use super::{Plot, format_value, precision, units};
 
 const HEIGHT: f32 = 26.0;
@@ -12,6 +12,11 @@ const GAP: f32 = 6.0;
 const PAD: f32 = 10.0;
 const DOT: f32 = 8.0;
 const CLOSE: f32 = 14.0;
+/// A chip's value is cut to this many characters (long strings), and to
+/// what fits the window.
+const VALUE_CHARS: usize = 32;
+/// An array's chip shows its length and this many elements.
+const ARRAY_SHOWN: usize = 3;
 
 /// Laid-out chips, relative to the legend's top left until placed.
 pub struct Chips {
@@ -28,9 +33,22 @@ struct Chip {
     /// Live and connected: the value is current.
     current: bool,
     severity: Option<Color32>,
-    /// A quiet word after the value: "live only", "no data".
-    mark: Option<&'static str>,
+    /// Quiet words after the value: "live only", "no data".
+    mark: Option<String>,
     note: String,
+    /// The value as shown, for tests.
+    #[cfg(test)]
+    text: String,
+}
+
+impl Chips {
+    /// Each chip's trace, rect on screen and value as shown.
+    #[cfg(test)]
+    pub fn shown(&self) -> Vec<(u64, Rect, String)> {
+        (self.chips.iter())
+            .map(|c| (c.trace, c.rect.translate(self.origin), c.text.clone()))
+            .collect()
+    }
 }
 
 impl Chip {
@@ -60,14 +78,23 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
         let state = t.pv.state();
         let prec = precision(t, &state);
         let egu = units(t);
-        let archived_last = t.history.as_ref().and_then(|h| {
+        let array = t.is_array();
+        let archived_last = t.history.as_ref().filter(|_| !array).and_then(|h| {
             h.samples
                 .iter()
                 .rev()
                 .find(|s| s.val.is_finite())
                 .map(|s| s.val)
         });
-        let (value, current) = if state.connected
+        let (value, current) = if state.connected && array {
+            // An array archived as a waveform may have one element live.
+            let text = array_text(&state.value, prec)
+                .unwrap_or_else(|| state.format(prec.map(|p| p as i32), true));
+            (text, true)
+        } else if state.connected && matches!(state.value, pv::Value::Str(_)) {
+            // Text: shown (cut short below), not plotted.
+            (state.format(None, false), true)
+        } else if state.connected
             && let Some(v) = state.value.as_f64()
         {
             // Large numbers as the axis has them, not in a dozen digits.
@@ -89,6 +116,9 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
         } else {
             note.push("Live: not connected".into());
         }
+        if array {
+            note.push("An array: not plotted".into());
+        }
         if plot.archiver.is_some() {
             note.push(if t.archive_name().is_none() {
                 "Archive: none for this kind of PV".to_string()
@@ -97,13 +127,15 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             } else if let Some(e) = &t.fetch.error {
                 format!("Archive: {e}")
             } else if let Some(h) = &t.history {
-                if h.samples.is_empty() {
+                if h.kind == archiver::ValueKind::Waveform {
+                    "Archive: archived (an array: history not fetched)".to_string()
+                } else if h.samples.is_empty() {
                     "Archive: no data in range".to_string()
                 } else {
                     let what = match h.kind {
                         archiver::ValueKind::Scalar if h.binned => "bins (mean, min…max)",
                         archiver::ValueKind::Scalar => "samples",
-                        archiver::ValueKind::Waveform => "samples (element 0 plotted)",
+                        archiver::ValueKind::Waveform => "array samples",
                         archiver::ValueKind::Text => "text samples (not plotted)",
                         archiver::ValueKind::Other => "samples (not plottable)",
                     };
@@ -114,43 +146,36 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             });
         }
         note.push("Click to hide or show; ✕ to remove".into());
-        let mark = if plot.archiver.is_some() && t.fetch.not_archived {
-            Some("live only")
-        } else if value == "—" && t.history.as_ref().is_some_and(|h| h.samples.is_empty()) {
-            Some("no data")
-        } else if value == "—"
-            && let Some(h) = &t.history
-            && matches!(
-                h.kind,
-                archiver::ValueKind::Text | archiver::ValueKind::Other
-            )
-        {
-            // Archived, but nothing a plot can draw.
-            Some(if h.kind == archiver::ValueKind::Text {
-                "text"
-            } else {
-                "not plotted"
-            })
-        } else {
-            None
-        };
-        let mut name = t.label();
-        if name.chars().count() > 48 {
-            name = format!("{}…", name.chars().take(47).collect::<String>());
-        }
-        let w = PAD
+        let mark = marks(
+            plot.archiver.is_some(),
+            &t.fetch,
+            t.history.as_ref(),
+            array,
+            value == "—",
+        );
+        let mark = (!mark.is_empty()).then(|| mark.join(" · "));
+        let name = ellipsize(&t.label(), 48);
+        // Everything but the value, which gets what is left of the width.
+        let rest = PAD
             + DOT
             + 6.0
             + super::render::text_size(painter, &name, &font).x
             + 8.0
-            + super::render::text_size(painter, &value, &font).x
-            + mark.map_or(0.0, |m| {
+            + mark.as_ref().map_or(0.0, |m| {
                 6.0 + super::render::text_size(painter, m, &mark_font()).x
             })
             + 6.0
             + CLOSE
             + PAD / 2.0;
-        let w = w.min(width);
+        let value = fit(
+            painter,
+            &ellipsize(&value, VALUE_CHARS),
+            &font,
+            width - rest,
+        );
+        let w = (rest + super::render::text_size(painter, &value, &font).x).min(width);
+        #[cfg(test)]
+        let text = value.clone();
         if x > 0.0 && x + w > width {
             x = 0.0;
             y += HEIGHT + GAP;
@@ -168,6 +193,8 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             },
             mark,
             note: note.join("\n"),
+            #[cfg(test)]
+            text,
         });
         x += w + GAP;
     }
@@ -223,8 +250,92 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         plot.traces.retain(|t| t.id != id);
         highlight = None;
     }
-    // Only a visible trace is picked out.
-    plot.highlight = highlight.filter(|id| plot.traces.iter().any(|t| t.id == *id && t.visible));
+    // Only a drawn trace is picked out: visible, and not an array.
+    plot.highlight = highlight
+        .filter(|id| (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array()));
+}
+
+/// The quiet words after a chip's value, saying why it has no line or no
+/// history: an array (not plotted), a PV the archiver does not have (live
+/// only), or an archive with nothing drawable in range. `no_value`: the
+/// chip shows "—".
+fn marks(
+    archiver: bool,
+    fetch: &FetchState,
+    history: Option<&History>,
+    array: bool,
+    no_value: bool,
+) -> Vec<&'static str> {
+    let mut marks = Vec::new();
+    if array {
+        marks.push("not plotted");
+    }
+    if archiver && fetch.not_archived {
+        marks.push("live only");
+    } else if array {
+        // Its history is not kept: nothing more to say.
+    } else if no_value && let Some(h) = history {
+        if h.samples.is_empty() {
+            marks.push("no data");
+        } else if h.kind == archiver::ValueKind::Text {
+            // Archived, but nothing a plot can draw.
+            marks.push("text");
+        } else if h.kind == archiver::ValueKind::Other {
+            marks.push("not plotted");
+        }
+    }
+    marks
+}
+
+/// An array's value, short: its length and first few elements, as
+/// `[936] 0, 0, 0, …`. `None` for a value that is not an array.
+fn array_text(v: &pv::Value, prec: Option<usize>) -> Option<String> {
+    let num = |x: f64| format_value(x, prec, "");
+    let (len, mut parts): (usize, Vec<String>) = match v {
+        pv::Value::DoubleArray(a) => (
+            a.len(),
+            a.iter().take(ARRAY_SHOWN).map(|x| num(*x)).collect(),
+        ),
+        pv::Value::LongArray(a) => (
+            a.len(),
+            a.iter().take(ARRAY_SHOWN).map(|x| num(*x as f64)).collect(),
+        ),
+        pv::Value::StrArray(a) => (a.len(), a.iter().take(ARRAY_SHOWN).cloned().collect()),
+        _ => return None,
+    };
+    if len > ARRAY_SHOWN {
+        parts.push("…".into());
+    }
+    Some(format!("[{len}] {}", parts.join(", ")))
+}
+
+/// `text` cut to `max` characters, the last an ellipsis.
+fn ellipsize(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let keep: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{}…", keep.trim_end())
+}
+
+/// `text` cut (with an ellipsis) to fit `width` points in `font`: the
+/// most characters that fit, found by bisection. At least "…".
+pub(super) fn fit(painter: &egui::Painter, text: &str, font: &FontId, width: f32) -> String {
+    let fits = |s: &str| super::render::text_size(painter, s, font).x <= width;
+    if fits(text) {
+        return text.to_string();
+    }
+    // `lo` characters fit (one, the ellipsis, is the floor); `hi` don't.
+    let (mut lo, mut hi) = (1, text.chars().count());
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if fits(&ellipsize(text, mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    ellipsize(text, lo)
 }
 
 pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark: bool) {
@@ -297,7 +408,7 @@ pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark:
             font.clone(),
             value_color,
         );
-        if let Some(mark) = c.mark {
+        if let Some(mark) = &c.mark {
             painter.text(
                 Pos2::new(value.right() + 6.0, rect.center().y),
                 Align2::LEFT_CENTER,
@@ -333,5 +444,96 @@ pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark:
                 v.warn_fg_color,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_values_are_cut_with_an_ellipsis() {
+        assert_eq!(ellipsize("298.1 mA", 32), "298.1 mA");
+        assert_eq!(ellipsize("abcdefgh", 5), "abcd…");
+        assert_eq!(ellipsize("abc defgh", 5), "abc…");
+        assert_eq!(ellipsize("abcdefgh", 5).chars().count(), 5);
+    }
+
+    #[test]
+    fn fit_keeps_the_most_that_fits() {
+        let ctx = egui::Context::default();
+        let text = "a long status message that goes on and on and on";
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter();
+            let size = |s: &str| super::super::render::text_size(painter, s, &font()).x;
+            assert_eq!(fit(painter, text, &font(), 1e4), text);
+            for width in [0.0, 20.0, 60.0, 150.0] {
+                let shown = fit(painter, text, &font(), width);
+                let n = shown.chars().count();
+                assert!(shown.ends_with('…'), "{shown}");
+                assert!(n == 1 || size(&shown) <= width, "{shown} in {width}");
+                // Nothing longer would fit.
+                let longest = (1..text.len())
+                    .map(|k| ellipsize(text, k))
+                    .filter(|s| size(s) <= width)
+                    .map(|s| s.chars().count())
+                    .max();
+                assert!(longest.is_none_or(|m| m <= n), "{shown} in {width}");
+            }
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn arrays_show_their_length_and_first_elements() {
+        let wave = pv::Value::DoubleArray(vec![0.0; 936].into());
+        assert_eq!(array_text(&wave, Some(0)).unwrap(), "[936] 0, 0, 0, …");
+        let short = pv::Value::LongArray(vec![1, 2].into());
+        assert_eq!(array_text(&short, Some(0)).unwrap(), "[2] 1, 2");
+        let one = pv::Value::DoubleArray(vec![4.0].into());
+        assert_eq!(array_text(&one, Some(1)).unwrap(), "[1] 4.0");
+        assert_eq!(array_text(&pv::Value::Double(1.0), None), None);
+    }
+
+    #[test]
+    fn marks_say_why_a_trace_has_no_line_or_history() {
+        let fetch = FetchState::default();
+        let not_archived = FetchState {
+            not_archived: true,
+            ..FetchState::default()
+        };
+        let history = |kind, n| History {
+            kind,
+            samples: vec![archiver::Sample::raw(0.0, 1.0); n],
+            ..History::default()
+        };
+        // An unarchived array.
+        assert_eq!(
+            marks(true, &not_archived, None, true, false),
+            ["not plotted", "live only"]
+        );
+        // An unarchived scalar; no archiver at all says nothing per chip.
+        assert_eq!(
+            marks(true, &not_archived, None, false, false),
+            ["live only"]
+        );
+        assert!(marks(false, &not_archived, None, false, false).is_empty());
+        // Archived, but nothing in range.
+        let empty = history(archiver::ValueKind::Scalar, 0);
+        assert_eq!(marks(true, &fetch, Some(&empty), false, true), ["no data"]);
+        let text = history(archiver::ValueKind::Text, 3);
+        assert_eq!(marks(true, &fetch, Some(&text), false, true), ["text"]);
+        // An archived array.
+        // An archived array (its samples not kept), connected or not.
+        let wave = history(archiver::ValueKind::Waveform, 0);
+        for no_value in [false, true] {
+            assert_eq!(
+                marks(true, &fetch, Some(&wave), true, no_value),
+                ["not plotted"]
+            );
+        }
+        // An ordinary trace.
+        let scalar = history(archiver::ValueKind::Scalar, 3);
+        assert!(marks(true, &fetch, Some(&scalar), false, false).is_empty());
     }
 }

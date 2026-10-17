@@ -35,12 +35,15 @@ the ≡ menu.
 | gesture | effect |
 | --- | --- |
 | click | hide or show the trace |
-| hover | highlight the trace and dim the others |
+| hover | highlight the trace (bolder, drawn on top, with its band) and dim the others |
 | click ✕ | remove the PV |
 
 A chip shows the latest value and units, a spinner while history loads, a
 grey "—" while disconnected, and a "live only" mark when the archiver has no
-history of the PV. Hover it for details.
+history of the PV. A long value is cut short with "…", and an array shows
+its length and first elements, e.g. `[936] 0, 0, 0, …`. Arrays are not
+plotted, and their chip says "not plotted". A `!` in place of the ✕ means
+the last archive request failed. Hover a chip for details.
 
 ## Keys
 
