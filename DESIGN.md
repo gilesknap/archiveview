@@ -200,7 +200,7 @@ Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
 - The range is `Range::Relative { secs }`, which is live and ends at now, or `Range::Absolute { start, end }`.
 - Panning or zooming into the past leaves live mode.
 - The **Live** pill, the `L` key, or panning back to the right edge (within 2% of the span) re-enters live mode.
-- Presets are 1h, 8h, 1d and 7d, plus Custom, which takes typed spans parsed by bobview's `parse_span` ("90m", "2 days", ...) or two date-times.
+- Presets are 1h, 8h, 1d and 1w, plus Custom, which takes typed spans parsed by bobview's `parse_span` ("90m", "2 days", "1y", ...; `mo` is 30 days, `y` 365) or two date-times.
 
 ## UI
 
@@ -208,7 +208,7 @@ Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🔍 Search PVs…        │ 1h  8h  1d  7d  ⋯ │ ● Live │ ● host │ ↶ ↷ ⤢ ⌂ │  ≡ │  ← slim top bar (one row, ~36 pt)
+│ 🔍 Search PVs…        │ 1h  8h  1d  1w  ⋯ │ ● Live │ ● host │ ↶ ↷ ⤢ ⌂ │  ≡ │  ← slim top bar (one row, ~36 pt)
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 300 ┤                                                     ┆ ╭─────────────╮ │
 │     │        ╱‾‾‾╲            ▒▒▒                          ┆ │ Tue 17 14:32:05│ │
@@ -229,7 +229,7 @@ Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
   - Adding keeps the text, the list and the focus, so several PVs can be added from one search; rows already plotted are dimmed with a ✓ and picking one does nothing. `Esc` closes the list (the text stays), a second `Esc` or the ✕ clears the box, and a click elsewhere closes the list. When the box gets the focus back (a click, `/`), its text is selected, so typing replaces it.
   - **Recent searches.** A search is remembered when something is added from it, with its regex flag: the last 50, newest first, without duplicates (`history::SearchHistory`). With the box empty, the list holds them under "Recent"; while typing, up to five that start with (then contain) the text come first, with a clock icon, above the matches. Picking one puts it back in the box and searches; it adds nothing, and Enter's default row is the first match, not a recent search. A ✕ on hover forgets one, and "Clear search history" in the `≡` menu forgets them all. The widget only keeps the list in memory: the app loads it from and saves it to `history.json` (`Plot::set_search_history`, `Plot::search_history_changed`), so an embedding host decides whether, and where, it persists.
   - A small `.*` toggle inside the box switches to regex.
-- **Time-range pill.** A segmented control: 1h, 8h, 1d, 7d and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
+- **Time-range pill.** A segmented control: 1h, 8h, 1d, 1w and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
 - **Live toggle.** A pill reading `● Live`. While following now its red dot shows; it pulses (a halo animated with `ctx.input(|i| i.time)`, repainting at about 15 fps) for 3 s after following starts and while the pointer is over the plot, and is still otherwise. When not following, it reads `○ Live` and clicking it jumps to now.
 - **Archiver pill.** `● host` (e.g. `archappl.diamond.ac.uk`), right of the Live pill: a green dot when the archiver answers, amber when it fails (not red, which is the Live dot beside it), a spinner while checking, a hollow grey dot and "No archiver" without one. Hover shows the retrieval URL, the appliance version, the state, and the last error with when it happened. Click opens a popover: the URL in an editable field (Enter or Use), the recent archivers, and "No archiver (live only)". On a compact bar it is the dot alone.
 - **Undo** (`↶`) and **Redo** (`↷`) icon buttons, greyed out with nothing to undo or redo; the tooltip names the step ("Undo zoom (Ctrl+Z)"). Hidden with `Plot::set_undo_controls(false)`.
@@ -432,7 +432,7 @@ archiveview [--archiver URL] [--view NAME] [--range SPAN] [--theme system|light|
 
 - `--archiver`: the retrieval base, e.g. `http://host:17668`. `/retrieval` is appended unless the URL already ends with it. It overrides the view's and `settings.json`'s archiver and is remembered in `settings.json`; the plot is live only with none.
 - `--no-archiver`: no archiver, whatever the view or settings say.
-- `--range`: e.g. `1h`, `7d` or `90m`, parsed by `parse_span`.
+- `--range`: e.g. `1h`, `7d`, `90m` or `1y`, parsed by `parse_span`.
 - `--snapshot`: run headless and write a PNG. The run takes at least `--wait` seconds, then waits until `!is_loading()`, with a 60 s deadline. The size defaults to 1280x800 and the wait to 2 s. This is bobview's software rasteriser.
 - Logging uses the `ARCHIVEVIEW_LOG` level, with library targets capped at warn as in bobview.
 - Exit codes are 2 for usage errors and 1 for failures.
