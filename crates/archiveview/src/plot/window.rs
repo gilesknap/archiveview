@@ -81,9 +81,20 @@ impl Window {
     }
 
     /// Move the window `dt` seconds later (earlier when negative). Leaves
-    /// live mode going back; reaching now (within 2% of the span) follows
-    /// it again.
+    /// live mode going back; coming forward to now (within 2% of the
+    /// span) follows it again. Going back never snaps to now, so a pan in
+    /// small steps (a slow drag or swipe, a frame at a time) leaves it.
     pub fn pan(&mut self, dt: f64, now: f64) {
+        self.drag(dt, now);
+        if dt > 0.0 {
+            self.settle(now);
+        }
+    }
+
+    /// As [`Window::pan`] for one frame of a drag, which never follows now
+    /// again until it ends ([`Window::settle`]): a hand that wavers near
+    /// now does not lose the drag to it. Never past now.
+    pub fn drag(&mut self, dt: f64, now: f64) {
         if !dt.is_finite() || dt == 0.0 {
             return;
         }
@@ -94,9 +105,8 @@ impl Window {
             self.live = false;
             self.end = now + dt;
         } else {
-            self.end += dt;
+            self.end = (self.end + dt).min(now);
         }
-        self.settle(now);
     }
 
     /// Show `from..to` exactly (a box zoom, or a custom range), not live.
@@ -105,7 +115,7 @@ impl Window {
     }
 
     /// Follow now if the right edge reached it; never look into the future.
-    fn settle(&mut self, now: f64) {
+    pub fn settle(&mut self, now: f64) {
         if !self.live && self.end >= now - SNAP_LIVE * self.span {
             self.live = true;
         }
@@ -228,6 +238,30 @@ mod tests {
         // Within 2% of the span of now: live again.
         w.pan(85.0, NOW);
         assert!(w.live);
+    }
+
+    #[test]
+    fn small_steps_back_leave_live() {
+        // A slow drag or swipe: each frame's step is well under 2% of the
+        // span, and they add up rather than snapping back to now.
+        let mut w = Window::live(1000.0);
+        for _ in 0..10 {
+            w.pan(-5.0, NOW);
+        }
+        assert!(!w.live);
+        assert_eq!(w.end, NOW - 50.0);
+        // A drag wavering near now keeps its place until it ends.
+        let mut d = Window::live(1000.0);
+        for step in [-5.0, -5.0, 3.0, -5.0, 2.0] {
+            d.drag(step, NOW);
+        }
+        assert!(!d.live);
+        assert_eq!(d.end, NOW - 10.0);
+        // Nor does it go past now; ending there follows now again.
+        d.drag(500.0, NOW);
+        assert_eq!(d.end, NOW);
+        d.settle(NOW);
+        assert!(d.live);
     }
 
     #[test]

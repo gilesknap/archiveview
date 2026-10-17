@@ -56,8 +56,8 @@ sizes, get axes of their own; see [Work with value axes](axes.md).
 
 While the plot follows the current time, the **● Live** pill shows a red dot
 and new values appear at the right edge. Panning or zooming into the past
-stops following. Click the pill, press `L`, or drag back to the right edge to
-follow again.
+stops following. Click the pill, press `L`, or drag back to the right edge
+and let go to follow again.
 
 ## Read values
 

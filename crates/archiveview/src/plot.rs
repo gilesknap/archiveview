@@ -1577,7 +1577,7 @@ impl Plot {
             let d = resp.drag_delta();
             match self.drag {
                 Some(Drag::Pan) => {
-                    self.window.pan(-d.x as f64 * per_px, now);
+                    self.window.drag(-d.x as f64 * per_px, now);
                     if d.y != 0.0 {
                         // Axes with a fixed range move with the pointer.
                         let frac = -(d.y / data.height().max(1.0)) as f64;
@@ -1605,6 +1605,8 @@ impl Plot {
         if resp.drag_stopped() {
             match self.drag.take() {
                 Some(Drag::Pan) => {
+                    // Ended at (or near) now: follow it again.
+                    self.window.settle(now);
                     let v = ui.input(|i| i.pointer.velocity()).x as f64;
                     if v.abs() > 150.0 {
                         self.glide = -v * per_px;
@@ -1967,6 +1969,24 @@ fn ease_values(shown: (f64, f64), target: (f64, f64), dt: f64) -> (f64, f64) {
 }
 
 /// The units of trace `t`: the live PV's, else the archive's.
+/// A tooltip's list of what can be done, one gesture a line, as
+/// "action — effect" in two columns (a proportional font does not keep
+/// indents made of spaces).
+fn gestures(ui: &mut egui::Ui, id: egui::Id, rows: &[(&str, &str)]) {
+    egui::Grid::new(id)
+        .num_columns(2)
+        .spacing([6.0, 2.0])
+        .show(ui, |ui| {
+            for (action, effect) in rows {
+                ui.add(egui::Label::new(*action).extend());
+                ui.add(
+                    egui::Label::new(egui::RichText::new(format!("— {effect}")).weak()).extend(),
+                );
+                ui.end_row();
+            }
+        });
+}
+
 fn units(t: &Trace) -> String {
     let live = t.pv.state().units;
     if !live.is_empty() {
@@ -2270,6 +2290,85 @@ mod tests {
         }
         assert!(h.plot.window.live);
         assert!(h.plot.autoscaling());
+    }
+
+    #[test]
+    fn a_drag_pans_whatever_its_pace() {
+        let press = |x: f32, pressed| egui::Event::PointerButton {
+            pos: Pos2::new(x, 300.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let to = |x: f32| egui::Event::PointerMoved(Pos2::new(x, 300.0));
+        // Frame by frame: the events each frame gets, starting over the
+        // plot at x = 500 and dragging right, back in time.
+        let slow: Vec<Vec<egui::Event>> = std::iter::once(vec![press(500.0, true)])
+            .chain((1..=40).map(|k| vec![to(500.0 + k as f32)]))
+            .chain([vec![press(540.0, false)]])
+            .collect();
+        let scenarios: Vec<(&str, Vec<Vec<egui::Event>>)> = vec![
+            (
+                "a frame per event",
+                vec![
+                    vec![press(500.0, true)],
+                    vec![to(520.0)],
+                    vec![to(600.0)],
+                    vec![press(600.0, false)],
+                ],
+            ),
+            (
+                "moving in the press's frame",
+                vec![
+                    vec![press(500.0, true), to(530.0)],
+                    vec![to(600.0)],
+                    vec![press(600.0, false)],
+                ],
+            ),
+            (
+                "held still first",
+                vec![
+                    vec![press(500.0, true)],
+                    vec![],
+                    vec![],
+                    vec![to(503.0)],
+                    vec![to(600.0)],
+                    vec![press(600.0, false)],
+                ],
+            ),
+            // A pixel a frame, far under the 2% of the width that snaps
+            // to now: it used to snap back every frame and never pan.
+            ("slow, from live", slow.clone()),
+        ];
+        // (Pressed in one frame and moved and released by the next, a
+        // drag is never seen: egui decides on a drag in a frame with the
+        // button still down. Only a frame slower than the drag does that.)
+        for (name, script) in scenarios {
+            let pvs = PvManager::new();
+            let mut p = Plot::new(&pvs, None);
+            p.add_pvs(&names(&["sim://sine"]));
+            let mut h = Harness::new(p);
+            h.frame(vec![to(500.0)]);
+            for events in script {
+                h.frame(events);
+            }
+            assert!(!h.plot.window.live, "{name}: panned back from now");
+        }
+        // Slowly when not live, too: it moves by what was dragged.
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.add_pvs(&names(&["sim://sine"]));
+        let mut h = Harness::new(p);
+        h.frame(vec![to(500.0)]);
+        h.key(egui::Key::L);
+        assert!(!h.plot.window.live);
+        let end = h.plot.window.end;
+        for events in slow {
+            h.frame(events);
+        }
+        let per_px = h.plot.window.span / 900.0;
+        let moved = end - h.plot.window.end;
+        assert!(moved > 30.0 * per_px, "moved {moved} s");
     }
 
     #[test]
