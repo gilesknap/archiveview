@@ -267,7 +267,10 @@ where a pixel holds many samples you see the line's mean with a shaded
 min-to-max band.</li>
 <li>Click <strong>7d</strong> in the time-range pill to see the whole week, then
 <strong>double-click</strong> the plot to return to where you started.</li>
+<li>The pill reading <strong>● 127.0.0.1:17668</strong> is the archiver: its dot is green
+while the archiver answers. Hover over it for details.</li>
 </ul>
+<p>archiveview remembers <code>--archiver</code>, so from now on you can leave it out.</p>
 <h2 id="4-find-another-pv"><a class="header" href="#4-find-another-pv">4. Find another PV</a></h2>
 <p>Press <code>/</code> (or click the search box) and type <code>ramp</code>. The archiver's
 matching PVs appear as you type; pick <code>MOCK:RAMP</code> with the arrow keys and
@@ -277,7 +280,7 @@ Enter, or click it.</p>
 machine:</p>
 <pre><code class="language-bash">bobview-testioc &amp;
 export EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO
-archiveview --archiver http://127.0.0.1:17668 --range 10m bl01t:SUM
+archiveview --range 10m bl01t:SUM
 </code></pre>
 <p>(install the IOC first with <code>cargo install bobview-testioc</code>, or take it from a
 <a href="https://github.com/gilesknap/bobview/releases">bobview release</a>).</p>
@@ -288,8 +291,8 @@ live following stops. Press <code>L</code>, or click the pill, to jump back to n
 <h2 id="6-save-the-view"><a class="header" href="#6-save-the-view">6. Save the view</a></h2>
 <p>Open the <strong>≡</strong> menu, type <code>demo</code> into the <strong>Save as…</strong> field under Views
 and press Enter. Next
-time, <code>archiveview --archiver http://127.0.0.1:17668 --view demo</code> reopens the
-same PVs and time range. See <a href="tutorials/../how-to/views.html">Save and load views</a>.</p>
+time, <code>archiveview --view demo</code> reopens the same PVs and time range, from
+the same archiver. Plain <code>archiveview</code> reopens the plot as you left it. See <a href="tutorials/../how-to/views.html">Save and load views</a>.</p>
 <h2 id="7-finish"><a class="header" href="#7-finish">7. Finish</a></h2>
 <p>Close the window, then stop the background programs:</p>
 <pre><code class="language-bash">kill %1 %2
@@ -348,11 +351,47 @@ know about still plots live.</p>
 <code>http://host:17668/retrieval</code> mean the same. A single-container appliance
 that serves everything on one port works the same way, e.g.
 <code>http://host:17665</code>. See <a href="how-to/../reference/archiver-api.html">The archiver URL and API</a>.</p>
-<p>To avoid typing it each time, put it in <code>settings.json</code>:</p>
-<pre><code class="language-json">{ "archiver_url": "http://archiver.example.org:17668" }
-</code></pre>
-<p>in <code>~/.config/archiveview/</code> (see <a href="how-to/../reference/config.html">Config files</a>).
-<code>--archiver</code> on the command line wins over the file.</p>
+<p><code>--archiver</code> is remembered: archiveview writes it to <code>settings.json</code> as
+<code>archiver_url</code> (see <a href="how-to/../reference/config.html">Config files</a>), so later runs
+use it without being told. Give <code>--archiver</code> again only to change
+archivers, or <code>--no-archiver</code> for a run with live values only.</p>
+<p>At start-up the archiver is chosen in this order:</p>
+<ol>
+<li><code>--archiver URL</code>;</li>
+<li>none, with <code>--no-archiver</code>;</li>
+<li>the archiver the opened view was saved with (the <code>default</code> view
+restored at start-up, or <code>--view NAME</code>);</li>
+<li><code>archiver_url</code> in <code>settings.json</code>.</li>
+</ol>
+<h2 id="see-and-change-the-archiver"><a class="header" href="#see-and-change-the-archiver">See and change the archiver</a></h2>
+<p>The pill right of <strong>Live</strong> in the top bar shows the archiver's host and a
+dot:</p>
+<div class="table-wrapper"><table><thead><tr><th>dot</th><th>meaning</th></tr></thead><tbody>
+<tr><td>green</td><td>the archiver answers</td></tr>
+<tr><td>amber</td><td>it does not: no connection, a gateway error, or a URL that is not an archiver</td></tr>
+<tr><td>spinner</td><td>checking, at start-up or after a change</td></tr>
+<tr><td>hollow grey, "No archiver"</td><td>none is set: live values only</td></tr>
+</tbody></table>
+</div>
+<p>archiveview asks the appliance for its version (<code>bpl/getVersion</code>) at
+start-up and after a change. After that every history fetch and search
+updates the dot: a success turns it green, and a failure that looks like
+the archiver's is checked with another version request before the dot
+turns amber (one slow query timing out is not the archiver down). While
+it is amber the archiver is checked again every minute, so it turns green
+when the archiver comes back. A PV that is not archived (a 404 for that
+PV) is not an archiver error.</p>
+<p>Hover over the pill for the full retrieval URL, the appliance's version,
+and the last error and when it happened. Click it to switch archivers
+without restarting: type a URL and press Enter (or <strong>Use</strong>), pick one of
+the recently used archivers, or choose <strong>No archiver</strong>. <strong>Use</strong> on the
+archiver already in use checks it again at once. The plotted PVs'
+history is fetched again from the new archiver.</p>
+<p>A switch to another archiver, in the pill or by opening a view saved with
+one, is remembered in <code>settings.json</code> like <code>--archiver</code>. <strong>No archiver</strong>
+is for this run only: the settings keep the last archiver, so the next
+run without <code>--archiver</code> uses it again. In a narrow window the pill
+shrinks to its dot.</p>
 <h2 id="reach-the-iocs"><a class="header" href="#reach-the-iocs">Reach the IOCs</a></h2>
 <p>Live values use the standard EPICS client environment variables, as any CA
 or PVA client does:</p>
@@ -416,7 +455,7 @@ its trace: it is drawn bolder and on top, with its min/max band, while the
 others dim. That finds a trace hidden under another with the same values,
 or under the bands of busy PVs. Click its <code>✕</code> to remove it.</p>
 <h2 id="with-no-archiver"><a class="header" href="#with-no-archiver">With no archiver</a></h2>
-<p>Without <code>--archiver</code> or a saved <code>archiver_url</code>, there is nothing to search:
+<p>Without an archiver, there is nothing to search:
 the only row is <strong>Add "…" as typed</strong>, so type full names and press <code>Enter</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="navigate-the-plot"><a class="header" href="#navigate-the-plot">Navigate the plot</a></h1>
 <p>Everything happens on the plot itself; there are no axis dialogs. The full
@@ -476,26 +515,38 @@ contain <code>/</code> or <code>\</code>.</li>
 <li><strong>Save as default</strong> saves to <code>default</code>, which opens when archiveview
 starts with no PVs and no <code>--view</code>.</li>
 </ul>
+<p>A view also records the archiver in use when it was saved.</p>
 <h2 id="open-or-delete-a-view"><a class="header" href="#open-or-delete-a-view">Open or delete a view</a></h2>
-<p><strong>≡ ▸ Open ▸ NAME</strong> opens a saved view (the default is listed first).
+<p><strong>≡ ▸ Open ▸ NAME</strong> opens a saved view (the default is listed first). If
+the view was saved with a different archiver, archiveview switches to it;
+the archiver pill shows the change.
 <strong>≡ ▸ Delete ▸ NAME</strong> removes one. From the command line:</p>
 <pre><code class="language-bash">archiveview --view beam
 </code></pre>
 <h2 id="keep-the-default-up-to-date"><a class="header" href="#keep-the-default-up-to-date">Keep the default up to date</a></h2>
 <p><strong>Save default on exit</strong> (under Views in the ≡ menu) is on unless you turn
 it off: archiveview saves the current plot as <code>default</code> whenever you quit,
-so starting it with no PVs and no <code>--view</code> reopens it as you left it. The
-choice is kept in <code>settings.json</code>.</p>
+so starting it with no PVs and no <code>--view</code> reopens it as you left it, with
+the same archiver. The choice is kept in <code>settings.json</code>.</p>
+<p>When the default view is restored, a notice at the bottom says "Restored
+last session" for a few seconds. Its <strong>Start empty</strong> button clears the
+plot instead (keeping the archiver). PVs given on the command line start a
+new plot of just those PVs rather than adding to the restored one; with
+<strong>Save default on exit</strong> on, that plot becomes the default when you quit.</p>
 <h2 id="what-is-restored"><a class="header" href="#what-is-restored">What is restored</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>saved</th><th>restored as</th></tr></thead><tbody>
 <tr><td>a relative range (e.g. the last 8 hours)</td><td>that span ending now, following live</td></tr>
 <tr><td>an absolute range</td><td>exactly those start and end times</td></tr>
 <tr><td>autoscale off, with a min and max</td><td>that value range</td></tr>
 <tr><td>a trace's colour and hidden state</td><td>as saved</td></tr>
+<tr><td>the archiver</td><td>switched to, unless <code>--archiver</code> or <code>--no-archiver</code> is given</td></tr>
 </tbody></table>
 </div>
-<p>The archiver URL is not part of a view; it comes from <code>--archiver</code> or
-<code>settings.json</code>, so the same view works against another appliance.</p>
+<p>A run with <code>--no-archiver</code> saves the default view on exit with the
+archiver it had before, so one live-only run doesn't make the next start
+forget it. A view saved without an archiver (or by an older archiveview)
+keeps the archiver in use, so the same view works against another appliance; so
+does a hand-edited view with the <code>archiver</code> field removed.</p>
 <p>Views can be edited by hand or shared by copying the file; see
 <a href="how-to/../reference/config.html">Config files and the view format</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="run-over-ssh"><a class="header" href="#run-over-ssh">Run over ssh</a></h1>
@@ -628,6 +679,17 @@ egui::Window::new(plot.title())
 manager's tokio runtime. It starts no runtime or threads of its own.</li>
 <li><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
 bobview's trend window. <code>set_archiver</code> changes it later.</li>
+<li><strong>The archiver is the host's unless it says otherwise.</strong> The archiver
+pill always shows whether the archiver can be reached
+(<code>plot.archiver_status()</code>), but by default it is a status display only,
+and <code>set_view</code> ignores a view's <code>archiver</code>, so a layout restored later
+never moves the plot to another archiver. <code>plot.set_archiver_switching(true)</code>
+(as the standalone app does) lets the user switch archivers in the pill
+and makes <code>set_view</code> follow a view's archiver. The plot then switches
+itself, and <code>plot.take_archiver_change()</code> is true once afterwards so the
+host can remember the choice; give it the host's remembered archivers
+with <code>plot.set_recent_archivers(..)</code>. Persisting them is the host's job:
+the widget writes no files.</li>
 <li><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
 be open at once. <code>Plot::new</code> salts its ids with a running count;
 <code>Plot::with_id_salt(&amp;pvs, archiver, "trend-1")</code> uses the host's own salt,
@@ -639,7 +701,9 @@ last drawn in, so a plot in its own native window is repainted, not the
 root one) and, while following now, at the pace the time axis scrolls.</li>
 </ul>
 <p>To save a plot in the host's own layout files, store <code>plot.view()</code> (it is
-<code>serde</code>-serialisable) and restore it with <code>plot.set_view(&amp;view)</code>.
+<code>serde</code>-serialisable) and restore it with <code>plot.set_view(&amp;view)</code>. A view
+records the archiver in use; <code>set_view</code> switches to it only with archiver
+switching on.
 <code>plot.is_loading()</code> is true while archive requests are in flight.</p>
 <p>See the <a href="how-to/../reference/api.html">Rust API</a> for the full interface.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="build-from-source"><a class="header" href="#build-from-source">Build from source</a></h1>
@@ -839,8 +903,8 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <h2 id="archiveview-1"><a class="header" href="#archiveview-1">archiveview</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>argument</th><th>meaning</th></tr></thead><tbody>
 <tr><td><code>PV ...</code></td><td>PVs to plot. A plain name is Channel Access; <code>pva://name</code> is PV Access. With PVs given, archiveview starts a new view of them rather than opening the default view.</td></tr>
-<tr><td><code>-a</code>, <code>--archiver URL</code></td><td>the Archiver Appliance retrieval URL, e.g. <code>http://host:17668</code>. Phoebus's <code>pbraw://host:17668/retrieval</code> works too, as plain HTTP. <code>/retrieval</code> is added unless the URL ends with it. Overrides <code>archiver_url</code> in <code>settings.json</code>; with neither, the plot is live only.</td></tr>
-<tr><td><code>--no-archiver</code></td><td>use no archiver, even if <code>settings.json</code> names one: live values only.</td></tr>
+<tr><td><code>-a</code>, <code>--archiver URL</code></td><td>the Archiver Appliance retrieval URL, e.g. <code>http://host:17668</code>. Phoebus's <code>pbraw://host:17668/retrieval</code> works too, as plain HTTP. <code>/retrieval</code> is added unless the URL ends with it. Overrides the opened view's archiver and <code>archiver_url</code> in <code>settings.json</code>, and is remembered there for later runs (not by <code>--snapshot</code>). With no archiver at all the plot is live only.</td></tr>
+<tr><td><code>--no-archiver</code></td><td>use no archiver, even if the view or <code>settings.json</code> names one: live values only.</td></tr>
 <tr><td><code>--view NAME</code></td><td>open the saved view <code>NAME</code> from <code>~/.config/archiveview/views/</code>. Giving PVs as well is a usage error.</td></tr>
 <tr><td><code>-r</code>, <code>--range SPAN</code></td><td>the time span to show, ending now: <code>1h</code>, <code>8h</code>, <code>7d</code>, <code>90m</code>, <code>2 days</code>, <code>1 hour 30 min</code>. Default <code>1h</code>.</td></tr>
 <tr><td><code>--theme system|light|dark</code></td><td>the colour theme. Default: <code>theme</code> in <code>settings.json</code>, else <code>system</code> (follow the OS).</td></tr>
@@ -887,13 +951,14 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 <tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
 <tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>) or a start and end date-time</td></tr>
 <tr><td><strong>● Live</strong></td><td>red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow</td></tr>
+<tr><td><strong>● host</strong></td><td>the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See <a href="reference/../how-to/connect.html#see-and-change-the-archiver">Connect</a></td></tr>
 <tr><td><strong>⤢</strong></td><td>autoscale the value axis</td></tr>
 <tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
 <tr><td><strong>≡</strong></td><td>Log scale; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
 </tbody></table>
 </div>
-<p>In a narrow window the presets become a drop-down, and ⤢ and ⌂ move into
-the ≡ menu.</p>
+<p>In a narrow window the presets become a drop-down, the archiver pill shows
+only its dot, and ⤢ and ⌂ move into the ≡ menu.</p>
 <h2 id="on-the-plot"><a class="header" href="#on-the-plot">On the plot</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
 <tr><td>drag</td><td>pan time, with a glide after a quick release; stops following live</td></tr>
@@ -942,8 +1007,8 @@ the last archive request failed. Hover a chip for details.</p>
 <tr><td><code>LIBGL_ALWAYS_SOFTWARE</code> and friends</td><td>archiveview-ssh</td><td>set by the script; see <a href="reference/../how-to/software-rendering.html">Run over ssh</a></td></tr>
 </tbody></table>
 </div>
-<p>The archiver URL has no environment variable; use <code>--archiver</code> or
-<code>settings.json</code>.</p>
+<p>The archiver URL has no environment variable; use <code>--archiver</code> (which is
+remembered in <code>settings.json</code>) or the archiver pill.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="config-files-and-the-view-format"><a class="header" href="#config-files-and-the-view-format">Config files and the view format</a></h1>
 <p>archiveview keeps its files in <code>$XDG_CONFIG_HOME/archiveview</code> when
 <code>XDG_CONFIG_HOME</code> is set, otherwise <code>~/.config/archiveview</code>:</p>
@@ -954,17 +1019,25 @@ the last archive request failed. Hover a chip for details.</p>
     └── beam.json
 </code></pre>
 <p>All are pretty-printed JSON, written atomically (to a hidden temporary file,
-then renamed), so a crash never leaves half a file. Unknown fields are
-ignored and missing ones take their defaults, so files can be edited by hand.</p>
+then renamed), so a crash never leaves half a file. Missing fields take
+their defaults, so files can be edited by hand; fields archiveview doesn't
+know are kept when it saves <code>settings.json</code>. A <code>settings.json</code> that is not
+valid JSON gives the defaults for that run, with a warning, and is not
+saved over until it is fixed.</p>
 <h2 id="settingsjson"><a class="header" href="#settingsjson">settings.json</a></h2>
 <pre><code class="language-json">{
-  "archiver_url": "http://archiver.example.org:17668",
+  "archiver_url": "http://archiver.example.org:17668/retrieval",
+  "recent_archivers": [
+    "http://archiver.example.org:17668/retrieval",
+    "http://127.0.0.1:17668/retrieval"
+  ],
   "theme": "system",
   "save_default_on_exit": true
 }
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>field</th><th>default</th><th>meaning</th></tr></thead><tbody>
-<tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when <code>--archiver</code> is not given</td></tr>
+<tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when neither <code>--archiver</code> nor the view opened at start-up names one. Written by <code>--archiver</code>, and by switching to another archiver in the pill or by opening a view (not by <strong>No archiver</strong>).</td></tr>
+<tr><td><code>recent_archivers</code></td><td>none</td><td>archivers used recently, newest first (at most 8), offered by the archiver pill</td></tr>
 <tr><td><code>theme</code></td><td><code>"system"</code></td><td><code>"system"</code> (follow the OS), <code>"light"</code> or <code>"dark"</code>; set from the ≡ menu</td></tr>
 <tr><td><code>save_default_on_exit</code></td><td><code>true</code></td><td>save the plot as the <code>default</code> view on quit, so the next start (with no PVs or <code>--view</code>) reopens where you left off</td></tr>
 </tbody></table>
@@ -979,7 +1052,8 @@ one logs a warning).</p>
     { "name": "pva://bl01t:SUM", "color": "#d62728", "visible": false }
   ],
   "range": { "kind": "relative", "secs": 28800 },
-  "y": { "autoscale": true }
+  "y": { "autoscale": true },
+  "archiver": "http://archiver.example.org:17668/retrieval"
 }
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
@@ -991,6 +1065,7 @@ one logs a warning).</p>
 <tr><td><code>range</code></td><td><code>{"kind": "relative", "secs": S}</code>: the last <code>S</code> seconds, following now; or <code>{"kind": "absolute", "start": "...", "end": "..."}</code> with RFC 3339 UTC times such as <code>"2026-10-17T09:00:00Z"</code></td></tr>
 <tr><td><code>y.autoscale</code></td><td>default <code>true</code></td></tr>
 <tr><td><code>y.min</code>, <code>y.max</code></td><td>the value range when <code>autoscale</code> is <code>false</code></td></tr>
+<tr><td><code>archiver</code></td><td>the retrieval URL in use when the view was saved; opening the view switches to it. Optional: older files lack it, and the format version is still <code>1</code>.</td></tr>
 <tr><td><code>y.log</code></td><td><code>true</code> for a log value axis; default <code>false</code></td></tr>
 </tbody></table>
 </div>
@@ -1022,6 +1097,7 @@ appliance serves everything on 17665.</p>
 <tr><td>history</td><td><code>R/data/getData.json?pv=OP(PV)&amp;from=T&amp;to=T</code></td></tr>
 <tr><td>search</td><td><code>R/bpl/getMatchingPVs?pv=GLOB&amp;limit=50</code>, or <code>regex=RE</code></td></tr>
 <tr><td>PV type</td><td><code>R/bpl/getMetadata?pv=PV</code>, once per PV</td></tr>
+<tr><td>is it there?</td><td><code>R/bpl/getVersion</code>, at start-up and after a change of archiver, then every minute while it fails</td></tr>
 </tbody></table>
 </div>
 <p>Times are sent in UTC as <code>2026-10-17T09:00:00.000Z</code>. <code>OP</code> is
@@ -1048,7 +1124,15 @@ gap.</li>
 <tr><td>any other non-2xx</td><td>the status and the first line of the reply, on the chip and in the status line</td></tr>
 <tr><td>no connection</td><td>the transport error, likewise; live values carry on</td></tr>
 </tbody></table>
-</div><div style="break-before: page; page-break-before: always;"></div><h1 id="mock-archiver"><a class="header" href="#mock-archiver">Mock archiver</a></h1>
+</div>
+<p>The archiver pill turns amber for errors that are the archiver's, once a
+<code>getVersion</code> request confirms them: no connection, HTTP 502, 503 or 504,
+or a URL that is not an archiver (404 for data and search alike). A 404
+for one PV, a 400 for an odd name, or a 500 for a bad search pattern leave
+it as it was. A server that answers <code>getVersion</code> with another HTTP error
+(a proxy refusing it with 401 or 403, say) counts as reachable when it
+answers a search.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="mock-archiver"><a class="header" href="#mock-archiver">Mock archiver</a></h1>
 <p><code>archiveview-mockarchiver</code> is a small stand-in for an EPICS Archiver
 Appliance. It serves synthetic, deterministic history for a fixed set of PVs
 over the same HTTP API and JSON as the real appliance, quirks included. It
@@ -1080,6 +1164,7 @@ answer.</p>
 <tr><td><code>/retrieval/data/getData.json</code></td><td><code>pv</code>, <code>from</code>, <code>to</code>. Operators: raw (with the last sample before <code>from</code>), <code>optimized_N</code>, <code>mean_N</code>, <code>nth_N</code>, <code>ncount</code>, and the <code>…Sample_N</code> variants that leave empty bins out</td></tr>
 <tr><td><code>/retrieval/bpl/getMatchingPVs</code></td><td><code>pv</code> (glob) or <code>regex</code>, <code>limit</code></td></tr>
 <tr><td><code>/retrieval/bpl/getMetadata</code></td><td><code>pv</code></td></tr>
+<tr><td><code>/retrieval/bpl/getVersion</code></td><td>none; <code>{"version": "Archiver Appliance Version mock-…"}</code></td></tr>
 <tr><td><code>/mgmt/bpl/getAllPVs</code></td><td><code>pv</code> (comma-separated globs), <code>regex</code>, <code>limit</code></td></tr>
 </tbody></table>
 </div>

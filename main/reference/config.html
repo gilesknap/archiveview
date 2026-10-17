@@ -191,17 +191,25 @@
     └── beam.json
 </code></pre>
 <p>All are pretty-printed JSON, written atomically (to a hidden temporary file,
-then renamed), so a crash never leaves half a file. Unknown fields are
-ignored and missing ones take their defaults, so files can be edited by hand.</p>
+then renamed), so a crash never leaves half a file. Missing fields take
+their defaults, so files can be edited by hand; fields archiveview doesn't
+know are kept when it saves <code>settings.json</code>. A <code>settings.json</code> that is not
+valid JSON gives the defaults for that run, with a warning, and is not
+saved over until it is fixed.</p>
 <h2 id="settingsjson"><a class="header" href="#settingsjson">settings.json</a></h2>
 <pre><code class="language-json">{
-  "archiver_url": "http://archiver.example.org:17668",
+  "archiver_url": "http://archiver.example.org:17668/retrieval",
+  "recent_archivers": [
+    "http://archiver.example.org:17668/retrieval",
+    "http://127.0.0.1:17668/retrieval"
+  ],
   "theme": "system",
   "save_default_on_exit": true
 }
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>field</th><th>default</th><th>meaning</th></tr></thead><tbody>
-<tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when <code>--archiver</code> is not given</td></tr>
+<tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when neither <code>--archiver</code> nor the view opened at start-up names one. Written by <code>--archiver</code>, and by switching to another archiver in the pill or by opening a view (not by <strong>No archiver</strong>).</td></tr>
+<tr><td><code>recent_archivers</code></td><td>none</td><td>archivers used recently, newest first (at most 8), offered by the archiver pill</td></tr>
 <tr><td><code>theme</code></td><td><code>"system"</code></td><td><code>"system"</code> (follow the OS), <code>"light"</code> or <code>"dark"</code>; set from the ≡ menu</td></tr>
 <tr><td><code>save_default_on_exit</code></td><td><code>true</code></td><td>save the plot as the <code>default</code> view on quit, so the next start (with no PVs or <code>--view</code>) reopens where you left off</td></tr>
 </tbody></table>
@@ -216,7 +224,8 @@ one logs a warning).</p>
     { "name": "pva://bl01t:SUM", "color": "#d62728", "visible": false }
   ],
   "range": { "kind": "relative", "secs": 28800 },
-  "y": { "autoscale": true }
+  "y": { "autoscale": true },
+  "archiver": "http://archiver.example.org:17668/retrieval"
 }
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
@@ -228,6 +237,7 @@ one logs a warning).</p>
 <tr><td><code>range</code></td><td><code>{"kind": "relative", "secs": S}</code>: the last <code>S</code> seconds, following now; or <code>{"kind": "absolute", "start": "...", "end": "..."}</code> with RFC 3339 UTC times such as <code>"2026-10-17T09:00:00Z"</code></td></tr>
 <tr><td><code>y.autoscale</code></td><td>default <code>true</code></td></tr>
 <tr><td><code>y.min</code>, <code>y.max</code></td><td>the value range when <code>autoscale</code> is <code>false</code></td></tr>
+<tr><td><code>archiver</code></td><td>the retrieval URL in use when the view was saved; opening the view switches to it. Optional: older files lack it, and the format version is still <code>1</code>.</td></tr>
 <tr><td><code>y.log</code></td><td><code>true</code> for a log value axis; default <code>false</code></td></tr>
 </tbody></table>
 </div>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["BOLD"],"fn":["adapt","bold","install_fonts","live","palette","parse_hex","severity"]};
+window.SIDEBAR_ITEMS = {"constant":["BOLD"],"fn":["adapt","bold","install_fonts","live","palette","parse_hex","reachable","severity","unreachable"]};

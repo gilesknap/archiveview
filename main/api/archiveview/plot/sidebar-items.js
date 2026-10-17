@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["now","parse_span"],"struct":["Plot"]};
+window.SIDEBAR_ITEMS = {"enum":["ArchiverState"],"fn":["now","parse_span"],"struct":["ArchiverStatus","Plot"]};

@@ -224,7 +224,10 @@ where a pixel holds many samples you see the line's mean with a shaded
 min-to-max band.</li>
 <li>Click <strong>7d</strong> in the time-range pill to see the whole week, then
 <strong>double-click</strong> the plot to return to where you started.</li>
+<li>The pill reading <strong>● 127.0.0.1:17668</strong> is the archiver: its dot is green
+while the archiver answers. Hover over it for details.</li>
 </ul>
+<p>archiveview remembers <code>--archiver</code>, so from now on you can leave it out.</p>
 <h2 id="4-find-another-pv"><a class="header" href="#4-find-another-pv">4. Find another PV</a></h2>
 <p>Press <code>/</code> (or click the search box) and type <code>ramp</code>. The archiver's
 matching PVs appear as you type; pick <code>MOCK:RAMP</code> with the arrow keys and
@@ -234,7 +237,7 @@ Enter, or click it.</p>
 machine:</p>
 <pre><code class="language-bash">bobview-testioc &amp;
 export EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO
-archiveview --archiver http://127.0.0.1:17668 --range 10m bl01t:SUM
+archiveview --range 10m bl01t:SUM
 </code></pre>
 <p>(install the IOC first with <code>cargo install bobview-testioc</code>, or take it from a
 <a href="https://github.com/gilesknap/bobview/releases">bobview release</a>).</p>
@@ -245,8 +248,8 @@ live following stops. Press <code>L</code>, or click the pill, to jump back to n
 <h2 id="6-save-the-view"><a class="header" href="#6-save-the-view">6. Save the view</a></h2>
 <p>Open the <strong>≡</strong> menu, type <code>demo</code> into the <strong>Save as…</strong> field under Views
 and press Enter. Next
-time, <code>archiveview --archiver http://127.0.0.1:17668 --view demo</code> reopens the
-same PVs and time range. See <a href="../how-to/views.html">Save and load views</a>.</p>
+time, <code>archiveview --view demo</code> reopens the same PVs and time range, from
+the same archiver. Plain <code>archiveview</code> reopens the plot as you left it. See <a href="../how-to/views.html">Save and load views</a>.</p>
 <h2 id="7-finish"><a class="header" href="#7-finish">7. Finish</a></h2>
 <p>Close the window, then stop the background programs:</p>
 <pre><code class="language-bash">kill %1 %2

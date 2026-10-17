@@ -194,26 +194,38 @@ contain <code>/</code> or <code>\</code>.</li>
 <li><strong>Save as default</strong> saves to <code>default</code>, which opens when archiveview
 starts with no PVs and no <code>--view</code>.</li>
 </ul>
+<p>A view also records the archiver in use when it was saved.</p>
 <h2 id="open-or-delete-a-view"><a class="header" href="#open-or-delete-a-view">Open or delete a view</a></h2>
-<p><strong>≡ ▸ Open ▸ NAME</strong> opens a saved view (the default is listed first).
+<p><strong>≡ ▸ Open ▸ NAME</strong> opens a saved view (the default is listed first). If
+the view was saved with a different archiver, archiveview switches to it;
+the archiver pill shows the change.
 <strong>≡ ▸ Delete ▸ NAME</strong> removes one. From the command line:</p>
 <pre><code class="language-bash">archiveview --view beam
 </code></pre>
 <h2 id="keep-the-default-up-to-date"><a class="header" href="#keep-the-default-up-to-date">Keep the default up to date</a></h2>
 <p><strong>Save default on exit</strong> (under Views in the ≡ menu) is on unless you turn
 it off: archiveview saves the current plot as <code>default</code> whenever you quit,
-so starting it with no PVs and no <code>--view</code> reopens it as you left it. The
-choice is kept in <code>settings.json</code>.</p>
+so starting it with no PVs and no <code>--view</code> reopens it as you left it, with
+the same archiver. The choice is kept in <code>settings.json</code>.</p>
+<p>When the default view is restored, a notice at the bottom says "Restored
+last session" for a few seconds. Its <strong>Start empty</strong> button clears the
+plot instead (keeping the archiver). PVs given on the command line start a
+new plot of just those PVs rather than adding to the restored one; with
+<strong>Save default on exit</strong> on, that plot becomes the default when you quit.</p>
 <h2 id="what-is-restored"><a class="header" href="#what-is-restored">What is restored</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>saved</th><th>restored as</th></tr></thead><tbody>
 <tr><td>a relative range (e.g. the last 8 hours)</td><td>that span ending now, following live</td></tr>
 <tr><td>an absolute range</td><td>exactly those start and end times</td></tr>
 <tr><td>autoscale off, with a min and max</td><td>that value range</td></tr>
 <tr><td>a trace's colour and hidden state</td><td>as saved</td></tr>
+<tr><td>the archiver</td><td>switched to, unless <code>--archiver</code> or <code>--no-archiver</code> is given</td></tr>
 </tbody></table>
 </div>
-<p>The archiver URL is not part of a view; it comes from <code>--archiver</code> or
-<code>settings.json</code>, so the same view works against another appliance.</p>
+<p>A run with <code>--no-archiver</code> saves the default view on exit with the
+archiver it had before, so one live-only run doesn't make the next start
+forget it. A view saved without an archiver (or by an older archiveview)
+keeps the archiver in use, so the same view works against another appliance; so
+does a hand-edited view with the <code>archiver</code> field removed.</p>
 <p>Views can be edited by hand or shared by copying the file; see
 <a href="../reference/config.html">Config files and the view format</a>.</p>
 

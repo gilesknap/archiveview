@@ -204,6 +204,7 @@ appliance serves everything on 17665.</p>
 <tr><td>history</td><td><code>R/data/getData.json?pv=OP(PV)&amp;from=T&amp;to=T</code></td></tr>
 <tr><td>search</td><td><code>R/bpl/getMatchingPVs?pv=GLOB&amp;limit=50</code>, or <code>regex=RE</code></td></tr>
 <tr><td>PV type</td><td><code>R/bpl/getMetadata?pv=PV</code>, once per PV</td></tr>
+<tr><td>is it there?</td><td><code>R/bpl/getVersion</code>, at start-up and after a change of archiver, then every minute while it fails</td></tr>
 </tbody></table>
 </div>
 <p>Times are sent in UTC as <code>2026-10-17T09:00:00.000Z</code>. <code>OP</code> is
@@ -231,6 +232,14 @@ gap.</li>
 <tr><td>no connection</td><td>the transport error, likewise; live values carry on</td></tr>
 </tbody></table>
 </div>
+<p>The archiver pill turns amber for errors that are the archiver's, once a
+<code>getVersion</code> request confirms them: no connection, HTTP 502, 503 or 504,
+or a URL that is not an archiver (404 for data and search alike). A 404
+for one PV, a 400 for an odd name, or a 500 for a bad search pattern leave
+it as it was. A server that answers <code>getVersion</code> with another HTTP error
+(a proxy refusing it with 401 or 403, say) counts as reachable when it
+answers a search.</p>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

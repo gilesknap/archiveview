@@ -194,11 +194,47 @@ know about still plots live.</p>
 <code>http://host:17668/retrieval</code> mean the same. A single-container appliance
 that serves everything on one port works the same way, e.g.
 <code>http://host:17665</code>. See <a href="../reference/archiver-api.html">The archiver URL and API</a>.</p>
-<p>To avoid typing it each time, put it in <code>settings.json</code>:</p>
-<pre><code class="language-json">{ "archiver_url": "http://archiver.example.org:17668" }
-</code></pre>
-<p>in <code>~/.config/archiveview/</code> (see <a href="../reference/config.html">Config files</a>).
-<code>--archiver</code> on the command line wins over the file.</p>
+<p><code>--archiver</code> is remembered: archiveview writes it to <code>settings.json</code> as
+<code>archiver_url</code> (see <a href="../reference/config.html">Config files</a>), so later runs
+use it without being told. Give <code>--archiver</code> again only to change
+archivers, or <code>--no-archiver</code> for a run with live values only.</p>
+<p>At start-up the archiver is chosen in this order:</p>
+<ol>
+<li><code>--archiver URL</code>;</li>
+<li>none, with <code>--no-archiver</code>;</li>
+<li>the archiver the opened view was saved with (the <code>default</code> view
+restored at start-up, or <code>--view NAME</code>);</li>
+<li><code>archiver_url</code> in <code>settings.json</code>.</li>
+</ol>
+<h2 id="see-and-change-the-archiver"><a class="header" href="#see-and-change-the-archiver">See and change the archiver</a></h2>
+<p>The pill right of <strong>Live</strong> in the top bar shows the archiver's host and a
+dot:</p>
+<div class="table-wrapper"><table><thead><tr><th>dot</th><th>meaning</th></tr></thead><tbody>
+<tr><td>green</td><td>the archiver answers</td></tr>
+<tr><td>amber</td><td>it does not: no connection, a gateway error, or a URL that is not an archiver</td></tr>
+<tr><td>spinner</td><td>checking, at start-up or after a change</td></tr>
+<tr><td>hollow grey, "No archiver"</td><td>none is set: live values only</td></tr>
+</tbody></table>
+</div>
+<p>archiveview asks the appliance for its version (<code>bpl/getVersion</code>) at
+start-up and after a change. After that every history fetch and search
+updates the dot: a success turns it green, and a failure that looks like
+the archiver's is checked with another version request before the dot
+turns amber (one slow query timing out is not the archiver down). While
+it is amber the archiver is checked again every minute, so it turns green
+when the archiver comes back. A PV that is not archived (a 404 for that
+PV) is not an archiver error.</p>
+<p>Hover over the pill for the full retrieval URL, the appliance's version,
+and the last error and when it happened. Click it to switch archivers
+without restarting: type a URL and press Enter (or <strong>Use</strong>), pick one of
+the recently used archivers, or choose <strong>No archiver</strong>. <strong>Use</strong> on the
+archiver already in use checks it again at once. The plotted PVs'
+history is fetched again from the new archiver.</p>
+<p>A switch to another archiver, in the pill or by opening a view saved with
+one, is remembered in <code>settings.json</code> like <code>--archiver</code>. <strong>No archiver</strong>
+is for this run only: the settings keep the last archiver, so the next
+run without <code>--archiver</code> uses it again. In a narrow window the pill
+shrinks to its dot.</p>
 <h2 id="reach-the-iocs"><a class="header" href="#reach-the-iocs">Reach the IOCs</a></h2>
 <p>Live values use the standard EPICS client environment variables, as any CA
 or PVA client does:</p>
