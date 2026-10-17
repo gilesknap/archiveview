@@ -71,6 +71,14 @@ What the widget does, and doesn't, assume:
 - **It repaints itself** when archive data arrives (in the viewport it was
   last drawn in, so a plot in its own native window is repainted, not the
   root one) and, while following now, at the pace the time axis scrolls.
+  A host whose every repaint redraws more than the plot can slow it:
+  `plot.set_min_repaint_interval(Duration::from_millis(250))` floors every
+  repaint the plot schedules itself (the scroll pace, the Live pill's
+  pulse, spinners, debounce and probe waits). Easing after the user's own
+  pans and zooms, and the repaint when data arrives, stay immediate; with
+  a floor, a live rescale of the value axes moves once per tick. The floor
+  does not cover repaints from the host's own `PvManager` notifier on live
+  monitor updates: those are the host's to pace.
 
 - **It reads no clipboard.** Ctrl+V over the plot works on its own (egui
   delivers the clipboard as a paste event). For middle-click, the host
