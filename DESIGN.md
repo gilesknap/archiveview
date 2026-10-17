@@ -51,6 +51,10 @@ impl Plot {
     pub fn title(&self) -> String;
     pub fn view(&self) -> View;            // serde, for the host's own layouts
     pub fn set_view(&mut self, view: &View);
+    // Recent searches: kept in memory; the host loads and saves them.
+    pub fn set_search_history(&mut self, history: SearchHistory);
+    pub fn search_history(&self) -> &SearchHistory;
+    pub fn search_history_changed(&mut self) -> bool;  // once per change
     pub fn is_loading(&self) -> bool;
     pub fn ui(&mut self, ui: &mut egui::Ui);   // fills the space ui offers
     pub fn set_range(&mut self, range: &view::Range);
@@ -175,13 +179,15 @@ Value axes:
 Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
 
 - **Search box.** A rounded `TextEdit` with a search icon, filling the left of the bar. Typing debounces for 200 ms, then calls `archiver.search(Search::from_user(text, 50))` (case-insensitive substring, or a typed glob; see "Search" below). The results show in a popup list under the box (`egui::Popup`).
-  - The first row is highlighted; arrow keys move through the list and Enter adds the highlighted row. A result that is exactly the text typed is always first.
+  - The first match is highlighted; arrow keys move through the list and Enter adds the highlighted row. A result that is exactly the text typed is always first.
   - The list ends with "Add … as typed", which adds the text as it is. That is how you add a non-archived PV. A `pva://` or `sim://` name, or several names, can only be added as typed, so that row comes first.
+  - Adding keeps the text, the list and the focus, so several PVs can be added from one search; rows already plotted are dimmed with a ✓ and picking one does nothing. `Esc` closes the list (the text stays), a second `Esc` or the ✕ clears the box, and a click elsewhere closes the list. When the box gets the focus back (a click, `/`), its text is selected, so typing replaces it.
+  - **Recent searches.** A search is remembered when something is added from it, with its regex flag: the last 50, newest first, without duplicates (`history::SearchHistory`). With the box empty, the list holds them under "Recent"; while typing, up to five that start with (then contain) the text come first, with a clock icon, above the matches. Picking one puts it back in the box and searches; it adds nothing, and Enter's default row is the first match, not a recent search. A ✕ on hover forgets one, and "Clear search history" in the `≡` menu forgets them all. The widget only keeps the list in memory: the app loads it from and saves it to `history.json` (`Plot::set_search_history`, `Plot::search_history_changed`), so an embedding host decides whether, and where, it persists.
   - A small `.*` toggle inside the box switches to regex.
 - **Time-range pill.** A segmented control: 1h, 8h, 1d, 7d and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
 - **Live toggle.** A pill reading `● Live`. While following now its red dot shows; it pulses (a halo animated with `ctx.input(|i| i.time)`, repainting at about 15 fps) for 3 s after following starts and while the pointer is over the plot, and is still otherwise. When not following, it reads `○ Live` and clicking it jumps to now.
 - **Autoscale** (`⤢`) and **Reset** (`⌂`, bobview `Icon::Home`) icon buttons.
-- **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It holds Log scale (the widget's own item), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
+- **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It holds Log scale and Clear search history (the widget's own items), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
 - **Narrow windows** (under about 600 pt). The pill collapses to a combo, and autoscale and reset move into the menu.
 
 Plot area (fills the rest):
@@ -258,6 +264,12 @@ Persistence follows bobview's `layout.rs`:
 ```
 
 `range` can also be `{ "kind": "absolute", "start": "2026-10-17T09:00:00Z", "end": "2026-10-17T12:00:00Z" }`.
+
+`history.json`, the recent searches, newest first (saved whenever they change; a bad file reads as empty and the next save replaces it):
+
+```json
+{ "searches": [ { "text": "BL16I-EA-*" }, { "text": "SR01C-DI-EBPM-01:SA:.*", "regex": true } ] }
+```
 
 Startup order:
 1. PVs on the command line give a new view with those PVs, using `--range`.

@@ -5,12 +5,19 @@
 Press `/`, or click the search box at the left of the bar, and type part of
 a name. After a short pause the box lists the archiver's matching PVs:
 
-- The first row is highlighted: `↑`/`↓` move through the list, `Enter` adds
-  the highlighted row, and a click adds the one clicked.
-- A PV whose name is exactly what you typed is always the first row, so
+- The first match is highlighted: `↑`/`↓` move through the list, `Enter`
+  adds the highlighted row, and a click adds the one clicked.
+- A PV whose name is exactly what you typed is always the first match, so
   typing a full name and pressing `Enter` adds that PV, even when other
   names containing it sort before it.
-- `Esc` closes the list, and a second `Esc` clears the box.
+- Adding a PV keeps the text and the list, so you can add several from one
+  search: `↓`, `Enter`, `↓`, `Enter`, ... PVs already on the plot are
+  dimmed with a ✓, and picking one again does nothing.
+- `Esc` closes the list and keeps the text (`↓` brings the list back); a
+  second `Esc`, or the ✕ in the box, clears it. A click elsewhere closes
+  the list and keeps the text.
+- Coming back to the box (a click, or `/`) selects its text, so typing
+  starts a new search; press `→` or `End` to edit the old one instead.
 
 | you type | archiver is asked for (regex) | matches |
 | --- | --- | --- |
@@ -28,6 +35,24 @@ instead. It must match the **whole** name: `SR-DI` matches nothing, while
 `SR-DI.*` works. Start it with `(?i)` to ignore case.
 
 The list shows the first 50 matches; type more of the name to narrow it.
+
+## Reuse a recent search
+
+archiveview remembers a search once you add a PV from it (typos and
+half-typed names are not kept), with its `.*` setting. It keeps the last
+50, in `history.json` in the [config directory](../reference/config.md), so
+they survive a restart.
+
+- **Click the empty box, or press `/`:** the list shows your recent
+  searches under **Recent**. Pick one with `↓` and `Enter`, or a click, to
+  put it back in the box and search again. Nothing is added until you pick
+  a match.
+- **While typing:** recent searches that start with (or contain) the text
+  come first, marked with a clock, above the archiver's matches. `Enter`
+  still adds the first match; move up to a recent search to use it. So
+  typing `BL16I` offers `BL16I-EA-*` from yesterday.
+- Hover a recent search and click its ✕ to forget it, or choose
+  **Clear search history** in the ≡ menu to forget them all.
 
 ## Add a PV the archiver doesn't know
 
