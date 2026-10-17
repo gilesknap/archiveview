@@ -41,6 +41,18 @@ Ubuntu 20.04+ and Debian 10+.
 Run from inside an unpacked release tarball, `install.sh` installs that
 tarball rather than downloading one.
 
+## Or install with cargo
+
+With a stable Rust toolchain ([rustup](https://rustup.rs)), build the
+plotter and the mock archiver from crates.io into `~/.cargo/bin`:
+
+```bash
+cargo install archiveview archiveview-mockarchiver
+```
+
+This builds for the machine it runs on, so it suits platforms with no
+release build. `archiveview-ssh` comes only with the release tarball.
+
 ## Put it on your PATH
 
 On macOS `~/.local/bin` is not on `PATH` by default; add this to `~/.zshrc`:

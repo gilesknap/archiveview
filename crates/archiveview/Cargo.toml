@@ -3,8 +3,13 @@ name = "archiveview"
 description = "A modern archived and live EPICS PV time-series plotter (Archiver Appliance + CA/PVA)"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# the bundled fonts (fonts/) are under the SIL Open Font License
+license = "Apache-2.0 AND OFL-1.1"
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["epics", "plot", "time-series", "archiver", "controls"]
+categories = ["gui", "visualization", "science"]
 
 [lib]
 name = "archiveview"
@@ -36,7 +41,7 @@ eframe = { version = "0.36.2", optional = true, default-features = false, featur
 egui = "0.36.2"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 log = "0.4.34"
-archiver = { package = "archiveview-archiver", path = "../archiver" }
+archiver.workspace = true
 pv = { package = "bobview-pv", version = "1.8" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
