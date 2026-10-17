@@ -109,6 +109,15 @@ pub struct ArchiveApp {
     /// from a newer version): exiting leaves it alone rather than writing
     /// over it, until the user saves the default view themselves.
     keep_default: bool,
+    /// `--range`, which "Start empty" keeps too.
+    range: Option<f64>,
+    /// With `--no-archiver`: the archiver the default view was saved
+    /// with, kept when it is saved again on exit, so that one run
+    /// without an archiver doesn't forget it.
+    kept_archiver: Option<String>,
+    /// The archiver in use as last seen, to notice the user switching
+    /// (in the pill, or by opening a view) and remember it.
+    known_archiver: Option<String>,
 }
 
 impl ArchiveApp {
@@ -168,7 +177,18 @@ impl ArchiveApp {
                 .ok()
         });
         let mut plot = Plot::new(&pvs, archiver);
+        plot.set_archiver_switching(true);
         plot.set_recent_archivers(&settings.recent_archivers);
+        let kept_archiver = if opts.no_archiver {
+            match &opened {
+                Some((name, v)) if name == DEFAULT_VIEW => v.archiver.clone(),
+                _ => config::load_view(DEFAULT_VIEW)
+                    .ok()
+                    .and_then(|v| v.archiver),
+            }
+        } else {
+            None
+        };
 
         let mut view_name = None;
         plot.add_pvs(&opts.pvs);
@@ -189,6 +209,7 @@ impl ArchiveApp {
         }
         let keep_default =
             config::view_exists(DEFAULT_VIEW) && config::load_view(DEFAULT_VIEW).is_err();
+        let known_archiver = plot.archiver().map(|a| a.base().to_string());
         Self {
             plot,
             settings,
@@ -200,6 +221,26 @@ impl ArchiveApp {
             title: String::new(),
             forced_theme: opts.theme.is_some(),
             keep_default,
+            range: opts.range,
+            kept_archiver,
+            known_archiver,
+        }
+    }
+
+    /// Remember an archiver the user switched to (in the pill, or by
+    /// opening a view that names one) in `settings.json`, as `--archiver`
+    /// is. Switching to none ("No archiver") is for this run only: the
+    /// settings keep the last archiver.
+    fn remember_switch(&mut self) {
+        self.plot.take_archiver_change();
+        let now = self.plot.archiver().map(|a| a.base().to_string());
+        if now == self.known_archiver {
+            return;
+        }
+        self.known_archiver = now.clone();
+        if let Some(url) = now {
+            self.settings.remember_archiver(&url);
+            self.settings.save();
         }
     }
 
@@ -240,17 +281,10 @@ impl ArchiveApp {
             };
             plot.ui_with_menu(ui, &mut menu);
         });
-        if self.plot.take_archiver_change() {
-            // Picked in the archiver pill: the archiver from now on.
-            if let Some(a) = self.plot.archiver() {
-                self.settings.remember_archiver(a.base());
-                self.settings.save();
-            }
-        }
-
         if let Some(action) = action {
             self.apply(&ctx, action, now);
         }
+        self.remember_switch();
         self.toast(&ctx, now);
 
         let title = match self.plot.title() {
@@ -276,7 +310,13 @@ impl ArchiveApp {
         }
         if self.keep_default {
             log::warn!("not saving the default view over one that could not be read");
-        } else if let Err(e) = config::save_view(DEFAULT_VIEW, &self.plot.view()) {
+            return;
+        }
+        let mut view = self.plot.view();
+        if view.archiver.is_none() {
+            view.archiver = self.kept_archiver.clone();
+        }
+        if let Err(e) = config::save_view(DEFAULT_VIEW, &view) {
             log::error!("{e}");
         }
     }
@@ -321,8 +361,12 @@ impl ArchiveApp {
                 return;
             }
             Action::StartEmpty => {
-                // An empty view keeps the archiver.
-                self.plot.set_view(&View::default());
+                // An empty view keeps the archiver, and `--range`.
+                let range = self.range.map(|secs| Range::Relative { secs });
+                self.plot.set_view(&View {
+                    range: range.unwrap_or_default(),
+                    ..View::default()
+                });
                 self.view_name = None;
                 self.notice = None;
                 return;
@@ -564,6 +608,44 @@ mod tests {
             [view_url, settings_url],
             "the pill offers both"
         );
+        // A run with --no-archiver doesn't forget the default's archiver.
+        let mut app = ArchiveApp::new(
+            &ctx,
+            Options {
+                no_archiver: true,
+                range: Some(600.0),
+                ..restore.clone()
+            },
+        );
+        assert_eq!(base(&app), None);
+        app.exit();
+        let saved = config::load_view(DEFAULT_VIEW).unwrap();
+        assert_eq!(saved.archiver.as_deref(), Some(view_url));
+        // "Start empty" keeps --range.
+        app.apply(&ctx, Action::StartEmpty, 0.0);
+        assert_eq!(app.plot.view().range, Range::Relative { secs: 600.0 });
+        // Opening a view with another archiver is remembered, as a
+        // switch in the pill is; switching to none is not.
+        let other = View {
+            archiver: Some("http://other:17668/retrieval".into()),
+            ..View::default()
+        };
+        config::save_view("other", &other).unwrap();
+        app.apply(&ctx, Action::Open("other".into()), 0.0);
+        app.remember_switch();
+        assert_eq!(
+            Settings::load().archiver_url.as_deref(),
+            Some("http://other:17668/retrieval")
+        );
+        app.plot.set_archiver(None);
+        app.remember_switch();
+        assert_eq!(
+            Settings::load().archiver_url.as_deref(),
+            Some("http://other:17668/retrieval")
+        );
+        config::delete_view("other").unwrap();
+        settings.save();
+
         // --archiver wins, and --no-archiver.
         let cli = ArchiverClient::new("http://cli:17668").unwrap();
         let app = ArchiveApp::new(

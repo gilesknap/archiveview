@@ -2,11 +2,13 @@
 //!
 //! A `bpl/getVersion` probe runs when an archiver is set (at start-up, or
 //! after a change). After that the state is passive: every data fetch and
-//! search says how the archiver answered. A success turns it reachable; a
-//! failure that is the archiver's (no connection, a gateway error, a wrong
-//! URL) turns it unreachable. While unreachable it is probed again every
-//! [`REPROBE`] seconds, so it turns reachable again when the archiver comes
-//! back. A 404 for one PV (not archived) says nothing about the archiver.
+//! search says how the archiver answered. A success turns it reachable. A
+//! failure that looks like the archiver's (no connection, a gateway error,
+//! a wrong URL) is checked with a probe before the state turns
+//! unreachable, as one slow query timing out is not the archiver down.
+//! While unreachable it is probed again every [`REPROBE`] seconds, so it
+//! turns reachable again when the archiver comes back. A 404 for one PV
+//! (not archived) says nothing about the archiver.
 
 use archiver::Error;
 
@@ -16,6 +18,10 @@ pub const REPROBE: f64 = 60.0;
 /// A probe gives up after this long (seconds): a host that drops packets
 /// should not leave the pill checking for the fetch timeout.
 pub const PROBE_TIMEOUT: u64 = 10;
+
+/// A probe not answered this long after it was sent (seconds) is given up
+/// on, and another may be sent: its answer was lost.
+const PROBE_LOST: f64 = PROBE_TIMEOUT as f64 + 5.0;
 
 /// What is known of the archiver.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,7 +98,16 @@ impl Monitor {
 
     /// Whether to send a probe now: one is due, or the archiver has been
     /// unreachable since the last one for [`Monitor::reprobe`] seconds.
+    /// A probe in flight for longer than it can take has been lost (its
+    /// answer overwritten, say), and no longer holds the next one back.
     pub fn should_probe(&self, now: f64) -> bool {
+        if self.status.state == ArchiverState::None {
+            return false;
+        }
+        let lost = self.probing && now - self.probed_at > PROBE_LOST;
+        if lost {
+            return true;
+        }
         !self.probing
             && (self.due
                 || (self.status.state == ArchiverState::Unreachable
@@ -118,8 +133,21 @@ impl Monitor {
         back
     }
 
+    /// A fetch or search failed with `e`, which looks like the
+    /// archiver's fault: check with a probe before saying so (unless it is
+    /// known to be unreachable already).
+    pub fn suspect(&mut self, e: &Error, now: f64) {
+        if self.status.state == ArchiverState::None {
+            return;
+        }
+        self.status.last_error = Some((e.to_string(), now));
+        if self.status.state != ArchiverState::Unreachable {
+            self.due = true;
+        }
+    }
+
     /// The archiver failed with `e`.
-    pub fn failed(&mut self, e: &Error, now: f64) {
+    fn failed(&mut self, e: &Error, now: f64) {
         if self.status.state == ArchiverState::None {
             return;
         }
@@ -181,8 +209,9 @@ mod tests {
         assert!(!m.should_probe(0.0));
         // Without an archiver nothing changes it.
         m.ok(1.0);
-        m.failed(&down(), 1.0);
+        m.suspect(&down(), 1.0);
         assert_eq!(m.status.state, ArchiverState::None);
+        assert!(!m.should_probe(100.0));
 
         m.reset(true);
         assert_eq!(m.status.state, ArchiverState::Checking);
@@ -194,8 +223,17 @@ mod tests {
         assert_eq!(m.status.version.as_deref(), Some("v1"));
         assert!(!m.should_probe(1000.0), "no polling while reachable");
 
-        // Passive: a failure turns it red, and it is probed again slowly.
-        m.failed(&down(), 10.0);
+        // Passive: a failure is checked with a probe, which turns it red
+        // if the archiver is down; then it is probed again slowly.
+        m.suspect(&down(), 9.0);
+        assert_eq!(m.status.state, ArchiverState::Reachable, "not yet");
+        assert!(m.should_probe(9.0));
+        m.sent(9.0);
+        assert!(!m.probed(m.epoch, Ok(None), 9.5), "fine after all");
+        assert_eq!(m.status.state, ArchiverState::Reachable);
+        m.suspect(&down(), 10.0);
+        m.sent(0.0);
+        m.probed(m.epoch, Err(down()), 10.0);
         assert_eq!(m.status.state, ArchiverState::Unreachable);
         assert_eq!(
             m.status.last_error,
@@ -203,6 +241,9 @@ mod tests {
         );
         assert!(!m.should_probe(30.0), "probed less than a minute ago");
         assert!(m.should_probe(REPROBE), "a minute since the last probe");
+        // Failures while unreachable add no probes.
+        m.suspect(&down(), 30.0);
+        assert!(!m.should_probe(30.0));
         m.sent(10.0);
         assert!(!m.probed(m.epoch, Err(down()), 11.0));
         assert!(!m.should_probe(30.0));
@@ -211,6 +252,19 @@ mod tests {
         assert!(m.ok(40.0));
         assert_eq!(m.status.state, ArchiverState::Reachable);
         assert_eq!(m.status.version.as_deref(), Some("v1"), "kept");
+    }
+
+    #[test]
+    fn a_lost_probe_answer_does_not_stop_probing() {
+        let mut m = Monitor::default();
+        m.reset(true);
+        m.sent(0.0);
+        // Its answer never comes (another's overwrote it).
+        assert!(!m.should_probe(PROBE_LOST - 1.0));
+        assert!(m.should_probe(PROBE_LOST + 1.0), "given up on");
+        m.sent(PROBE_LOST + 1.0);
+        assert!(!m.probed(m.epoch, Ok(Some("v".into())), PROBE_LOST + 2.0));
+        assert_eq!(m.status.state, ArchiverState::Reachable);
     }
 
     #[test]

@@ -50,8 +50,10 @@ new plot of just those PVs rather than adding to the restored one; with
 | a trace's colour and hidden state | as saved |
 | the archiver | switched to, unless `--archiver` or `--no-archiver` is given |
 
-A view saved without an archiver (or by an older archiveview) keeps the
-archiver in use, so the same view works against another appliance; so
+A run with `--no-archiver` saves the default view on exit with the
+archiver it had before, so one live-only run doesn't make the next start
+forget it. A view saved without an archiver (or by an older archiveview)
+keeps the archiver in use, so the same view works against another appliance; so
 does a hand-edited view with the `archiver` field removed.
 
 Views can be edited by hand or shared by copying the file; see

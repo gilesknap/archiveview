@@ -54,7 +54,8 @@ impl Plot {
     pub fn names(&self) -> Vec<String>;
     pub fn title(&self) -> String;
     pub fn view(&self) -> View;            // serde, for the host's own layouts
-    pub fn set_view(&mut self, view: &View);   // switches to view.archiver if set
+    pub fn set_view(&mut self, view: &View);   // follows view.archiver if switching is on
+    pub fn set_archiver_switching(&mut self, on: bool);  // off by default
     pub fn is_loading(&self) -> bool;
     pub fn ui(&mut self, ui: &mut egui::Ui);   // fills the space ui offers
     pub fn set_range(&mut self, range: &view::Range);
@@ -71,7 +72,8 @@ These rules make the widget safe to embed:
 - **It reuses the caller's pv context.** `Plot::new` clones the caller's `PvManager`. A `tagged` handle from bobview repaints only the window that holds this plot. Archive fetches run as `pvs.runtime().spawn_blocking(..)` jobs on the pv crate's tokio runtime, so the widget starts no runtime and no threads of its own.
 - **Its repaints are self-contained.** Each frame the widget stores `ui.ctx().clone()` and `ctx.viewport_id()`. Completed fetches call `ctx.request_repaint_of(viewport)`: outside a frame a plain `request_repaint` targets the root viewport, and bobview shows each trend in a viewport of its own. While following "now", it asks for `request_repaint_after` at the scroll pace (bobview's `scroll_repaint`). The Live pill pulses (at about 15 fps) only for 3 s after following starts and while the pointer is over the plot, so an idle live plot repaints only at the scroll pace.
 - **A minimum size.** The plot takes all the space it is offered, but at least 360 × 200 points, so it neither collapses nor grows without end in an auto-sized `egui::Window`. Hosts should give such windows a `default_size`.
-- **It persists nothing.** The archiver pill switches the plot's archiver itself and reports it (`take_archiver_change`); remembering it (in `settings.json`) is `ArchiveApp`'s job, as is the recent-archivers list it hands the widget.
+- **The host owns the archiver.** By default the archiver pill only shows the state, and `set_view` ignores a view's `archiver`, so a bobview layout restored later never moves its plot to another archiver. `set_archiver_switching(true)`, which `ArchiveApp` calls, enables the pill's switcher and following views' archivers.
+- **It persists nothing.** With switching on, the pill switches the plot's archiver itself and reports it (`take_archiver_change`); remembering it (in `settings.json`) is `ArchiveApp`'s job, as is the recent-archivers list it hands the widget.
 - **It works with no archiver.** With `archiver = None` the plot is live only, like bobview's current trend. Search then completes only the names already plotted, and the time presets still apply, limited to the live buffer.
 - **It takes the host's theme and fonts.** It reads `ui.visuals()` (`dark_mode`, `extreme_bg_color`, text colour) and never installs fonts or sets the theme. Doing that is `ArchiveApp`'s job.
 
@@ -125,10 +127,10 @@ Live-following:
 The archiver pill shows one of four states: none (no archiver), checking,
 reachable or unreachable (`plot/status.rs`).
 
-- `bpl/getVersion` is asked once when an archiver is set (start-up, a switch in the pill, a view naming another archiver), with a 10 s timeout. An archiver answering 404 to it (a proxy passing on only data and search) is asked for a search instead; 404 to both means the URL is not an archiver.
-- After that the state is passive: every data result and search answer updates it. A success turns it reachable. An error that is the archiver's turns it unreachable: no connection, HTTP 502/503/504, a wrong URL (`BadUrl` from the 404 check), or a 404 for a search. A 404 for one PV's data (not archived), a 400 for an odd name, a 500 for a bad search regex, and undecodable data say nothing about the archiver.
-- Only while unreachable is it probed again, every 60 s, so it turns green when the archiver returns. Coming back (by a probe or any success) asks again at once for the traces whose fetch failed, rather than waiting out their backoff.
-- Answers about an earlier archiver are dropped by an epoch counter, as fetches are by their generation.
+- `bpl/getVersion` is asked once when an archiver is set (start-up, a switch in the pill, a view naming another archiver), with a 10 s timeout, and again when "Use" is pressed on the current archiver. An archiver answering it with an HTTP error other than 502–504 (a proxy passing on only data and search, or refusing it with 401/403) is asked for a search instead: any answer but a 404 to both (not an archiver) or the archiver's own faults counts as reachable, with no version.
+- After that the state is passive: every data result and search answer updates it. A success turns it reachable. An error that looks like the archiver's (no connection, HTTP 502/503/504, a wrong URL (`BadUrl` from the 404 check), or a 404 for a search) sends a probe, and only the probe's failure turns it unreachable: one PV's query timing out while others load is not the archiver down. A 404 for one PV's data (not archived), a 400 for an odd name, a 500 for a bad search regex, and undecodable data say nothing about the archiver.
+- Only while unreachable is it probed again, every 60 s, so it turns green when the archiver returns. Coming back (by a probe or any success) asks again at once for the traces whose fetch failed because of the archiver (`FetchState::archivers_fault`), rather than waiting out their backoff; others keep backing off.
+- Answers about an earlier archiver are dropped by an epoch counter, as fetches are by their generation. The probe answer slot never lets a late answer about an earlier archiver replace a newer one, and a probe unanswered for 15 s (its answer lost) no longer holds the next one back.
 
 ### Live merge
 
@@ -196,7 +198,7 @@ Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
   - A small `.*` toggle inside the box switches to regex.
 - **Time-range pill.** A segmented control: 1h, 8h, 1d, 7d and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
 - **Live toggle.** A pill reading `● Live`. While following now its red dot shows; it pulses (a halo animated with `ctx.input(|i| i.time)`, repainting at about 15 fps) for 3 s after following starts and while the pointer is over the plot, and is still otherwise. When not following, it reads `○ Live` and clicking it jumps to now.
-- **Archiver pill.** `● host` (e.g. `archappl.diamond.ac.uk`), right of the Live pill: a green dot when the archiver answers, red when it fails, a spinner while checking, a hollow grey dot and "No archiver" without one. Hover shows the retrieval URL, the appliance version, the state, and the last error with when it happened. Click opens a popover: the URL in an editable field (Enter or Use), the recent archivers, and "No archiver (live only)". On a compact bar it is the dot alone.
+- **Archiver pill.** `● host` (e.g. `archappl.diamond.ac.uk`), right of the Live pill: a green dot when the archiver answers, amber when it fails (not red, which is the Live dot beside it), a spinner while checking, a hollow grey dot and "No archiver" without one. Hover shows the retrieval URL, the appliance version, the state, and the last error with when it happened. Click opens a popover: the URL in an editable field (Enter or Use), the recent archivers, and "No archiver (live only)". On a compact bar it is the dot alone.
 - **Autoscale** (`⤢`) and **Reset** (`⌂`, bobview `Icon::Home`) icon buttons.
 - **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It holds Log scale (the widget's own item), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
 - **Narrow windows** (under about 600 pt). The range pill collapses to a combo, the archiver pill to its dot, and autoscale and reset move into the menu.
@@ -264,9 +266,15 @@ Persistence follows bobview's `layout.rs`:
   "theme": "system", "save_default_on_exit": true }
 ```
 
-`archiver_url` is written by `--archiver` (not in snapshot mode) and by a
-switch in the archiver pill, which also put it first in `recent_archivers`
-(at most 8). Nothing else writes them.
+`archiver_url` is written by `--archiver` (not in snapshot mode, and only
+after the command line is checked) and by a switch to another archiver in
+the pill or by opening a view; each also puts it first in
+`recent_archivers` (at most 8). Switching to no archiver writes nothing:
+it lasts for the run. Unknown fields are kept (`Settings::extra`), and a
+`settings.json` that does not parse is never saved over.
+
+With `--no-archiver`, exit saves the default view with the archiver the
+default had, not none.
 
 `views/<name>.json`:
 
@@ -288,7 +296,7 @@ in use when the view was saved; opening the view switches to it.
 Startup order:
 1. PVs on the command line give a new view with those PVs, using `--range`. They replace the default view rather than adding to it (there is no `--new`); with "save default on exit" on, this plot becomes the default.
 2. Otherwise `--view NAME` opens that view.
-3. Otherwise `views/default.json` opens, if it exists, with a "Restored last session" notice whose "Start empty" button clears the plot (keeping the archiver).
+3. Otherwise `views/default.json` opens, if it exists, with a "Restored last session" notice whose "Start empty" button clears the plot (keeping the archiver and `--range`).
 4. Otherwise the plot starts in the empty state.
 
 The archiver at start-up (`app::startup_archiver`): `--archiver` >

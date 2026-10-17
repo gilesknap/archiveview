@@ -42,7 +42,8 @@ pub enum Theme {
 /// How many archivers `Settings::recent_archivers` keeps.
 pub const MAX_RECENT_ARCHIVERS: usize = 8;
 
-/// `settings.json`. Every field defaults, so old and partial files load.
+/// `settings.json`. Every field defaults, so old and partial files load,
+/// and fields this version doesn't know are kept when it is saved.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     /// The archiver last chosen (`--archiver`, or in the archiver pill):
@@ -58,6 +59,15 @@ pub struct Settings {
     /// next start reopens where this one left off (on unless turned off).
     #[serde(default = "yes")]
     pub save_default_on_exit: bool,
+    /// Fields this version doesn't know (from a newer one, or added by
+    /// hand), written back as they were.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The file is there but could not be read: these are the defaults,
+    /// and saving them would lose what it holds, so [`Settings::save`]
+    /// leaves it alone.
+    #[serde(skip)]
+    unreadable: bool,
 }
 
 fn yes() -> bool {
@@ -71,6 +81,8 @@ impl Default for Settings {
             recent_archivers: Vec::new(),
             theme: Theme::default(),
             save_default_on_exit: true,
+            extra: serde_json::Map::new(),
+            unreadable: false,
         }
     }
 }
@@ -82,7 +94,8 @@ impl Settings {
         config_dir().map_or_else(Self::default, |d| Self::load_from(&d))
     }
 
-    /// Write `settings.json`, logging a warning on failure.
+    /// Write `settings.json`, logging a warning on failure. Not over a file
+    /// that could not be read (fix it by hand first).
     pub fn save(&self) {
         if let Some(d) = config_dir() {
             self.save_to(&d);
@@ -104,12 +117,25 @@ impl Settings {
             return Self::default();
         };
         serde_json::from_str(&text).unwrap_or_else(|e| {
-            log::warn!("{}: {e}: using the default settings", path.display());
-            Self::default()
+            log::warn!(
+                "{}: {e}: using the default settings, and not saving over it",
+                path.display()
+            );
+            Self {
+                unreadable: true,
+                ..Self::default()
+            }
         })
     }
 
     fn save_to(&self, dir: &Path) {
+        if self.unreadable {
+            log::warn!(
+                "not saving settings over {}, which could not be read",
+                dir.join("settings.json").display()
+            );
+            return;
+        }
         let written = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)
             .and_then(|text| write_atomic(&dir.join("settings.json"), &(text + "\n")));
@@ -249,6 +275,7 @@ mod tests {
             recent_archivers: vec!["http://archiver:17668".into()],
             theme: Theme::Dark,
             save_default_on_exit: false,
+            ..Settings::default()
         };
         s.save_to(&dir);
         assert_eq!(Settings::load_from(&dir), s);
@@ -262,7 +289,39 @@ mod tests {
             "on by default"
         );
         std::fs::write(dir.join("settings.json"), "{ bad").unwrap();
-        assert_eq!(Settings::load_from(&dir), Settings::default());
+        let bad = Settings::load_from(&dir);
+        assert_eq!(bad.theme, Theme::default());
+        assert!(bad.save_default_on_exit);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_unreadable_file_is_not_saved_over_and_unknown_fields_stay() {
+        let dir = temp("unreadable");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        // A trailing comma: not JSON.
+        let text = r#"{"theme":"dark","save_default_on_exit":false,"future_field":1,}"#;
+        std::fs::write(&path, text).unwrap();
+        let mut s = Settings::load_from(&dir);
+        s.remember_archiver("http://other:17668/retrieval");
+        s.save_to(&dir);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "left alone");
+
+        // Fixed: unknown fields are kept through a save.
+        std::fs::write(&path, text.replace(",}", "}")).unwrap();
+        let mut s = Settings::load_from(&dir);
+        assert_eq!(s.theme, Theme::Dark);
+        s.remember_archiver("http://other:17668/retrieval");
+        s.save_to(&dir);
+        let back = Settings::load_from(&dir);
+        assert_eq!(back.theme, Theme::Dark);
+        assert!(!back.save_default_on_exit);
+        assert_eq!(back.extra.get("future_field"), Some(&serde_json::json!(1)));
+        assert_eq!(
+            back.archiver_url.as_deref(),
+            Some("http://other:17668/retrieval")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

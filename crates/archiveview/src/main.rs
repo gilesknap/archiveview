@@ -185,16 +185,6 @@ fn run(cli: Cli) -> Result<(), Failure> {
         .map(ArchiverClient::new)
         .transpose()
         .map_err(|e| Failure::usage(e.to_string()))?;
-    // Remembered, so later runs need no --archiver (but not by snapshots,
-    // which are for docs and CI).
-    if let Some(a) = &archiver
-        && cli.snapshot.is_none()
-    {
-        let mut settings = config::Settings::load();
-        if remember_archiver(&mut settings, a) {
-            settings.save();
-        }
-    }
     if let Some(name) = &cli.view {
         if !cli.pvs.is_empty() {
             return Err(Failure::usage("give PVs or --view, not both"));
@@ -218,6 +208,17 @@ fn run(cli: Cli) -> Result<(), Failure> {
             f.ok()
         }),
     };
+
+    // Remembered, so later runs need no --archiver (but not by snapshots,
+    // which are for docs and CI).
+    if let Some(a) = &opts.archiver
+        && cli.snapshot.is_none()
+    {
+        let mut settings = config::Settings::load();
+        if remember_archiver(&mut settings, a) {
+            settings.save();
+        }
+    }
 
     if let Some(out) = cli.snapshot {
         let snap = snapshot::Options {
@@ -334,11 +335,8 @@ mod tests {
 
     #[test]
     fn the_archiver_given_is_remembered() {
-        let mut s = config::Settings {
-            archiver_url: Some("http://old/retrieval".into()),
-            recent_archivers: vec!["http://old/retrieval".into()],
-            ..Default::default()
-        };
+        let mut s = config::Settings::default();
+        s.remember_archiver("http://old/retrieval");
         let a = ArchiverClient::new("pbraw://archappl.diamond.ac.uk/retrieval").unwrap();
         assert!(remember_archiver(&mut s, &a));
         assert_eq!(

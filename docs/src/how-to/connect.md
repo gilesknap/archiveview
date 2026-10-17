@@ -39,23 +39,31 @@ dot:
 | dot | meaning |
 | --- | --- |
 | green | the archiver answers |
-| red | it does not: no connection, a gateway error, or a URL that is not an archiver |
+| amber | it does not: no connection, a gateway error, or a URL that is not an archiver |
 | spinner | checking, at start-up or after a change |
 | hollow grey, "No archiver" | none is set: live values only |
 
 archiveview asks the appliance for its version (`bpl/getVersion`) at
 start-up and after a change. After that every history fetch and search
-updates the dot; while it is red the archiver is checked again every
-minute, so it turns green when the archiver comes back. A PV that is not
-archived (a 404 for that PV) is not an archiver error.
+updates the dot: a success turns it green, and a failure that looks like
+the archiver's is checked with another version request before the dot
+turns amber (one slow query timing out is not the archiver down). While
+it is amber the archiver is checked again every minute, so it turns green
+when the archiver comes back. A PV that is not archived (a 404 for that
+PV) is not an archiver error.
 
 Hover over the pill for the full retrieval URL, the appliance's version,
 and the last error and when it happened. Click it to switch archivers
 without restarting: type a URL and press Enter (or **Use**), pick one of
-the recently used archivers, or choose **No archiver**. The plotted PVs'
-history is fetched again from the new archiver, and the choice is
-remembered in `settings.json` like `--archiver`. In a narrow window the
-pill shrinks to its dot.
+the recently used archivers, or choose **No archiver**. **Use** on the
+archiver already in use checks it again at once. The plotted PVs'
+history is fetched again from the new archiver.
+
+A switch to another archiver, in the pill or by opening a view saved with
+one, is remembered in `settings.json` like `--archiver`. **No archiver**
+is for this run only: the settings keep the last archiver, so the next
+run without `--archiver` uses it again. In a narrow window the pill
+shrinks to its dot.
 
 ## Reach the IOCs
 

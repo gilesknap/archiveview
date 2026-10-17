@@ -545,7 +545,7 @@ pub fn take_found(plot: &mut Plot, now: f64) -> bool {
             s.results.clear();
             s.error = Some(e.to_string());
             if super::status::archiver_fault(&e, true) {
-                plot.monitor.failed(&e, now);
+                plot.monitor.suspect(&e, now);
             }
             false
         }
@@ -875,7 +875,7 @@ fn archiver_pill(plot: &mut Plot, ui: &mut egui::Ui, compact: bool, now: f64) {
     } else {
         r.on_hover_ui(|ui| archiver_tooltip(plot, ui, now))
     };
-    if r.clicked() {
+    if r.clicked() && plot.switch_archivers {
         let e = &mut plot.edit;
         e.open = !e.open;
         e.url = plot
@@ -898,7 +898,9 @@ fn archiver_tooltip(plot: &Plot, ui: &mut egui::Ui, now: f64) {
     let Some(a) = &plot.archiver else {
         ui.label(egui::RichText::new("No archiver").strong());
         ui.label("Live data only, and search adds names as typed.");
-        ui.label(weak("Click to set an archiver".into()));
+        if plot.switch_archivers {
+            ui.label(weak("Click to set an archiver".into()));
+        }
         return;
     };
     ui.label(egui::RichText::new(a.base()).strong());
@@ -916,7 +918,7 @@ fn archiver_tooltip(plot: &Plot, ui: &mut egui::Ui, now: f64) {
         ),
         ArchiverState::Unreachable => (
             "Unreachable: checked again every minute".to_string(),
-            ui.visuals().error_fg_color,
+            crate::style::unreachable(ui.visuals().dark_mode),
         ),
         ArchiverState::None => (String::new(), ui.visuals().text_color()),
     };
@@ -926,7 +928,9 @@ fn archiver_tooltip(plot: &Plot, ui: &mut egui::Ui, now: f64) {
         let e = e.strip_prefix(&format!("{}: ", a.base())).unwrap_or(e);
         ui.label(format!("Last error {}: {e}", ago(now, *t)));
     }
-    ui.label(weak("Click to change the archiver".into()));
+    if plot.switch_archivers {
+        ui.label(weak("Click to change the archiver".into()));
+    }
 }
 
 /// When `t` was, from `now`: "14:02:10, 3m 5s ago".
@@ -1005,7 +1009,7 @@ fn archiver_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect) {
                         ui.spacing_mut().item_spacing.y = 2.0;
                         for url in &plot.recent {
                             let on = current.as_deref() == Some(url.as_str());
-                            if ui.selectable_label(on, url).clicked() && !on {
+                            if ui.selectable_label(on, url).clicked() {
                                 match ArchiverClient::new(url) {
                                     Ok(a) => pick = Some(Some(a)),
                                     Err(err) => e.error = Some(err.to_string()),
@@ -1040,6 +1044,9 @@ fn archiver_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect) {
         if archiver.as_ref().map(|a| a.base()) != current.as_deref() {
             plot.set_archiver(archiver);
             plot.archiver_changed = true;
+        } else if archiver.is_some() {
+            // The same one again: check it now (it may be back).
+            plot.monitor.due = true;
         }
     }
 }

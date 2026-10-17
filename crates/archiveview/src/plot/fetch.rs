@@ -233,8 +233,8 @@ impl Fetcher {
 
     /// Ask `client` for its version, to learn whether it can be reached:
     /// the archiver's `epoch` comes back with the answer. An archiver
-    /// that answers 404 to `getVersion` (a proxy passing on only data and
-    /// search) is asked for a search instead.
+    /// that answers `getVersion` with an HTTP error (a proxy passing on
+    /// only data and search) is asked for a search instead.
     pub fn probe(
         &self,
         pvs: &PvManager,
@@ -249,33 +249,23 @@ impl Fetcher {
         let panicked = {
             let probed = probed.clone();
             move || {
-                *probed.lock() = Some((
-                    epoch,
-                    Err(archiver::Error::Transport(
-                        "the check failed unexpectedly".into(),
-                    )),
-                ));
+                store_probe(
+                    &probed,
+                    (
+                        epoch,
+                        Err(archiver::Error::Transport(
+                            "the check failed unexpectedly".into(),
+                        )),
+                    ),
+                );
             }
         };
         self.run(pvs, repaint, panicked, move || {
-            let result = match client.version() {
-                Ok(v) => Ok(Some(v)),
-                Err(e) if e.is_not_archived() => {
-                    log::debug!("{}: no getVersion: {e}", client.base());
-                    match client.search(&Search::exact("archiveview", 1)) {
-                        Ok(_) => Ok(None),
-                        Err(check) if check.is_not_archived() => Err(archiver::Error::BadUrl(
-                            format!("{}: not an archiver (HTTP 404)", client.base()),
-                        )),
-                        Err(check) => Err(check),
-                    }
-                }
-                Err(e) => Err(e),
-            };
+            let result = probe(&client);
             if let Err(e) = &result {
                 log::info!("archiver {}: {e}", client.base());
             }
-            *probed.lock() = Some((epoch, result));
+            store_probe(&probed, (epoch, result));
         });
     }
 
@@ -316,6 +306,38 @@ impl Fetcher {
             let _ = (pvs, panicked);
             drop(task);
         }
+    }
+}
+
+/// Keep a probe's answer for the plot, unless one about a newer archiver
+/// is waiting: an answer about an earlier archiver arriving late must not
+/// hide the current one's (the plot may not have been drawn in between).
+fn store_probe(slot: &Mutex<Option<Probed>>, probed: Probed) {
+    let mut slot = slot.lock();
+    if slot.as_ref().is_none_or(|(epoch, _)| probed.0 >= *epoch) {
+        *slot = Some(probed);
+    }
+}
+
+/// Probe `client`: its version, or `None` when it answers HTTP but not to
+/// `getVersion` (a proxy passing on only data and search, or refusing it
+/// with 401 or 403), as long as a search answers.
+fn probe(client: &ArchiverClient) -> Result<Option<String>, archiver::Error> {
+    let e = match client.version() {
+        Ok(v) => return Ok(Some(v)),
+        Err(e @ archiver::Error::Http { status, .. }) if !(502..=504).contains(&status) => e,
+        Err(e) => return Err(e),
+    };
+    log::debug!("{}: no getVersion: {e}", client.base());
+    match client.search(&Search::exact("archiveview", 1)) {
+        Ok(_) => Ok(None),
+        // 404 for both: nothing is served here.
+        Err(check) if check.is_not_archived() && e.is_not_archived() => Err(
+            archiver::Error::BadUrl(format!("{}: not an archiver (HTTP 404)", client.base())),
+        ),
+        Err(check) if super::status::archiver_fault(&check, false) => Err(check),
+        // Something answers, if not to these.
+        Err(_) => Ok(None),
     }
 }
 
@@ -474,6 +496,20 @@ mod tests {
             refresh_after(30.0, week, Operator::Optimized(1500), false),
             30.0
         );
+    }
+
+    #[test]
+    fn a_late_probe_answer_does_not_hide_a_newer_one() {
+        let slot = Mutex::new(None);
+        let down = || Err(archiver::Error::Transport("down".into()));
+        // Archiver 2's answer waits; archiver 1's comes late.
+        store_probe(&slot, (2, Ok(Some("v2".into()))));
+        store_probe(&slot, (1, down()));
+        assert_eq!(slot.lock().take(), Some((2, Ok(Some("v2".into())))));
+        // In order, the newer replaces the older.
+        store_probe(&slot, (1, down()));
+        store_probe(&slot, (2, Ok(None)));
+        assert_eq!(slot.lock().take(), Some((2, Ok(None))));
     }
 
     #[test]

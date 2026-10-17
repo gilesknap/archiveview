@@ -12,8 +12,11 @@ archiveview keeps its files in `$XDG_CONFIG_HOME/archiveview` when
 ```
 
 All are pretty-printed JSON, written atomically (to a hidden temporary file,
-then renamed), so a crash never leaves half a file. Unknown fields are
-ignored and missing ones take their defaults, so files can be edited by hand.
+then renamed), so a crash never leaves half a file. Missing fields take
+their defaults, so files can be edited by hand; fields archiveview doesn't
+know are kept when it saves `settings.json`. A `settings.json` that is not
+valid JSON gives the defaults for that run, with a warning, and is not
+saved over until it is fixed.
 
 ## settings.json
 
@@ -31,7 +34,7 @@ ignored and missing ones take their defaults, so files can be edited by hand.
 
 | field | default | meaning |
 | --- | --- | --- |
-| `archiver_url` | none | the archiver used when neither `--archiver` nor the view opened at start-up names one. Written by `--archiver` and by a switch in the archiver pill. |
+| `archiver_url` | none | the archiver used when neither `--archiver` nor the view opened at start-up names one. Written by `--archiver`, and by switching to another archiver in the pill or by opening a view (not by **No archiver**). |
 | `recent_archivers` | none | archivers used recently, newest first (at most 8), offered by the archiver pill |
 | `theme` | `"system"` | `"system"` (follow the OS), `"light"` or `"dark"`; set from the ≡ menu |
 | `save_default_on_exit` | `true` | save the plot as the `default` view on quit, so the next start (with no PVs or `--view`) reopens where you left off |

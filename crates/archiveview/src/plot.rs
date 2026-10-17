@@ -126,6 +126,9 @@ pub struct Plot {
     /// The user picked another archiver in the pill since the host last
     /// asked ([`Plot::take_archiver_change`]).
     archiver_changed: bool,
+    /// The pill can switch archivers, and a view's archiver is followed
+    /// ([`Plot::set_archiver_switching`]).
+    switch_archivers: bool,
     edit: bar::ArchiverEdit,
 }
 
@@ -219,6 +222,7 @@ impl Plot {
             monitor,
             recent,
             archiver_changed: false,
+            switch_archivers: false,
             edit: bar::ArchiverEdit::default(),
         }
     }
@@ -260,6 +264,18 @@ impl Plot {
     /// settings).
     pub fn take_archiver_change(&mut self) -> bool {
         std::mem::take(&mut self.archiver_changed)
+    }
+
+    /// Let the user switch archivers in the archiver pill, and have
+    /// [`Plot::set_view`] switch to a view's archiver. Off by default: an
+    /// embedding host that manages the archiver itself keeps the pill as
+    /// a status display only, and its stored views don't move the plot to
+    /// another archiver. The standalone app turns it on.
+    pub fn set_archiver_switching(&mut self, on: bool) {
+        self.switch_archivers = on;
+        if !on {
+            self.edit = bar::ArchiverEdit::default();
+        }
     }
 
     /// The archivers the pill offers to switch to (retrieval URLs, newest
@@ -362,10 +378,12 @@ impl Plot {
         }
     }
 
-    /// Show `view`, replacing the traces and range. A view that names an
-    /// archiver switches to it; one without leaves the archiver as it is.
+    /// Show `view`, replacing the traces and range. With archiver
+    /// switching on ([`Plot::set_archiver_switching`]), a view that names
+    /// an archiver switches to it; otherwise, or for a view without one,
+    /// the archiver stays as it is.
     pub fn set_view(&mut self, view: &View) {
-        if let Some(url) = &view.archiver {
+        if let Some(url) = view.archiver.as_ref().filter(|_| self.switch_archivers) {
             match ArchiverClient::new(url) {
                 Ok(a) if self.archiver.as_ref() != Some(&a) => self.set_archiver(Some(a)),
                 Ok(_) => {}
@@ -722,7 +740,7 @@ impl Plot {
                     t.fetch.failures = 0;
                     back |= self.monitor.ok(now);
                 }
-                Err(e) if status::archiver_fault(e, false) => self.monitor.failed(e, now),
+                Err(e) if status::archiver_fault(e, false) => self.monitor.suspect(e, now),
                 // Not archived, or something about this PV: the archiver
                 // answered, but that says nothing of the others.
                 Err(_) => {}
@@ -790,6 +808,7 @@ impl Plot {
                 }
                 Err(e) => {
                     log::warn!("{}: {e}", t.name);
+                    t.fetch.archivers_fault = status::archiver_fault(&e, false);
                     t.fetch.error = Some(e.to_string());
                     t.fetch.failures += 1;
                 }
@@ -797,9 +816,11 @@ impl Plot {
         }
         back |= bar::take_found(self, now);
         if back {
-            // The archiver is back: ask again now for what failed.
+            // The archiver is back: ask again now for what failed because
+            // it was down (not for what fails for reasons of its own,
+            // which keeps backing off).
             for t in &mut self.traces {
-                if t.fetch.error.is_some() && !t.fetch.in_flight {
+                if t.fetch.error.is_some() && t.fetch.archivers_fault && !t.fetch.in_flight {
                     t.fetch.failures = 0;
                     t.fetch.requested = None;
                 }
@@ -1637,6 +1658,10 @@ mod tests {
         h.frame(vec![egui::Event::PointerMoved(pill)]);
         h.button(pill, true);
         h.button(pill, false);
+        assert!(!h.plot.edit.open, "embedded: a status display only");
+        h.plot.set_archiver_switching(true);
+        h.button(pill, true);
+        h.button(pill, false);
         assert!(h.plot.edit.open, "the popover opens");
         h.frame(vec![]);
         h.frame(vec![egui::Event::Text(mock.url())]);
@@ -1647,7 +1672,17 @@ mod tests {
         assert!(h.plot.take_archiver_change(), "the host is told");
         assert!(!h.plot.take_archiver_change(), "once");
         assert_eq!(h.plot.recent_archivers(), [base]);
-        h.until(|p| p.archiver_status().state == ArchiverState::Reachable);
+        h.until(|p| p.archiver_status().state == ArchiverState::Reachable && !p.is_loading());
+
+        // "Use" on the same archiver checks it again.
+        let probed = h.plot.monitor.probed_at;
+        h.button(pill, true);
+        h.button(pill, false);
+        assert!(h.plot.edit.open);
+        h.frame(vec![]);
+        h.key(egui::Key::Enter);
+        assert!(!h.plot.take_archiver_change(), "no change");
+        assert!(h.plot.monitor.probed_at > probed, "probed again");
     }
 
     #[test]
@@ -1662,10 +1697,15 @@ mod tests {
         assert!(h.plot.traces[0].history.is_some());
         h.plot.fetcher.sent.lock().clear();
 
-        // As a view saved with archiver b does.
+        // As a view saved with archiver b does (once allowed to: an
+        // embedded plot keeps its host's archiver).
         let mut v = h.plot.view();
+        let a_url = v.archiver.clone();
         let b_url = ArchiverClient::new(&b.url()).unwrap().base().to_string();
         v.archiver = Some(b_url.clone());
+        h.plot.set_view(&v);
+        assert_eq!(h.plot.archiver().map(|a| a.base().to_string()), a_url);
+        h.plot.set_archiver_switching(true);
         h.plot.set_view(&v);
         assert_eq!(h.plot.archiver().unwrap().base(), b_url);
         assert_eq!(h.plot.archiver_status().state, ArchiverState::Checking);
