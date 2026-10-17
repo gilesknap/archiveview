@@ -9,7 +9,7 @@ use archiver::ArchiverClient;
 use pv::PvManager;
 
 use crate::config::{self, DEFAULT_VIEW, Settings, Theme};
-use crate::plot::{MiddleClick, Plot};
+use crate::plot::{MenuPart, MiddleClick, Plot};
 use crate::selection::{MakeSelection, Worker};
 use crate::view::{Range, View};
 
@@ -23,6 +23,24 @@ const PRIMARY_DEBOUNCE: f64 = 0.15;
 
 /// How long the "Restored last session" notice shows (seconds).
 const RESTORED_SECS: f64 = 8.0;
+
+/// The interface zoom's steps (`−` and `+` in the `≡` menu, ctrl+=/−),
+/// as a browser's: round percentages, 50% to 300%.
+const ZOOM_STEPS: [f32; 13] = [
+    0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
+];
+
+/// The next zoom step above `zoom` (`up`) or below it; `zoom` itself at
+/// either end. From a zoom between steps (`--ui-scale 1.3`), the nearest
+/// step that way.
+fn zoom_step(zoom: f32, up: bool) -> f32 {
+    let next = if up {
+        ZOOM_STEPS.iter().find(|&&s| s > zoom + 0.005)
+    } else {
+        ZOOM_STEPS.iter().rev().find(|&&s| s < zoom - 0.005)
+    };
+    next.copied().unwrap_or(zoom)
+}
 
 /// What the command line asks for.
 #[derive(Clone, Debug, Default)]
@@ -43,7 +61,8 @@ pub struct Options {
     pub restore_default: bool,
     /// The theme, overriding the settings (`--theme`; snapshots).
     pub theme: Option<Theme>,
-    /// Scale the whole interface (`--ui-scale`, `ARCHIVEVIEW_UI_SCALE`).
+    /// Scale the whole interface (`--ui-scale`, `ARCHIVEVIEW_UI_SCALE`):
+    /// the zoom to start at, over the one saved in `settings.json`.
     pub ui_scale: Option<f32>,
 }
 
@@ -53,6 +72,8 @@ enum Action {
     Open(String),
     Delete(String),
     Theme(Theme),
+    /// The interface zoom (1 is 100%).
+    Zoom(f32),
     /// Leave the restored view for an empty plot.
     StartEmpty,
 }
@@ -138,6 +159,12 @@ pub struct ArchiveApp {
     /// Text selected in the search box, and when, until it is steady
     /// enough to make the primary selection.
     selected: Option<(String, f64)>,
+    /// The interface zoom: egui's zoom factor, relative to the desktop's
+    /// scale (1 is 100%).
+    zoom: f32,
+    /// Where the `≡` menu's zoom row was drawn: `−`, the percentage, `+`.
+    #[cfg(test)]
+    zoom_row: [egui::Rect; 3],
 }
 
 impl ArchiveApp {
@@ -147,10 +174,16 @@ impl ArchiveApp {
         crate::style::install_fonts(ctx);
         let settings = Settings::load();
         apply_theme(ctx, opts.theme.unwrap_or(settings.theme));
+        // The app zooms by its own steps, and saves the zoom.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        if let Some(f) = opts.ui_scale {
-            ctx.set_zoom_factor(f);
-        }
+        let saved = settings.ui_zoom;
+        let saved = if saved.is_finite() && saved > 0.0 {
+            saved.clamp(ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.len() - 1])
+        } else {
+            1.0
+        };
+        let zoom = opts.ui_scale.unwrap_or(saved);
+        ctx.set_zoom_factor(zoom);
 
         let asked = Arc::new(AtomicBool::new(false));
         let (c, a) = (ctx.clone(), asked.clone());
@@ -250,7 +283,33 @@ impl ArchiveApp {
             clicks: 0,
             reading: None,
             selected: None,
+            zoom,
+            #[cfg(test)]
+            zoom_row: [egui::Rect::NOTHING; 3],
         }
+    }
+
+    /// The interface zoom (1 is 100%).
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// Ctrl+= (or ctrl++), ctrl+− and ctrl+0, read before the plot sees
+    /// the keys: they work while a text field has the focus too (they mean
+    /// nothing to one), and leave the plot's +/− (time) alone.
+    fn zoom_keys(&self, ctx: &egui::Context) -> Option<Action> {
+        use egui::gui_zoom::kb_shortcuts::{ZOOM_IN, ZOOM_IN_SECONDARY, ZOOM_OUT, ZOOM_RESET};
+        ctx.input_mut(|i| {
+            if i.consume_shortcut(&ZOOM_RESET) {
+                Some(Action::Zoom(1.0))
+            } else if i.consume_shortcut(&ZOOM_IN) || i.consume_shortcut(&ZOOM_IN_SECONDARY) {
+                Some(Action::Zoom(zoom_step(self.zoom, true)))
+            } else if i.consume_shortcut(&ZOOM_OUT) {
+                Some(Action::Zoom(zoom_step(self.zoom, false)))
+            } else {
+                None
+            }
+        })
     }
 
     /// Remember an archiver the user switched to (in the pill, or by
@@ -349,7 +408,8 @@ impl ArchiveApp {
         let ctx = ui.ctx().clone();
         let now = ui.input(|i| i.time);
 
-        let mut action = None;
+        let mut action = self.zoom_keys(&ctx);
+        let zoom = self.zoom;
         let frame = egui::Frame::new()
             .fill(ui.visuals().panel_fill)
             .inner_margin(egui::Margin::same(10));
@@ -359,19 +419,34 @@ impl ArchiveApp {
             views,
             save_as,
             forced_theme,
+            #[cfg(test)]
+            zoom_row,
             ..
         } = self;
         let view_name = plot.view_name().map(str::to_string);
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
-            let mut menu = |ui: &mut egui::Ui| {
-                action = view_menu(
-                    ui,
-                    settings,
-                    view_name.as_deref(),
-                    views,
-                    save_as,
-                    *forced_theme,
-                );
+            let mut menu = |ui: &mut egui::Ui, part| {
+                let chosen = match part {
+                    MenuPart::Top => {
+                        let (chosen, _rects) = zoom_menu_row(ui, zoom);
+                        #[cfg(test)]
+                        {
+                            *zoom_row = _rects;
+                        }
+                        chosen
+                    }
+                    MenuPart::Main => view_menu(
+                        ui,
+                        settings,
+                        view_name.as_deref(),
+                        views,
+                        save_as,
+                        *forced_theme,
+                    ),
+                };
+                if chosen.is_some() {
+                    action = chosen;
+                }
             };
             plot.ui_with_menu(ui, &mut menu);
         });
@@ -462,6 +537,21 @@ impl ArchiveApp {
                 self.settings.theme = theme;
                 self.settings.save();
                 apply_theme(ctx, theme);
+                return;
+            }
+            Action::Zoom(zoom) => {
+                if zoom == self.zoom {
+                    return;
+                }
+                self.zoom = zoom;
+                ctx.set_zoom_factor(zoom);
+                // In the settings until there are windows and layouts:
+                // then each window's, in its layout.
+                self.settings.ui_zoom = zoom;
+                self.settings.save();
+                let mut notice = Notice::new(format!("Zoom {}", percent(zoom)), false, 1.5);
+                notice.until = now + notice.secs;
+                self.notice = Some(notice);
                 return;
             }
             Action::StartEmpty => {
@@ -566,6 +656,42 @@ fn apply_theme(ctx: &egui::Context, theme: Theme) {
         Theme::Light => egui::ThemePreference::Light,
         Theme::Dark => egui::ThemePreference::Dark,
     });
+}
+
+/// A zoom as a percentage, e.g. "125%".
+fn percent(zoom: f32) -> String {
+    format!("{:.0}%", zoom * 100.0)
+}
+
+/// The top of the `≡` menu: `−  100%  +`, the interface zoom. Clicking the
+/// percentage goes back to 100%. Also where the three were drawn.
+fn zoom_menu_row(ui: &mut egui::Ui, zoom: f32) -> (Option<Action>, [egui::Rect; 3]) {
+    let mut action = None;
+    let max = ZOOM_STEPS[ZOOM_STEPS.len() - 1];
+    let row = ui.horizontal(|ui| {
+        ui.label("Zoom");
+        let minus = ui
+            .add_enabled(zoom > ZOOM_STEPS[0] + 0.005, egui::Button::new("−"))
+            .on_hover_text("Zoom out (Ctrl+−)");
+        if minus.clicked() {
+            action = Some(Action::Zoom(zoom_step(zoom, false)));
+        }
+        let pct = ui
+            .add(egui::Button::new(percent(zoom)).min_size(egui::vec2(52.0, 0.0)))
+            .on_hover_text("Back to 100% (Ctrl+0)");
+        if pct.clicked() {
+            action = Some(Action::Zoom(1.0));
+        }
+        let plus = ui
+            .add_enabled(zoom < max - 0.005, egui::Button::new("+"))
+            .on_hover_text("Zoom in (Ctrl+=)");
+        if plus.clicked() {
+            action = Some(Action::Zoom(zoom_step(zoom, true)));
+        }
+        [minus.rect, pct.rect, plus.rect]
+    });
+    ui.separator();
+    (action, row.inner)
 }
 
 /// The app's part of the `≡` menu: views and the theme.
@@ -848,13 +974,166 @@ mod tests {
         assert!(late.lock().is_empty(), "{:?}", late.lock());
     }
 
+    /// Point `XDG_CONFIG_HOME` at an empty directory of the test's own,
+    /// holding a lock so that the tests that do this take turns.
+    fn config_home(name: &str) -> (parking_lot::MutexGuard<'static, ()>, std::path::PathBuf) {
+        static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+        let lock = LOCK.lock();
+        let dir = std::env::temp_dir().join(format!("archiveview-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        // SAFETY: only these tests set the environment, in turn; the
+        // config module's read their config from directories they are
+        // given.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
+        (lock, dir)
+    }
+
+    #[test]
+    fn zoom_steps() {
+        assert_eq!(zoom_step(1.0, true), 1.1);
+        assert_eq!(zoom_step(1.0, false), 0.9);
+        assert_eq!(zoom_step(3.0, true), 3.0, "the top");
+        assert_eq!(zoom_step(0.5, false), 0.5, "the bottom");
+        // Between steps (--ui-scale 1.3): the nearest that way.
+        assert_eq!(zoom_step(1.3, true), 1.5);
+        assert_eq!(zoom_step(1.3, false), 1.25);
+        // Beyond them: back in.
+        assert_eq!(zoom_step(4.0, false), 3.0);
+        assert_eq!(zoom_step(0.25, true), 0.5);
+        assert_eq!(percent(0.67), "67%");
+    }
+
+    #[test]
+    fn the_interface_zooms_from_the_keys_and_the_menu() {
+        let (_lock, dir) = config_home("zoom");
+        let ctx = egui::Context::default();
+        let mut app = ArchiveApp::new(&ctx, Options::default());
+        app.plot.set_archiver(None);
+        let t = std::cell::Cell::new(0.0);
+        let frame = |app: &mut ArchiveApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                time: Some(t.get()),
+                events,
+                ..Default::default()
+            };
+            t.set(t.get() + 0.05);
+            let mut out = ctx.run_ui(input, |ui| app.draw(ui));
+            out.textures_delta.clear();
+        };
+        let key = |app: &mut ArchiveApp, key, modifiers| {
+            let ev = |pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            };
+            frame(app, vec![ev(true)]);
+            frame(app, vec![ev(false)]);
+        };
+        let ctrl = |app: &mut ArchiveApp, k| key(app, k, egui::Modifiers::COMMAND);
+        let click = |app: &mut ArchiveApp, at: egui::Pos2| {
+            let ev = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(app, vec![egui::Event::PointerMoved(at)]);
+            frame(app, vec![ev(true)]);
+            frame(app, vec![ev(false)]);
+            frame(app, vec![]);
+        };
+        let saved = || Settings::load().ui_zoom;
+        frame(&mut app, vec![]);
+        assert_eq!(app.zoom(), 1.0);
+        assert_eq!(ctx.zoom_factor(), 1.0);
+
+        // The keys, as a browser's, saved and said.
+        ctrl(&mut app, egui::Key::Equals);
+        assert_eq!(app.zoom(), 1.1);
+        assert_eq!(ctx.zoom_factor(), 1.1);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 110%");
+        assert_eq!(saved(), 1.1);
+        // Ctrl++ (shift held for the +) too.
+        key(
+            &mut app,
+            egui::Key::Plus,
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        );
+        assert_eq!(app.zoom(), 1.25);
+        ctrl(&mut app, egui::Key::Minus);
+        ctrl(&mut app, egui::Key::Minus);
+        ctrl(&mut app, egui::Key::Minus);
+        assert_eq!(app.zoom(), 0.9);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 90%");
+        ctrl(&mut app, egui::Key::Num0);
+        assert_eq!(app.zoom(), 1.0);
+        assert_eq!(saved(), 1.0);
+        // Not the plot's time zoom.
+        let range = app.plot.view().range;
+        ctrl(&mut app, egui::Key::Equals);
+        assert_eq!(app.plot.view().range, range);
+        ctrl(&mut app, egui::Key::Num0);
+
+        // With the search box focused, too.
+        let on_plot = egui::pos2(500.0, 300.0);
+        frame(&mut app, vec![egui::Event::PointerMoved(on_plot)]);
+        key(&mut app, egui::Key::Slash, egui::Modifiers::NONE);
+        assert!(ctx.memory(|m| m.focused().is_some()), "the search box");
+        ctrl(&mut app, egui::Key::Equals);
+        assert_eq!(app.zoom(), 1.1);
+        ctrl(&mut app, egui::Key::Minus);
+        ctrl(&mut app, egui::Key::Minus);
+        assert_eq!(app.zoom(), 0.9);
+        ctrl(&mut app, egui::Key::Num0);
+        assert_eq!(app.zoom(), 1.0);
+        assert!(ctx.memory(|m| m.focused().is_some()), "still focused");
+        key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
+        key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
+
+        // The row at the top of ≡: −, the percentage (back to 100%), +.
+        // (A click on one closes the menu: open it each time.)
+        let menu = egui::pos2(1000.0 - 10.0 - 16.0, 10.0 + 14.0);
+        let pick = |app: &mut ArchiveApp, which: usize| {
+            app.zoom_row = [egui::Rect::NOTHING; 3];
+            click(app, menu);
+            let at = app.zoom_row[which];
+            assert!(at.is_positive(), "the menu shows the row");
+            click(app, at.center());
+        };
+        pick(&mut app, 2);
+        assert_eq!(app.zoom(), 1.1);
+        pick(&mut app, 2);
+        assert_eq!(app.zoom(), 1.25);
+        assert_eq!(saved(), 1.25);
+        pick(&mut app, 1);
+        assert_eq!(app.zoom(), 1.0);
+        pick(&mut app, 0);
+        assert_eq!(app.zoom(), 0.9);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 90%");
+
+        // The next start begins at the saved zoom; --ui-scale wins.
+        let app = ArchiveApp::new(&ctx, Options::default());
+        assert_eq!(app.zoom(), 0.9);
+        let app = ArchiveApp::new(
+            &ctx,
+            Options {
+                ui_scale: Some(1.5),
+                ..Options::default()
+            },
+        );
+        assert_eq!(app.zoom(), 1.5);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn the_default_view_comes_back_with_its_archiver() {
-        let dir = std::env::temp_dir().join(format!("archiveview-app-{}", std::process::id()));
-        std::fs::remove_dir_all(&dir).ok();
-        // SAFETY: the only test that sets the environment; the others
-        // read their config from directories they are given.
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
+        let (_lock, dir) = config_home("app");
         let base = |o: &ArchiveApp| o.plot.archiver().map(|a| a.base().to_string());
         let view_url = "http://view:17668/retrieval";
         let settings_url = "http://settings:17668/retrieval";

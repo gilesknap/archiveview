@@ -61,6 +61,12 @@ pub struct Settings {
     /// next start reopens where this one left off (on unless turned off).
     #[serde(default = "yes")]
     pub save_default_on_exit: bool,
+    /// The interface zoom (`−  100%  +` in the `≡` menu, ctrl+=/−/0),
+    /// relative to the desktop's scale: 1 is 100%. One for the app until
+    /// windows and layouts exist, when it moves to each window's layout.
+    /// `--ui-scale` and `ARCHIVEVIEW_UI_SCALE` win over it.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub ui_zoom: f32,
     /// Fields this version doesn't know (from a newer one, or added by
     /// hand), written back as they were.
     #[serde(flatten)]
@@ -76,6 +82,14 @@ fn yes() -> bool {
     true
 }
 
+fn one() -> f32 {
+    1.0
+}
+
+fn is_one(f: &f32) -> bool {
+    *f == 1.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -83,6 +97,7 @@ impl Default for Settings {
             recent_archivers: Vec::new(),
             theme: Theme::default(),
             save_default_on_exit: true,
+            ui_zoom: 1.0,
             extra: serde_json::Map::new(),
             unreadable: false,
         }
@@ -311,15 +326,22 @@ mod tests {
             recent_archivers: vec!["http://archiver:17668".into()],
             theme: Theme::Dark,
             save_default_on_exit: false,
+            ui_zoom: 1.25,
             ..Settings::default()
         };
         s.save_to(&dir);
         assert_eq!(Settings::load_from(&dir), s);
         let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(text.contains("\"theme\": \"dark\""), "{text}");
+        assert!(text.contains("\"ui_zoom\": 1.25"), "{text}");
+        // 100% is left out.
+        Settings::default().save_to(&dir);
+        let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(!text.contains("ui_zoom"), "{text}");
         // Partial files load; bad ones give the defaults.
         std::fs::write(dir.join("settings.json"), r#"{"theme":"light"}"#).unwrap();
         assert_eq!(Settings::load_from(&dir).theme, Theme::Light);
+        assert_eq!(Settings::load_from(&dir).ui_zoom, 1.0);
         assert!(
             Settings::load_from(&dir).save_default_on_exit,
             "on by default"
