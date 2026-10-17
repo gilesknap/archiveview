@@ -9,8 +9,17 @@ use archiver::ArchiverClient;
 use pv::PvManager;
 
 use crate::config::{self, DEFAULT_VIEW, Settings, Theme};
-use crate::plot::Plot;
+use crate::plot::{MiddleClick, Plot};
+use crate::selection::{MakeSelection, Worker};
 use crate::view::{Range, View};
+
+/// How long a middle-click waits for the selection (seconds).
+const SELECTION_WAIT: f64 = 2.0;
+
+/// Text selected in the search box becomes the primary selection once it
+/// has stayed the same this long (seconds): not at every shift+arrow,
+/// which over `ssh -X` costs a round trip each.
+const PRIMARY_DEBOUNCE: f64 = 0.15;
 
 /// How long the "Restored last session" notice shows (seconds).
 const RESTORED_SECS: f64 = 8.0;
@@ -118,6 +127,17 @@ pub struct ArchiveApp {
     /// The archiver in use as last seen, to notice the user switching
     /// (in the pill, or by opening a view) and remember it.
     known_archiver: Option<String>,
+    /// The primary selection and the clipboard, for middle-click, on a
+    /// thread of their own; none in snapshot mode.
+    selection: Option<Worker<(u64, MiddleClick)>>,
+    /// Middle-clicks so far, to number them.
+    clicks: u64,
+    /// The middle-click waiting for the selection: its number, and when
+    /// (egui time) it asked.
+    reading: Option<(u64, f64)>,
+    /// Text selected in the search box, and when, until it is steady
+    /// enough to make the primary selection.
+    selected: Option<(String, f64)>,
 }
 
 impl ArchiveApp {
@@ -226,6 +246,10 @@ impl ArchiveApp {
             range: opts.range,
             kept_archiver,
             known_archiver,
+            selection: None,
+            clicks: 0,
+            reading: None,
+            selected: None,
         }
     }
 
@@ -243,6 +267,74 @@ impl ArchiveApp {
         if let Some(url) = now {
             self.settings.remember_archiver(&url);
             self.settings.save();
+        }
+    }
+
+    /// Where middle-click reads the primary selection (or the clipboard),
+    /// and the search box's selected text goes: `make` builds it on a
+    /// thread of its own (see [`crate::selection::system`]), which wakes
+    /// `ctx` when a read is answered.
+    pub fn set_selection(&mut self, ctx: &egui::Context, make: Option<MakeSelection>) {
+        self.selection = make.map(|make| {
+            let ctx = ctx.clone();
+            Worker::spawn(make, move || ctx.request_repaint())
+        });
+        self.reading = None;
+    }
+
+    /// Answer the plot's middle-clicks from the selection (read on its
+    /// thread, so a slow owner never stalls the window), make text
+    /// selected in its search box the primary selection once it is steady,
+    /// and say what a paste added.
+    fn paste(&mut self, ctx: &egui::Context, now: f64) {
+        if let Some(worker) = &self.selection {
+            if let Some(click) = self.plot.take_middle_click() {
+                self.clicks += 1;
+                worker.read((self.clicks, click));
+                self.reading = Some((self.clicks, now));
+                ctx.request_repaint_after(Duration::from_secs_f64(SELECTION_WAIT));
+            }
+            while let Some(((n, click), text)) = worker.answer() {
+                // Only the latest click's answer, and only in time.
+                if self.reading.is_some_and(|(r, _)| r == n) {
+                    self.reading = None;
+                    let text = text.unwrap_or_default();
+                    match click {
+                        MiddleClick::Plot => {
+                            self.plot.paste_pvs(&text);
+                        }
+                        MiddleClick::Search => self.plot.paste_into_search(&text),
+                    }
+                }
+            }
+            if let Some((_, since)) = self.reading
+                && now - since >= SELECTION_WAIT
+            {
+                self.reading = None;
+                let mut notice = Notice::new("Could not read the selection", true, 4.0);
+                notice.until = now + notice.secs;
+                self.notice = Some(notice);
+            }
+            // Queued after any read, so a click reads what was selected
+            // before it.
+            if let Some(text) = self.plot.take_search_selection() {
+                self.selected = Some((text, now));
+                ctx.request_repaint_after(Duration::from_secs_f64(PRIMARY_DEBOUNCE));
+            }
+            if self
+                .selected
+                .as_ref()
+                .is_some_and(|(_, since)| now - since >= PRIMARY_DEBOUNCE)
+                && let Some((text, _)) = self.selected.take()
+            {
+                worker.set_primary(text);
+            }
+        }
+        if let Some(pasted) = self.plot.take_pasted() {
+            let error = pasted.added.is_empty() && pasted.present.is_empty();
+            let mut notice = Notice::new(pasted.message(), error, 3.0);
+            notice.until = now + notice.secs;
+            self.notice = Some(notice);
         }
     }
 
@@ -292,6 +384,7 @@ impl ArchiveApp {
         if self.plot.search_history_changed() {
             self.history_unsaved = !config::save_history(self.plot.search_history());
         }
+        self.paste(&ctx, now);
         self.toast(&ctx, now);
 
         let title = match self.plot.title() {
@@ -462,6 +555,8 @@ impl eframe::App for ArchiveApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.exit();
+        // Before the window (and a Wayland connection) goes.
+        self.selection = None;
     }
 }
 
@@ -577,6 +672,180 @@ mod tests {
                 "{cli:?} {no} {view:?} {settings:?}"
             );
         }
+    }
+
+    /// A selection the test fills, sharing what was set with the test.
+    struct FakeSelection {
+        /// There is a primary selection (`primary` may still be `None`).
+        has: bool,
+        primary: Option<String>,
+        clipboard: Option<String>,
+        set: Arc<parking_lot::Mutex<Vec<String>>>,
+        /// Take this long to answer, as a hung selection owner does.
+        slow: Duration,
+    }
+
+    impl crate::selection::Selection for FakeSelection {
+        fn has_primary(&mut self) -> bool {
+            self.has
+        }
+        fn primary(&mut self) -> Option<String> {
+            std::thread::sleep(self.slow);
+            self.primary.clone()
+        }
+        fn clipboard(&mut self) -> Option<String> {
+            self.clipboard.clone()
+        }
+        fn set_primary(&mut self, text: &str) {
+            self.set.lock().push(text.to_string());
+        }
+    }
+
+    impl Drop for FakeSelection {
+        /// A slow one says when it is dropped (it should be leaked).
+        fn drop(&mut self) {
+            if !self.slow.is_zero() {
+                self.set.lock().push("dropped".into());
+            }
+        }
+    }
+
+    #[test]
+    fn middle_click_adds_the_selected_pvs_and_says_so() {
+        let ctx = egui::Context::default();
+        let mut app = ArchiveApp::new(&ctx, Options::default());
+        app.plot.set_archiver(None);
+        let t = std::cell::Cell::new(0.0);
+        let frame = |app: &mut ArchiveApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                time: Some(t.get()),
+                events,
+                ..Default::default()
+            };
+            t.set(t.get() + 0.05);
+            let mut out = ctx.run_ui(input, |ui| app.draw(ui));
+            out.textures_delta.clear();
+        };
+        // A middle-click, then frames until the selection's answer is in.
+        let click = |app: &mut ArchiveApp, pos| {
+            let ev = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Middle,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(app, vec![egui::Event::PointerMoved(pos), ev(true)]);
+            frame(app, vec![ev(false)]);
+            assert!(app.reading.is_some(), "asked for the selection");
+            let start = std::time::Instant::now();
+            while app.reading.is_some() {
+                assert!(start.elapsed().as_secs() < 5, "no answer");
+                std::thread::sleep(Duration::from_millis(10));
+                frame(app, vec![]);
+            }
+            frame(app, vec![]);
+        };
+        let set = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let select =
+            |app: &mut ArchiveApp, has: bool, primary: Option<&str>, clip: Option<&str>| {
+                let fake = FakeSelection {
+                    has,
+                    primary: primary.map(Into::into),
+                    clipboard: clip.map(Into::into),
+                    set: set.clone(),
+                    slow: Duration::ZERO,
+                };
+                app.set_selection(&ctx, Some(Box::new(move || Box::new(fake))));
+            };
+        let on_plot = egui::pos2(500.0, 300.0);
+        frame(&mut app, vec![]);
+
+        // The primary selection's PVs, with a toast.
+        let two = Some("BL16I-EA-DET-01:COUNT\nSR:X");
+        select(&mut app, true, two, Some("CLIP:BOARD"));
+        click(&mut app, on_plot);
+        assert_eq!(app.plot.names(), ["BL16I-EA-DET-01:COUNT", "SR:X"]);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Added 2 PVs");
+        // An empty primary selection is not the clipboard's cue.
+        select(&mut app, true, None, Some("CLIP:BOARD"));
+        click(&mut app, on_plot);
+        assert_eq!(app.plot.names().len(), 2);
+        assert!(app.notice.as_ref().unwrap().text.contains("empty"));
+        // No primary selection at all: the clipboard.
+        select(&mut app, false, None, Some("CLIP:BOARD"));
+        click(&mut app, on_plot);
+        assert_eq!(app.plot.names().last().unwrap(), "CLIP:BOARD");
+        assert_eq!(app.notice.as_ref().unwrap().text, "Added CLIP:BOARD");
+        // Nothing usable: the toast says so.
+        let junk = Some("42 12:30:00 https://example.com/x");
+        select(&mut app, true, junk, None);
+        click(&mut app, on_plot);
+        assert_eq!(app.plot.names().len(), 3);
+        let notice = app.notice.as_ref().unwrap();
+        assert!(notice.error && notice.text.contains("No PV names"));
+
+        // In the search box: pasted there, not added.
+        select(&mut app, true, Some("SR-DI-DCCT-01:SIGNAL"), None);
+        click(&mut app, egui::pos2(80.0, 22.0));
+        assert_eq!(app.plot.names().len(), 3);
+        // Selecting it there makes it the primary selection, once steady.
+        let select_all = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        frame(&mut app, vec![select_all]);
+        frame(&mut app, vec![]);
+        assert!(set.lock().is_empty(), "not yet");
+        for _ in 0..6 {
+            frame(&mut app, vec![]);
+        }
+        let start = std::time::Instant::now();
+        while set.lock().is_empty() && start.elapsed().as_secs() < 5 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*set.lock(), ["SR-DI-DCCT-01:SIGNAL"]);
+
+        // A selection owner that never answers: the window goes on, and
+        // after a while says so.
+        let late = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let fake = FakeSelection {
+            has: true,
+            primary: Some("LATE:PV".into()),
+            clipboard: None,
+            set: late.clone(),
+            slow: Duration::from_millis(1500),
+        };
+        app.set_selection(&ctx, Some(Box::new(move || Box::new(fake))));
+        let ev = |pressed| egui::Event::PointerButton {
+            pos: on_plot,
+            button: egui::PointerButton::Middle,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let before = std::time::Instant::now();
+        frame(&mut app, vec![egui::Event::PointerMoved(on_plot), ev(true)]);
+        frame(&mut app, vec![ev(false)]);
+        // 2.5 s of egui time pass in frames, quickly.
+        for _ in 0..50 {
+            frame(&mut app, vec![]);
+        }
+        assert!(before.elapsed().as_secs_f64() < 1.0, "never blocked");
+        assert!(app.reading.is_none());
+        let notice = app.notice.as_ref().unwrap();
+        assert!(notice.error && notice.text.contains("Could not read"));
+        assert_eq!(app.plot.names().len(), 3, "the late answer is dropped");
+        // Still stuck when dropped (as at exit): given up on, and when it
+        // wakes it leaks the selection rather than dropping it.
+        app.set_selection(&ctx, None);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(late.lock().is_empty(), "{:?}", late.lock());
     }
 
     #[test]

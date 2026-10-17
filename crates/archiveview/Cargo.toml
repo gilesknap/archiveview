@@ -18,8 +18,17 @@ required-features = ["app"]
 default = ["app"]
 # The standalone application (window, snapshot mode, command line). An
 # embedding host such as bobview turns it off (`default-features = false`)
-# and gets only `Plot`, with egui and no eframe, png or clap.
-app = ["dep:eframe", "dep:png", "dep:clap"]
+# and gets only `Plot`, with egui and no eframe, png, clap or clipboard.
+app = [
+    "dep:eframe",
+    "dep:png",
+    "dep:clap",
+    "dep:arboard",
+    "dep:smithay-clipboard",
+    "dep:wayland-client",
+    "dep:wayland-backend",
+    "dep:raw-window-handle",
+]
 
 [dependencies]
 # Must stay identical to bobview's egui/eframe so bobview can embed `archiveview::Plot`.
@@ -37,6 +46,18 @@ png = { version = "0.18.1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { version = "4.6.7", optional = true, features = ["derive", "wrap_help"] }
+# The primary selection and the clipboard (`selection.rs`), at egui-winit's
+# versions and features, so nothing new is built.
+arboard = { version = "3.6", optional = true, default-features = false }
+raw-window-handle = { version = "0.6.2", optional = true }
+
+# Wayland's primary selection, read as egui-winit reads its clipboard (on
+# egui-winit's platforms), and a look at the compositor's globals for the
+# primary-selection protocol. All already built for egui-winit.
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+smithay-clipboard = { version = "0.7.2", optional = true }
+wayland-client = { version = "0.31", optional = true }
+wayland-backend = { version = "0.3", optional = true, features = ["client_system"] }
 
 [dev-dependencies]
 archiveview-mockarchiver = { path = "../mockarchiver" }

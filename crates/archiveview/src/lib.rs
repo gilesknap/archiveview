@@ -22,6 +22,8 @@ pub mod config;
 pub mod history;
 mod icons;
 pub mod plot;
+#[cfg(feature = "app")]
+pub mod selection;
 #[cfg(all(feature = "app", not(target_arch = "wasm32")))]
 pub mod snapshot;
 pub mod style;

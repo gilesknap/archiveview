@@ -74,6 +74,12 @@ impl Plot {
     pub fn view_name(&self) -> Option<&str>;
     // As ui, with the host's items (views, settings) added to the ≡ menu:
     pub fn ui_with_menu(&mut self, ui: &mut egui::Ui, menu: &mut dyn FnMut(&mut egui::Ui));
+    // Middle-click and paste: the host reads the selection (see "Selection").
+    pub fn take_middle_click(&mut self) -> Option<MiddleClick>;   // Plot or Search
+    pub fn paste_pvs(&mut self, text: &str) -> Pasted;
+    pub fn paste_into_search(&mut self, text: &str);
+    pub fn take_pasted(&mut self) -> Option<Pasted>;    // for a toast
+    pub fn take_search_selection(&mut self) -> Option<String>;
 }
 ```
 
@@ -265,6 +271,8 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 | shift- or ctrl-scroll, or drag on a value axis | zoom values: the axis under the pointer, or every axis over the data; turns autoscale off |
 | secondary-drag or shift-drag a box | zoom to the box (time and value) |
 | double-click | reset: autoscale on, back to the preset span (live if it was live) |
+| middle-click on the plot or legend | add the PVs in the primary selection (see "Selection") |
+| Ctrl+V with the pointer over the plot | add the PVs in the clipboard (egui's `Event::Paste`) |
 | mouse back / forward buttons | undo / redo |
 | hover | crosshair readout |
 
@@ -292,6 +300,59 @@ it is embedded. They are snapshot-based, not command-based:
 - **Views.** Undoing "open view" brings back the traces, range and axes, not the archiver (which is never undone: switch back in the pill). The host's name for the view (`Plot::set_view_name`, the app's "Save “NAME”") is kept with each step and comes back with it.
 - **Off.** `set_undo_controls(false)` hides the buttons and ignores the keys but still records, for a host that drives `undo`/`redo` itself; `set_undo_enabled(false)` clears the lists and records nothing (removed traces are dropped at once), for a host with no use for them.
 - At most 100 steps are kept, for the session only (not in views). A new change after undoing clears the redo list. Undoing a step moves the state it replaced onto the redo list.
+
+### Selection
+
+Cross-application drag and drop isn't possible (winit delivers only dropped
+files and can't start a drag), so PV names come in through the X11/Wayland
+primary selection, as in EDM and MEDM: middle-click a widget in bobview,
+then middle-click the plot.
+
+- **The widget reads no clipboard** (it has no clipboard dependency). A
+  middle-click (`button_clicked`, so never a middle drag, which still pans)
+  on the plot or legend, on the plot's own layer, is reported by
+  `take_middle_click()`; one in the search box (where egui has already put
+  the cursor; not on its ✕ or regex toggle) likewise. It stays there until
+  taken. The host answers with `paste_pvs` or `paste_into_search`, which
+  ask for a repaint. Ctrl+V needs no host: egui-winit turns it into
+  `Event::Paste` with the clipboard's text, which the plot takes when the
+  keyboard shortcuts apply. Pasted PVs go through one `add_pvs` call, as
+  the search box's do.
+- **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace, commas
+  and semicolons, drop quotes and brackets around a word. A word can be a
+  name if (after an optional `ca://`/`pva://`) it is only record-name
+  characters (plus `{}` and `$`), has a letter, doesn't start with `-`/`+`
+  (flags) or start or end with `.`/`:`, and, without a scheme, isn't a
+  time, date, `host:port` (exactly two parts, the host with a `.`,
+  `localhost` or lower case, so `SR:BPM:01` and `DLS:01` stay names),
+  `a::b` path, or (among other words) a Python log line
+  `LEVEL:logger:msg` with a lower-case logger. A one-word selection is taken if
+  it can be a name (some sites' names have no structure: `TEMP1`); in
+  several words only those with a scheme or structure (`:`, `-`, `_`,
+  braces, a digit, `.FIELD`) are, so prose, shell lines and code add
+  nothing. A paste naming more than `MAX_PASTE` (20) adds none and says
+  so: a screenful pasted by accident would otherwise subscribe to it all.
+  `Pasted::message` words the toast.
+- **egui does not set the primary selection**, so the search box reports
+  newly selected text (once the pointer is up), but not the select-all it
+  makes itself on focus (kept apart until a press or key in the box). The
+  app sets the primary once the selection has been steady for 150 ms, not
+  at every shift+arrow (a round trip each over `ssh -X`).
+- **`ArchiveApp`** reads through a `selection::Selection` trait (tests
+  inject text) owned by a `selection::Worker` thread: an X11 read asks the
+  selection's owner, up to 4 s per format, and smithay's has no timeout,
+  so the UI thread never reads. A click is answered when the text arrives,
+  or after 2 s says it could not be read (a late answer is dropped).
+  `selection::system`, behind the `app` feature, uses smithay-clipboard on
+  the app's own Wayland connection (as egui-winit reads its clipboard;
+  arboard alone would need the data-control protocol, which GNOME lacks)
+  and arboard on X11, including over `ssh -X`, on egui-winit's platforms
+  (Linux and the BSDs). All of it is in the tree already through
+  egui-winit, at the same versions. Middle-click reads the clipboard only
+  where there is no primary selection (`has_primary`: macOS, Windows, or a
+  compositor whose globals lack `zwp_primary_selection_device_manager_v1`),
+  never because the primary is empty. The worker, and with it the Wayland
+  clipboard, goes in `on_exit`, before the display does.
 
 ### Palette and theme
 

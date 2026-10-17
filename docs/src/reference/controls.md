@@ -4,7 +4,7 @@
 
 | control | what it does |
 | --- | --- |
-| search box | find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. See [Find and add PVs](../how-to/search.md) |
+| search box | find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. Middle-click pastes the primary selection. See [Find and add PVs](../how-to/search.md) |
 | `.*` (in the search box, shown while it has the focus) | search with a regular expression instead of a glob |
 | ✕ (in the search box) | clear it |
 | **1h 8h 1d 7d** | show that span ending now, following live |
@@ -34,6 +34,8 @@ only its dot, and ↶ ↷, ⤢ and ⌂ move into the ≡ menu.
 | hover a value axis' name | its full name, units and traces (with their colours), and the gestures |
 | double-click a value axis' name | rename it (Enter keeps, Esc cancels, empty is automatic) |
 | right-click a value axis | its menu: Log scale, Autoscale, Rename… |
+| middle-click (here or on the legend) | add the PVs in the primary selection (the text last selected anywhere), or in the clipboard where there is no primary selection (macOS, Windows). At most 20 at once. See [Add PVs from another window](../how-to/search.md#add-pvs-from-another-window) |
+| `Ctrl+V` (pointer over the plot) | add the PVs in the clipboard |
 | mouse back and forward buttons | undo and redo, as in a browser |
 | hover | crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap) |
 
