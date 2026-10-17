@@ -186,29 +186,35 @@
 <p>Press <code>/</code>, or click the search box at the left of the bar, and type part of
 a name. After a short pause the box lists the archiver's matching PVs:</p>
 <ul>
-<li><code>↑</code>/<code>↓</code> move through the list, <code>Enter</code> adds the highlighted PV, and a click
-adds the one clicked.</li>
+<li>The first row is highlighted: <code>↑</code>/<code>↓</code> move through the list, <code>Enter</code> adds
+the highlighted row, and a click adds the one clicked.</li>
+<li>A PV whose name is exactly what you typed is always the first row, so
+typing a full name and pressing <code>Enter</code> adds that PV, even when other
+names containing it sort before it.</li>
 <li><code>Esc</code> closes the list, and a second <code>Esc</code> clears the box.</li>
 </ul>
-<p>What you type is a glob, as the Archiver Appliance understands it:</p>
-<div class="table-wrapper"><table><thead><tr><th>you type</th><th>archiver is asked for</th><th>matches</th></tr></thead><tbody>
-<tr><td><code>DCCT</code></td><td><code>*DCCT*</code></td><td>any name containing <code>DCCT</code></td></tr>
-<tr><td><code>SR-DI-*:SIGNAL</code></td><td><code>SR-DI-*:SIGNAL</code></td><td>as written; <code>*</code> is any run of characters</td></tr>
-<tr><td><code>BL0?T*</code></td><td><code>BL0?T*</code></td><td><code>?</code> is any one character</td></tr>
+<div class="table-wrapper"><table><thead><tr><th>you type</th><th>archiver is asked for (regex)</th><th>matches</th></tr></thead><tbody>
+<tr><td><code>dcct</code></td><td><code>(?i).*dcct.*</code></td><td>any name containing <code>dcct</code>, in any case (<code>SR-DI-DCCT-01:SIGNAL</code>)</td></tr>
+<tr><td><code>ES{Dif}</code></td><td><code>(?i).*ES\{Dif\}.*</code></td><td>as written: <code>{</code>, <code>(</code>, <code>.</code>, <code>+</code> and the like match only themselves</td></tr>
+<tr><td><code>SR-DI-*:SIGNAL</code></td><td><code>SR-DI-.*:SIGNAL</code></td><td>the whole name, with case; <code>*</code> is any run of characters</td></tr>
+<tr><td><code>BL0?T*</code></td><td><code>BL0.T.*</code></td><td><code>?</code> is any one character</td></tr>
 </tbody></table>
 </div>
-<p>Text without <code>*</code> or <code>?</code> is searched as a substring. Note that the appliance
-turns a glob into a regular expression naively, so a <code>.</code> in the name matches
-any character.</p>
+<p>Text without <code>*</code> or <code>?</code> is searched as a substring, ignoring case. With <code>*</code>
+or <code>?</code> it is a glob: it must match the whole name, case and all, and every
+other character stands for itself.</p>
 <p>Click the <code>.*</code> toggle inside the box to type a Java regular expression
 instead. It must match the <strong>whole</strong> name: <code>SR-DI</code> matches nothing, while
-<code>SR-DI.*</code> works.</p>
+<code>SR-DI.*</code> works. Start it with <code>(?i)</code> to ignore case.</p>
 <p>The list shows the first 50 matches; type more of the name to narrow it.</p>
 <h2 id="add-a-pv-the-archiver-doesnt-know"><a class="header" href="#add-a-pv-the-archiver-doesnt-know">Add a PV the archiver doesn't know</a></h2>
-<p>Type the full name and press <code>Enter</code> with nothing highlighted. The text is
-added as written, so this is how to add a PV that is not archived, a PV
-Access PV (<code>pva://name</code>), or a simulated one (<code>sim://sine</code>). It plots live
-only.</p>
+<p>Type the full name: as well as any archived matches, the list ends with an
+<strong>Add "…" as typed</strong> row. Highlight it with <code>↓</code> (or click it) and press
+<code>Enter</code>. The text is added as written, so this is how to add a PV that is
+not archived; it plots live only. A PV Access or simulated name
+(<code>pva://name</code>, <code>sim://sine</code>), or several names separated by spaces or
+commas, can only be added as typed, so that row comes first and <code>Enter</code>
+adds it straight away.</p>
 <h2 id="add-pvs-from-the-command-line"><a class="header" href="#add-pvs-from-the-command-line">Add PVs from the command line</a></h2>
 <p>Name them after the options:</p>
 <pre><code class="language-bash">archiveview --archiver http://archiver:17668 SR-DI-DCCT-01:SIGNAL SR-DI-DCCT-01:LIFETIME
@@ -219,8 +225,8 @@ only.</p>
 trace (the dot turns hollow) and again to show it. Hover a chip to highlight
 its trace, and click its <code>✕</code> to remove it.</p>
 <h2 id="with-no-archiver"><a class="header" href="#with-no-archiver">With no archiver</a></h2>
-<p>Without <code>--archiver</code> or a saved <code>archiver_url</code>, there is nothing to search;
-type full names and press <code>Enter</code>.</p>
+<p>Without <code>--archiver</code> or a saved <code>archiver_url</code>, there is nothing to search:
+the only row is <strong>Add "…" as typed</strong>, so type full names and press <code>Enter</code>.</p>
 
                     </main>
 

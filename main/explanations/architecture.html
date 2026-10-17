@@ -236,15 +236,20 @@ update into a ring buffer, stamped with the <strong>IOC's timestamp</strong>, th
 clock the archiver stored, so the two line up. History is cut at the first
 live sample, so at the right edge the live values always win, and since both
 are drawn as steps the join is seamless. A disconnect records a gap.</p>
-<p>While the plot follows now, the history behind the live values is topped up
-every 30 seconds or so.</p>
+<p>While the plot follows now, the history behind the live values is topped up:
+raw history every 30 seconds or so, by fetching only what is new since its
+last sample; binned history by fetching the (bounded) window again, but only
+once time has moved on by a few bins, so a week-long view asks the archiver
+for its week of bins every half hour, not every 30 seconds. Each
+trace has at most one request to the archiver at a time.</p>
 <h3 id="drawing"><a class="header" href="#drawing">Drawing</a></h3>
 <p>Each frame, the visible part of every trace is thinned to at most four
 points per pixel column (first, min, max, last), which keeps every peak
 while drawing a bounded number of segments. Gaps (NaN values, and the
 archiver's disconnection markers) break the line. Autoscale covers the
-visible values including the bands, and the value axis animates to its new
-range.</p>
+visible values including the bands, and the value axes animate to their new
+ranges. Traces with different units get a value axis each (up to three), so
+a current in mA and a voltage of a few volts are both readable.</p>
 <h2 id="the-widget-and-the-app"><a class="header" href="#the-widget-and-the-app">The widget and the app</a></h2>
 <p><code>archiveview::Plot</code> holds everything about one plot and nothing global, so
 several can share one window or one program, and it borrows the host's PV

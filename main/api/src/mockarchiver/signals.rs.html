@@ -208,172 +208,187 @@
 <a href=#208 id=208 data-nosnippet>208</a>    (s - <span class="number">2.0</span>) * <span class="number">3.0f64</span>.sqrt()
 <a href=#209 id=209 data-nosnippet>209</a>}
 <a href=#210 id=210 data-nosnippet>210</a>
-<a href=#211 id=211 data-nosnippet>211</a><span class="doccomment">/// A motor that moves to a new position every 15 minutes, taking 20 s.
-<a href=#212 id=212 data-nosnippet>212</a></span><span class="kw">fn </span>motor(t: f64, salt: u64) -&gt; f64 {
-<a href=#213 id=213 data-nosnippet>213</a>    <span class="kw">const </span>MOVE: f64 = <span class="number">900.0</span>;
-<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">const </span>TRAVEL: f64 = <span class="number">20.0</span>;
-<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">let </span>n = (t / MOVE).floor() <span class="kw">as </span>i64;
-<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">let </span>pos = |n: i64| ((unit(n, salt) * <span class="number">16.0 </span>- <span class="number">8.0</span>) * <span class="number">100.0</span>).round() / <span class="number">100.0</span>;
-<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">let </span>(from, to) = (pos(n - <span class="number">1</span>), pos(n));
-<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>f = ((t - n <span class="kw">as </span>f64 * MOVE) / TRAVEL).clamp(<span class="number">0.0</span>, <span class="number">1.0</span>);
-<a href=#219 id=219 data-nosnippet>219</a>    from + (to - from) * f
-<a href=#220 id=220 data-nosnippet>220</a>}
-<a href=#221 id=221 data-nosnippet>221</a>
-<a href=#222 id=222 data-nosnippet>222</a><span class="kw">const </span>TAU: f64 = std::f64::consts::TAU;
-<a href=#223 id=223 data-nosnippet>223</a>
-<a href=#224 id=224 data-nosnippet>224</a><span class="kw">impl </span>Signal {
-<a href=#225 id=225 data-nosnippet>225</a>    <span class="doccomment">/// The sample period in nanoseconds.
-<a href=#226 id=226 data-nosnippet>226</a>    </span><span class="kw">pub fn </span>period_ns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i64 {
-<a href=#227 id=227 data-nosnippet>227</a>        (<span class="self">self</span>.period * <span class="number">1e9</span>).round() <span class="kw">as </span>i64
-<a href=#228 id=228 data-nosnippet>228</a>    }
-<a href=#229 id=229 data-nosnippet>229</a>
-<a href=#230 id=230 data-nosnippet>230</a>    <span class="doccomment">/// The event at absolute grid index `k` (time `k * period`), or `None`
-<a href=#231 id=231 data-nosnippet>231</a>    /// when the PV was disconnected then.
-<a href=#232 id=232 data-nosnippet>232</a>    </span><span class="kw">pub fn </span>event(<span class="kw-2">&amp;</span><span class="self">self</span>, k: i64) -&gt; <span class="prelude-ty">Option</span>&lt;Event&gt; {
-<a href=#233 id=233 data-nosnippet>233</a>        <span class="kw">let </span>t_ns = k * <span class="self">self</span>.period_ns();
-<a href=#234 id=234 data-nosnippet>234</a>        <span class="kw">let </span>t = t_ns <span class="kw">as </span>f64 * <span class="number">1e-9</span>;
-<a href=#235 id=235 data-nosnippet>235</a>        <span class="kw">let </span><span class="kw-2">mut </span>severity = <span class="number">0</span>;
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">let </span><span class="kw-2">mut </span>status = <span class="number">0</span>;
-<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">let </span><span class="kw-2">mut </span>fields = Vec::new();
-<a href=#238 id=238 data-nosnippet>238</a>        <span class="kw">let </span>salt = <span class="self">self
-<a href=#239 id=239 data-nosnippet>239</a>            </span>.name
-<a href=#240 id=240 data-nosnippet>240</a>            .bytes()
-<a href=#241 id=241 data-nosnippet>241</a>            .fold(<span class="number">0u64</span>, |h, b| h.wrapping_mul(<span class="number">31</span>) ^ b <span class="kw">as </span>u64);
-<a href=#242 id=242 data-nosnippet>242</a>        <span class="kw">let </span>value = <span class="kw">match </span><span class="self">self</span>.shape {
-<a href=#243 id=243 data-nosnippet>243</a>            Shape::Sine =&gt; {
-<a href=#244 id=244 data-nosnippet>244</a>                <span class="kw">let </span>v = <span class="number">250.0 </span>+ <span class="number">40.0 </span>* (TAU * t / <span class="number">600.0</span>).sin() + <span class="number">0.2 </span>* normal(k, salt);
-<a href=#245 id=245 data-nosnippet>245</a>                <span class="kw">if </span>v &gt; <span class="number">285.0 </span>{
-<a href=#246 id=246 data-nosnippet>246</a>                    severity = <span class="number">1</span>;
-<a href=#247 id=247 data-nosnippet>247</a>                    status = <span class="number">4</span>; <span class="comment">// HIGH
-<a href=#248 id=248 data-nosnippet>248</a>                </span>}
-<a href=#249 id=249 data-nosnippet>249</a>                Value::Double(v)
-<a href=#250 id=250 data-nosnippet>250</a>            }
-<a href=#251 id=251 data-nosnippet>251</a>            Shape::Ramp =&gt; Value::Double((t % <span class="number">3600.0</span>) / <span class="number">36.0</span>),
-<a href=#252 id=252 data-nosnippet>252</a>            Shape::Noise =&gt; Value::Double(<span class="number">5.0 </span>* (TAU * t / <span class="number">10800.0</span>).sin() + normal(k, salt)),
-<a href=#253 id=253 data-nosnippet>253</a>            Shape::Slow =&gt; {
-<a href=#254 id=254 data-nosnippet>254</a>                Value::Double(<span class="number">20.0 </span>+ <span class="number">3.0 </span>* (TAU * t / <span class="number">86400.0</span>).sin() + <span class="number">0.3 </span>* normal(k, salt))
-<a href=#255 id=255 data-nosnippet>255</a>            }
-<a href=#256 id=256 data-nosnippet>256</a>            Shape::Step =&gt; {
-<a href=#257 id=257 data-nosnippet>257</a>                <span class="kw">let </span>n = (t / <span class="number">240.0</span>).floor() <span class="kw">as </span>i64;
-<a href=#258 id=258 data-nosnippet>258</a>                Value::Double((unit(n, salt) * <span class="number">1000.0</span>).round() / <span class="number">100.0</span>)
+<a href=#211 id=211 data-nosnippet>211</a><span class="doccomment">/// A motor parked at 0 (where bobview-testioc's motors rest, so archive
+<a href=#212 id=212 data-nosnippet>212</a>/// and live join up) that every 15 minutes moves out to a new position
+<a href=#213 id=213 data-nosnippet>213</a>/// for two minutes and back, taking 20 s each way.
+<a href=#214 id=214 data-nosnippet>214</a></span><span class="kw">fn </span>motor(t: f64, salt: u64) -&gt; f64 {
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">const </span>MOVE: f64 = <span class="number">900.0</span>;
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">const </span>TRAVEL: f64 = <span class="number">20.0</span>;
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">const </span>AWAY: f64 = <span class="number">120.0</span>;
+<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>n = (t / MOVE).floor() <span class="kw">as </span>i64;
+<a href=#219 id=219 data-nosnippet>219</a>    <span class="kw">let </span>pos = ((unit(n, salt) * <span class="number">16.0 </span>- <span class="number">8.0</span>) * <span class="number">100.0</span>).round() / <span class="number">100.0</span>;
+<a href=#220 id=220 data-nosnippet>220</a>    <span class="kw">let </span>s = t - n <span class="kw">as </span>f64 * MOVE;
+<a href=#221 id=221 data-nosnippet>221</a>    <span class="kw">let </span>out = (s / TRAVEL).clamp(<span class="number">0.0</span>, <span class="number">1.0</span>);
+<a href=#222 id=222 data-nosnippet>222</a>    <span class="kw">let </span>back = ((s - TRAVEL - AWAY) / TRAVEL).clamp(<span class="number">0.0</span>, <span class="number">1.0</span>);
+<a href=#223 id=223 data-nosnippet>223</a>    pos * (out - back)
+<a href=#224 id=224 data-nosnippet>224</a>}
+<a href=#225 id=225 data-nosnippet>225</a>
+<a href=#226 id=226 data-nosnippet>226</a><span class="kw">const </span>TAU: f64 = std::f64::consts::TAU;
+<a href=#227 id=227 data-nosnippet>227</a>
+<a href=#228 id=228 data-nosnippet>228</a><span class="kw">impl </span>Signal {
+<a href=#229 id=229 data-nosnippet>229</a>    <span class="doccomment">/// The sample period in nanoseconds.
+<a href=#230 id=230 data-nosnippet>230</a>    </span><span class="kw">pub fn </span>period_ns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i64 {
+<a href=#231 id=231 data-nosnippet>231</a>        (<span class="self">self</span>.period * <span class="number">1e9</span>).round() <span class="kw">as </span>i64
+<a href=#232 id=232 data-nosnippet>232</a>    }
+<a href=#233 id=233 data-nosnippet>233</a>
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="doccomment">/// The event at absolute grid index `k` (time `k * period`), or `None`
+<a href=#235 id=235 data-nosnippet>235</a>    /// when the PV was disconnected then.
+<a href=#236 id=236 data-nosnippet>236</a>    </span><span class="kw">pub fn </span>event(<span class="kw-2">&amp;</span><span class="self">self</span>, k: i64) -&gt; <span class="prelude-ty">Option</span>&lt;Event&gt; {
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">let </span>t_ns = k * <span class="self">self</span>.period_ns();
+<a href=#238 id=238 data-nosnippet>238</a>        <span class="kw">let </span>t = t_ns <span class="kw">as </span>f64 * <span class="number">1e-9</span>;
+<a href=#239 id=239 data-nosnippet>239</a>        <span class="kw">let </span><span class="kw-2">mut </span>severity = <span class="number">0</span>;
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">let </span><span class="kw-2">mut </span>status = <span class="number">0</span>;
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="kw">let </span><span class="kw-2">mut </span>fields = Vec::new();
+<a href=#242 id=242 data-nosnippet>242</a>        <span class="kw">let </span>salt = <span class="self">self
+<a href=#243 id=243 data-nosnippet>243</a>            </span>.name
+<a href=#244 id=244 data-nosnippet>244</a>            .bytes()
+<a href=#245 id=245 data-nosnippet>245</a>            .fold(<span class="number">0u64</span>, |h, b| h.wrapping_mul(<span class="number">31</span>) ^ b <span class="kw">as </span>u64);
+<a href=#246 id=246 data-nosnippet>246</a>        <span class="kw">let </span>value = <span class="kw">match </span><span class="self">self</span>.shape {
+<a href=#247 id=247 data-nosnippet>247</a>            Shape::Sine =&gt; {
+<a href=#248 id=248 data-nosnippet>248</a>                <span class="kw">let </span>v = <span class="number">250.0 </span>+ <span class="number">40.0 </span>* (TAU * t / <span class="number">600.0</span>).sin() + <span class="number">0.2 </span>* normal(k, salt);
+<a href=#249 id=249 data-nosnippet>249</a>                <span class="kw">if </span>v &gt; <span class="number">285.0 </span>{
+<a href=#250 id=250 data-nosnippet>250</a>                    severity = <span class="number">1</span>;
+<a href=#251 id=251 data-nosnippet>251</a>                    status = <span class="number">4</span>; <span class="comment">// HIGH
+<a href=#252 id=252 data-nosnippet>252</a>                </span>}
+<a href=#253 id=253 data-nosnippet>253</a>                Value::Double(v)
+<a href=#254 id=254 data-nosnippet>254</a>            }
+<a href=#255 id=255 data-nosnippet>255</a>            Shape::Ramp =&gt; Value::Double((t % <span class="number">3600.0</span>) / <span class="number">36.0</span>),
+<a href=#256 id=256 data-nosnippet>256</a>            Shape::Noise =&gt; Value::Double(<span class="number">5.0 </span>* (TAU * t / <span class="number">10800.0</span>).sin() + normal(k, salt)),
+<a href=#257 id=257 data-nosnippet>257</a>            Shape::Slow =&gt; {
+<a href=#258 id=258 data-nosnippet>258</a>                Value::Double(<span class="number">20.0 </span>+ <span class="number">3.0 </span>* (TAU * t / <span class="number">86400.0</span>).sin() + <span class="number">0.3 </span>* normal(k, salt))
 <a href=#259 id=259 data-nosnippet>259</a>            }
-<a href=#260 id=260 data-nosnippet>260</a>            Shape::Enum =&gt; Value::Int((hash((t / <span class="number">1800.0</span>).floor() <span class="kw">as </span>u64 ^ salt) % <span class="number">4</span>) <span class="kw">as </span>i64),
-<a href=#261 id=261 data-nosnippet>261</a>            Shape::Text =&gt; {
-<a href=#262 id=262 data-nosnippet>262</a>                <span class="kw">const </span>STATES: [<span class="kw-2">&amp;</span>str; <span class="number">4</span>] = [<span class="string">"Idle"</span>, <span class="string">"Running"</span>, <span class="string">"Paused"</span>, <span class="string">"Fault: \"door\" open"</span>];
-<a href=#263 id=263 data-nosnippet>263</a>                Value::Text(STATES[k.rem_euclid(<span class="number">4</span>) <span class="kw">as </span>usize].to_string())
-<a href=#264 id=264 data-nosnippet>264</a>            }
-<a href=#265 id=265 data-nosnippet>265</a>            Shape::Wave =&gt; Value::Array(
-<a href=#266 id=266 data-nosnippet>266</a>                (<span class="number">0</span>..<span class="number">8</span>)
-<a href=#267 id=267 data-nosnippet>267</a>                    .map(|i| ((TAU * (t / <span class="number">60.0 </span>+ i <span class="kw">as </span>f64 / <span class="number">8.0</span>)).sin() * <span class="number">10.0</span>).round() / <span class="number">10.0</span>)
-<a href=#268 id=268 data-nosnippet>268</a>                    .collect(),
-<a href=#269 id=269 data-nosnippet>269</a>            ),
-<a href=#270 id=270 data-nosnippet>270</a>            Shape::Nan =&gt; {
-<a href=#271 id=271 data-nosnippet>271</a>                <span class="kw">let </span>phase = k.rem_euclid(NAN_CYCLE);
-<a href=#272 id=272 data-nosnippet>272</a>                <span class="kw">if </span>phase &gt; NAN_LOST &amp;&amp; phase &lt; NAN_REGAINED {
-<a href=#273 id=273 data-nosnippet>273</a>                    <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#274 id=274 data-nosnippet>274</a>                }
-<a href=#275 id=275 data-nosnippet>275</a>                <span class="kw">let </span>lost_secs = (k - phase + NAN_LOST) * <span class="self">self</span>.period_ns() / <span class="number">1_000_000_000</span>;
-<a href=#276 id=276 data-nosnippet>276</a>                <span class="kw">if </span>phase == NAN_LOST {
-<a href=#277 id=277 data-nosnippet>277</a>                    severity = <span class="number">3</span>;
-<a href=#278 id=278 data-nosnippet>278</a>                    status = <span class="number">9</span>; <span class="comment">// LINK
-<a href=#279 id=279 data-nosnippet>279</a>                    </span>fields.push((<span class="string">"cnxlostepsecs"</span>, lost_secs.to_string()));
-<a href=#280 id=280 data-nosnippet>280</a>                } <span class="kw">else if </span>phase == NAN_REGAINED {
-<a href=#281 id=281 data-nosnippet>281</a>                    fields.push((<span class="string">"cnxlostepsecs"</span>, lost_secs.to_string()));
-<a href=#282 id=282 data-nosnippet>282</a>                    fields.push((<span class="string">"cnxregainedepsecs"</span>, (t_ns / <span class="number">1_000_000_000</span>).to_string()));
-<a href=#283 id=283 data-nosnippet>283</a>                }
-<a href=#284 id=284 data-nosnippet>284</a>                <span class="kw">if </span>k.rem_euclid(<span class="number">50</span>) == <span class="number">49 </span>{
-<a href=#285 id=285 data-nosnippet>285</a>                    Value::Double(f64::NAN)
-<a href=#286 id=286 data-nosnippet>286</a>                } <span class="kw">else </span>{
-<a href=#287 id=287 data-nosnippet>287</a>                    Value::Double((TAU * t / <span class="number">300.0</span>).sin())
-<a href=#288 id=288 data-nosnippet>288</a>                }
-<a href=#289 id=289 data-nosnippet>289</a>            }
-<a href=#290 id=290 data-nosnippet>290</a>            Shape::Big =&gt; Value::Double(<span class="number">3e10 </span>* (TAU * t / <span class="number">600.0</span>).sin()),
-<a href=#291 id=291 data-nosnippet>291</a>            Shape::BeamA =&gt; Value::Double(beam_a(t)),
-<a href=#292 id=292 data-nosnippet>292</a>            Shape::BeamB =&gt; Value::Double(beam_b(t)),
-<a href=#293 id=293 data-nosnippet>293</a>            Shape::BeamSum =&gt; Value::Double(beam_a(t) + beam_b(t)),
-<a href=#294 id=294 data-nosnippet>294</a>            Shape::Motor1 =&gt; Value::Double(motor(t, salt)),
-<a href=#295 id=295 data-nosnippet>295</a>            Shape::Motor2 =&gt; Value::Double(motor(t + <span class="number">450.0</span>, salt)),
-<a href=#296 id=296 data-nosnippet>296</a>        };
-<a href=#297 id=297 data-nosnippet>297</a>        <span class="prelude-val">Some</span>(Event {
-<a href=#298 id=298 data-nosnippet>298</a>            t_ns,
-<a href=#299 id=299 data-nosnippet>299</a>            value,
-<a href=#300 id=300 data-nosnippet>300</a>            severity,
-<a href=#301 id=301 data-nosnippet>301</a>            status,
-<a href=#302 id=302 data-nosnippet>302</a>            fields,
-<a href=#303 id=303 data-nosnippet>303</a>        })
-<a href=#304 id=304 data-nosnippet>304</a>    }
-<a href=#305 id=305 data-nosnippet>305</a>}
-<a href=#306 id=306 data-nosnippet>306</a>
-<a href=#307 id=307 data-nosnippet>307</a><span class="kw">fn </span>beam_a(t: f64) -&gt; f64 {
-<a href=#308 id=308 data-nosnippet>308</a>    <span class="number">2.54 </span>+ <span class="number">0.4 </span>* (TAU * t / <span class="number">7200.0</span>).sin()
+<a href=#260 id=260 data-nosnippet>260</a>            Shape::Step =&gt; {
+<a href=#261 id=261 data-nosnippet>261</a>                <span class="kw">let </span>n = (t / <span class="number">240.0</span>).floor() <span class="kw">as </span>i64;
+<a href=#262 id=262 data-nosnippet>262</a>                Value::Double((unit(n, salt) * <span class="number">1000.0</span>).round() / <span class="number">100.0</span>)
+<a href=#263 id=263 data-nosnippet>263</a>            }
+<a href=#264 id=264 data-nosnippet>264</a>            Shape::Enum =&gt; Value::Int((hash((t / <span class="number">1800.0</span>).floor() <span class="kw">as </span>u64 ^ salt) % <span class="number">4</span>) <span class="kw">as </span>i64),
+<a href=#265 id=265 data-nosnippet>265</a>            Shape::Text =&gt; {
+<a href=#266 id=266 data-nosnippet>266</a>                <span class="kw">const </span>STATES: [<span class="kw-2">&amp;</span>str; <span class="number">4</span>] = [<span class="string">"Idle"</span>, <span class="string">"Running"</span>, <span class="string">"Paused"</span>, <span class="string">"Fault: \"door\" open"</span>];
+<a href=#267 id=267 data-nosnippet>267</a>                Value::Text(STATES[k.rem_euclid(<span class="number">4</span>) <span class="kw">as </span>usize].to_string())
+<a href=#268 id=268 data-nosnippet>268</a>            }
+<a href=#269 id=269 data-nosnippet>269</a>            Shape::Wave =&gt; Value::Array(
+<a href=#270 id=270 data-nosnippet>270</a>                (<span class="number">0</span>..<span class="number">8</span>)
+<a href=#271 id=271 data-nosnippet>271</a>                    .map(|i| ((TAU * (t / <span class="number">60.0 </span>+ i <span class="kw">as </span>f64 / <span class="number">8.0</span>)).sin() * <span class="number">10.0</span>).round() / <span class="number">10.0</span>)
+<a href=#272 id=272 data-nosnippet>272</a>                    .collect(),
+<a href=#273 id=273 data-nosnippet>273</a>            ),
+<a href=#274 id=274 data-nosnippet>274</a>            Shape::Nan =&gt; {
+<a href=#275 id=275 data-nosnippet>275</a>                <span class="kw">let </span>phase = k.rem_euclid(NAN_CYCLE);
+<a href=#276 id=276 data-nosnippet>276</a>                <span class="kw">if </span>phase &gt; NAN_LOST &amp;&amp; phase &lt; NAN_REGAINED {
+<a href=#277 id=277 data-nosnippet>277</a>                    <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#278 id=278 data-nosnippet>278</a>                }
+<a href=#279 id=279 data-nosnippet>279</a>                <span class="kw">let </span>lost_secs = (k - phase + NAN_LOST) * <span class="self">self</span>.period_ns() / <span class="number">1_000_000_000</span>;
+<a href=#280 id=280 data-nosnippet>280</a>                <span class="kw">if </span>phase == NAN_LOST {
+<a href=#281 id=281 data-nosnippet>281</a>                    severity = <span class="number">3</span>;
+<a href=#282 id=282 data-nosnippet>282</a>                    status = <span class="number">9</span>; <span class="comment">// LINK
+<a href=#283 id=283 data-nosnippet>283</a>                    </span>fields.push((<span class="string">"cnxlostepsecs"</span>, lost_secs.to_string()));
+<a href=#284 id=284 data-nosnippet>284</a>                } <span class="kw">else if </span>phase == NAN_REGAINED {
+<a href=#285 id=285 data-nosnippet>285</a>                    fields.push((<span class="string">"cnxlostepsecs"</span>, lost_secs.to_string()));
+<a href=#286 id=286 data-nosnippet>286</a>                    fields.push((<span class="string">"cnxregainedepsecs"</span>, (t_ns / <span class="number">1_000_000_000</span>).to_string()));
+<a href=#287 id=287 data-nosnippet>287</a>                }
+<a href=#288 id=288 data-nosnippet>288</a>                <span class="kw">if </span>k.rem_euclid(<span class="number">50</span>) == <span class="number">49 </span>{
+<a href=#289 id=289 data-nosnippet>289</a>                    Value::Double(f64::NAN)
+<a href=#290 id=290 data-nosnippet>290</a>                } <span class="kw">else </span>{
+<a href=#291 id=291 data-nosnippet>291</a>                    Value::Double((TAU * t / <span class="number">300.0</span>).sin())
+<a href=#292 id=292 data-nosnippet>292</a>                }
+<a href=#293 id=293 data-nosnippet>293</a>            }
+<a href=#294 id=294 data-nosnippet>294</a>            Shape::Big =&gt; Value::Double(<span class="number">3e10 </span>* (TAU * t / <span class="number">600.0</span>).sin()),
+<a href=#295 id=295 data-nosnippet>295</a>            Shape::BeamA =&gt; Value::Double(beam_a(t)),
+<a href=#296 id=296 data-nosnippet>296</a>            Shape::BeamB =&gt; Value::Double(beam_b(t)),
+<a href=#297 id=297 data-nosnippet>297</a>            Shape::BeamSum =&gt; Value::Double(beam_a(t) + beam_b(t)),
+<a href=#298 id=298 data-nosnippet>298</a>            Shape::Motor1 =&gt; Value::Double(motor(t, salt)),
+<a href=#299 id=299 data-nosnippet>299</a>            Shape::Motor2 =&gt; Value::Double(motor(t + <span class="number">450.0</span>, salt)),
+<a href=#300 id=300 data-nosnippet>300</a>        };
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="prelude-val">Some</span>(Event {
+<a href=#302 id=302 data-nosnippet>302</a>            t_ns,
+<a href=#303 id=303 data-nosnippet>303</a>            value,
+<a href=#304 id=304 data-nosnippet>304</a>            severity,
+<a href=#305 id=305 data-nosnippet>305</a>            status,
+<a href=#306 id=306 data-nosnippet>306</a>            fields,
+<a href=#307 id=307 data-nosnippet>307</a>        })
+<a href=#308 id=308 data-nosnippet>308</a>    }
 <a href=#309 id=309 data-nosnippet>309</a>}
 <a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a><span class="kw">fn </span>beam_b(t: f64) -&gt; f64 {
-<a href=#312 id=312 data-nosnippet>312</a>    <span class="number">2.61 </span>+ <span class="number">0.3 </span>* (TAU * t / <span class="number">10800.0</span>).cos()
-<a href=#313 id=313 data-nosnippet>313</a>}
-<a href=#314 id=314 data-nosnippet>314</a>
-<a href=#315 id=315 data-nosnippet>315</a><span class="attr">#[cfg(test)]
-<a href=#316 id=316 data-nosnippet>316</a></span><span class="kw">mod </span>tests {
-<a href=#317 id=317 data-nosnippet>317</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#318 id=318 data-nosnippet>318</a>
-<a href=#319 id=319 data-nosnippet>319</a>    <span class="attr">#[test]
-<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">fn </span>names_are_unique_and_findable() {
-<a href=#321 id=321 data-nosnippet>321</a>        <span class="kw">for </span>s <span class="kw">in </span>all() {
-<a href=#322 id=322 data-nosnippet>322</a>            <span class="macro">assert_eq!</span>(find(s.name).unwrap().name, s.name);
-<a href=#323 id=323 data-nosnippet>323</a>        }
-<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">let </span><span class="kw-2">mut </span>names: Vec&lt;<span class="kw">_</span>&gt; = all().iter().map(|s| s.name).collect();
-<a href=#325 id=325 data-nosnippet>325</a>        names.sort();
-<a href=#326 id=326 data-nosnippet>326</a>        names.dedup();
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="macro">assert_eq!</span>(names.len(), all().len());
-<a href=#328 id=328 data-nosnippet>328</a>        <span class="macro">assert!</span>(find(<span class="string">"NOPE"</span>).is_none());
-<a href=#329 id=329 data-nosnippet>329</a>    }
-<a href=#330 id=330 data-nosnippet>330</a>
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="attr">#[test]
-<a href=#332 id=332 data-nosnippet>332</a>    </span><span class="kw">fn </span>periods_divide_the_history_alignment() {
-<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">for </span>s <span class="kw">in </span>all() {
-<a href=#334 id=334 data-nosnippet>334</a>            <span class="macro">assert_eq!</span>(<span class="number">600_000_000_000 </span>% s.period_ns(), <span class="number">0</span>, <span class="string">"{}"</span>, s.name);
-<a href=#335 id=335 data-nosnippet>335</a>        }
-<a href=#336 id=336 data-nosnippet>336</a>    }
-<a href=#337 id=337 data-nosnippet>337</a>
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="attr">#[test]
-<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="kw">fn </span>values_are_deterministic() {
-<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw">let </span>s = find(<span class="string">"MOCK:NOISE"</span>).unwrap();
-<a href=#341 id=341 data-nosnippet>341</a>        <span class="macro">assert_eq!</span>(s.event(<span class="number">12345</span>), s.event(<span class="number">12345</span>));
-<a href=#342 id=342 data-nosnippet>342</a>        <span class="macro">assert_ne!</span>(s.event(<span class="number">12345</span>), s.event(<span class="number">12346</span>));
-<a href=#343 id=343 data-nosnippet>343</a>    }
-<a href=#344 id=344 data-nosnippet>344</a>
-<a href=#345 id=345 data-nosnippet>345</a>    <span class="attr">#[test]
-<a href=#346 id=346 data-nosnippet>346</a>    </span><span class="kw">fn </span>nan_pv_has_nans_and_gaps() {
-<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw">let </span>s = find(<span class="string">"MOCK:NAN"</span>).unwrap();
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="kw">let </span>k0 = <span class="number">1_700_000_000 </span>/ NAN_CYCLE * NAN_CYCLE;
-<a href=#349 id=349 data-nosnippet>349</a>        <span class="kw">let </span>lost = s.event(k0 + NAN_LOST).unwrap();
-<a href=#350 id=350 data-nosnippet>350</a>        <span class="macro">assert_eq!</span>(lost.severity, <span class="number">3</span>);
-<a href=#351 id=351 data-nosnippet>351</a>        <span class="macro">assert_eq!</span>(lost.fields[<span class="number">0</span>].<span class="number">0</span>, <span class="string">"cnxlostepsecs"</span>);
-<a href=#352 id=352 data-nosnippet>352</a>        <span class="macro">assert!</span>(s.event(k0 + NAN_LOST + <span class="number">1</span>).is_none());
-<a href=#353 id=353 data-nosnippet>353</a>        <span class="macro">assert!</span>(s.event(k0 + NAN_REGAINED - <span class="number">1</span>).is_none());
-<a href=#354 id=354 data-nosnippet>354</a>        <span class="kw">let </span>back = s.event(k0 + NAN_REGAINED).unwrap();
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="macro">assert_eq!</span>(back.fields.len(), <span class="number">2</span>);
-<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">let </span>v = s.event(k0 + <span class="number">49</span>).unwrap().value.as_f64().unwrap();
-<a href=#357 id=357 data-nosnippet>357</a>        <span class="macro">assert!</span>(v.is_nan());
+<a href=#311 id=311 data-nosnippet>311</a><span class="doccomment">/// The beam inputs wander a little about bobview-testioc's values (2.54
+<a href=#312 id=312 data-nosnippet>312</a>/// and 2.61), so archive and live join up.
+<a href=#313 id=313 data-nosnippet>313</a></span><span class="kw">fn </span>beam_a(t: f64) -&gt; f64 {
+<a href=#314 id=314 data-nosnippet>314</a>    <span class="number">2.54 </span>+ <span class="number">0.02 </span>* (TAU * t / <span class="number">7200.0</span>).sin()
+<a href=#315 id=315 data-nosnippet>315</a>}
+<a href=#316 id=316 data-nosnippet>316</a>
+<a href=#317 id=317 data-nosnippet>317</a><span class="kw">fn </span>beam_b(t: f64) -&gt; f64 {
+<a href=#318 id=318 data-nosnippet>318</a>    <span class="number">2.61 </span>+ <span class="number">0.015 </span>* (TAU * t / <span class="number">10800.0</span>).cos()
+<a href=#319 id=319 data-nosnippet>319</a>}
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a><span class="attr">#[cfg(test)]
+<a href=#322 id=322 data-nosnippet>322</a></span><span class="kw">mod </span>tests {
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#324 id=324 data-nosnippet>324</a>
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="attr">#[test]
+<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">fn </span>names_are_unique_and_findable() {
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">for </span>s <span class="kw">in </span>all() {
+<a href=#328 id=328 data-nosnippet>328</a>            <span class="macro">assert_eq!</span>(find(s.name).unwrap().name, s.name);
+<a href=#329 id=329 data-nosnippet>329</a>        }
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span><span class="kw-2">mut </span>names: Vec&lt;<span class="kw">_</span>&gt; = all().iter().map(|s| s.name).collect();
+<a href=#331 id=331 data-nosnippet>331</a>        names.sort();
+<a href=#332 id=332 data-nosnippet>332</a>        names.dedup();
+<a href=#333 id=333 data-nosnippet>333</a>        <span class="macro">assert_eq!</span>(names.len(), all().len());
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="macro">assert!</span>(find(<span class="string">"NOPE"</span>).is_none());
+<a href=#335 id=335 data-nosnippet>335</a>    }
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="attr">#[test]
+<a href=#338 id=338 data-nosnippet>338</a>    </span><span class="kw">fn </span>periods_divide_the_history_alignment() {
+<a href=#339 id=339 data-nosnippet>339</a>        <span class="kw">for </span>s <span class="kw">in </span>all() {
+<a href=#340 id=340 data-nosnippet>340</a>            <span class="macro">assert_eq!</span>(<span class="number">600_000_000_000 </span>% s.period_ns(), <span class="number">0</span>, <span class="string">"{}"</span>, s.name);
+<a href=#341 id=341 data-nosnippet>341</a>        }
+<a href=#342 id=342 data-nosnippet>342</a>    }
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>    <span class="attr">#[test]
+<a href=#345 id=345 data-nosnippet>345</a>    </span><span class="kw">fn </span>testioc_pvs_rest_at_its_values() {
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="comment">// Parked at 0 most of each 15 minutes; SUM near 2.54 + 2.61.
+<a href=#347 id=347 data-nosnippet>347</a>        </span><span class="macro">assert_eq!</span>(motor(<span class="number">1_800_000_000.0 </span>+ <span class="number">600.0</span>, <span class="number">1</span>), <span class="number">0.0</span>);
+<a href=#348 id=348 data-nosnippet>348</a>        <span class="macro">assert_ne!</span>(motor(<span class="number">1_800_000_000.0 </span>+ <span class="number">60.0</span>, <span class="number">1</span>), <span class="number">0.0</span>);
+<a href=#349 id=349 data-nosnippet>349</a>        <span class="kw">let </span>sum = beam_a(<span class="number">1.7e9</span>) + beam_b(<span class="number">1.7e9</span>);
+<a href=#350 id=350 data-nosnippet>350</a>        <span class="macro">assert!</span>((sum - <span class="number">5.15</span>).abs() &lt; <span class="number">0.05</span>, <span class="string">"{sum}"</span>);
+<a href=#351 id=351 data-nosnippet>351</a>    }
+<a href=#352 id=352 data-nosnippet>352</a>
+<a href=#353 id=353 data-nosnippet>353</a>    <span class="attr">#[test]
+<a href=#354 id=354 data-nosnippet>354</a>    </span><span class="kw">fn </span>values_are_deterministic() {
+<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">let </span>s = find(<span class="string">"MOCK:NOISE"</span>).unwrap();
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="macro">assert_eq!</span>(s.event(<span class="number">12345</span>), s.event(<span class="number">12345</span>));
+<a href=#357 id=357 data-nosnippet>357</a>        <span class="macro">assert_ne!</span>(s.event(<span class="number">12345</span>), s.event(<span class="number">12346</span>));
 <a href=#358 id=358 data-nosnippet>358</a>    }
 <a href=#359 id=359 data-nosnippet>359</a>
 <a href=#360 id=360 data-nosnippet>360</a>    <span class="attr">#[test]
-<a href=#361 id=361 data-nosnippet>361</a>    </span><span class="kw">fn </span>kinds() {
-<a href=#362 id=362 data-nosnippet>362</a>        <span class="macro">assert!</span>(Kind::Enum.is_scalar_numeric());
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="macro">assert!</span>(!Kind::Text.is_scalar_numeric());
-<a href=#364 id=364 data-nosnippet>364</a>        <span class="macro">assert!</span>(!Kind::Waveform(<span class="number">8</span>).is_scalar_numeric());
-<a href=#365 id=365 data-nosnippet>365</a>        <span class="macro">assert_eq!</span>(Kind::Waveform(<span class="number">8</span>).element_count(), <span class="number">8</span>);
-<a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">let </span>wave = find(<span class="string">"MOCK:WAVE"</span>).unwrap().event(<span class="number">0</span>).unwrap();
-<a href=#367 id=367 data-nosnippet>367</a>        <span class="macro">assert_eq!</span>(wave.value.as_f64(), <span class="prelude-val">Some</span>(<span class="number">0.0</span>));
-<a href=#368 id=368 data-nosnippet>368</a>    }
-<a href=#369 id=369 data-nosnippet>369</a>
-<a href=#370 id=370 data-nosnippet>370</a>    <span class="attr">#[test]
-<a href=#371 id=371 data-nosnippet>371</a>    </span><span class="kw">fn </span>testioc_values_line_up() {
-<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">let </span>a = find(<span class="string">"bl01t:A"</span>).unwrap().event(<span class="number">170_000_000</span>).unwrap();
-<a href=#373 id=373 data-nosnippet>373</a>        <span class="kw">let </span>b = find(<span class="string">"bl01t:B"</span>).unwrap().event(<span class="number">170_000_000</span>).unwrap();
-<a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">let </span>sum = find(<span class="string">"bl01t:SUM"</span>).unwrap().event(<span class="number">170_000_000</span>).unwrap();
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span>(a, b, sum) = (a.value.as_f64(), b.value.as_f64(), sum.value.as_f64());
-<a href=#376 id=376 data-nosnippet>376</a>        <span class="macro">assert!</span>((a.unwrap() + b.unwrap() - sum.unwrap()).abs() &lt; <span class="number">1e-12</span>);
-<a href=#377 id=377 data-nosnippet>377</a>    }
-<a href=#378 id=378 data-nosnippet>378</a>}
+<a href=#361 id=361 data-nosnippet>361</a>    </span><span class="kw">fn </span>nan_pv_has_nans_and_gaps() {
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">let </span>s = find(<span class="string">"MOCK:NAN"</span>).unwrap();
+<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">let </span>k0 = <span class="number">1_700_000_000 </span>/ NAN_CYCLE * NAN_CYCLE;
+<a href=#364 id=364 data-nosnippet>364</a>        <span class="kw">let </span>lost = s.event(k0 + NAN_LOST).unwrap();
+<a href=#365 id=365 data-nosnippet>365</a>        <span class="macro">assert_eq!</span>(lost.severity, <span class="number">3</span>);
+<a href=#366 id=366 data-nosnippet>366</a>        <span class="macro">assert_eq!</span>(lost.fields[<span class="number">0</span>].<span class="number">0</span>, <span class="string">"cnxlostepsecs"</span>);
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="macro">assert!</span>(s.event(k0 + NAN_LOST + <span class="number">1</span>).is_none());
+<a href=#368 id=368 data-nosnippet>368</a>        <span class="macro">assert!</span>(s.event(k0 + NAN_REGAINED - <span class="number">1</span>).is_none());
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>back = s.event(k0 + NAN_REGAINED).unwrap();
+<a href=#370 id=370 data-nosnippet>370</a>        <span class="macro">assert_eq!</span>(back.fields.len(), <span class="number">2</span>);
+<a href=#371 id=371 data-nosnippet>371</a>        <span class="kw">let </span>v = s.event(k0 + <span class="number">49</span>).unwrap().value.as_f64().unwrap();
+<a href=#372 id=372 data-nosnippet>372</a>        <span class="macro">assert!</span>(v.is_nan());
+<a href=#373 id=373 data-nosnippet>373</a>    }
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a>    <span class="attr">#[test]
+<a href=#376 id=376 data-nosnippet>376</a>    </span><span class="kw">fn </span>kinds() {
+<a href=#377 id=377 data-nosnippet>377</a>        <span class="macro">assert!</span>(Kind::Enum.is_scalar_numeric());
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="macro">assert!</span>(!Kind::Text.is_scalar_numeric());
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="macro">assert!</span>(!Kind::Waveform(<span class="number">8</span>).is_scalar_numeric());
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="macro">assert_eq!</span>(Kind::Waveform(<span class="number">8</span>).element_count(), <span class="number">8</span>);
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">let </span>wave = find(<span class="string">"MOCK:WAVE"</span>).unwrap().event(<span class="number">0</span>).unwrap();
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="macro">assert_eq!</span>(wave.value.as_f64(), <span class="prelude-val">Some</span>(<span class="number">0.0</span>));
+<a href=#383 id=383 data-nosnippet>383</a>    }
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="attr">#[test]
+<a href=#386 id=386 data-nosnippet>386</a>    </span><span class="kw">fn </span>testioc_values_line_up() {
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw">let </span>a = find(<span class="string">"bl01t:A"</span>).unwrap().event(<span class="number">170_000_000</span>).unwrap();
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">let </span>b = find(<span class="string">"bl01t:B"</span>).unwrap().event(<span class="number">170_000_000</span>).unwrap();
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="kw">let </span>sum = find(<span class="string">"bl01t:SUM"</span>).unwrap().event(<span class="number">170_000_000</span>).unwrap();
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">let </span>(a, b, sum) = (a.value.as_f64(), b.value.as_f64(), sum.value.as_f64());
+<a href=#391 id=391 data-nosnippet>391</a>        <span class="macro">assert!</span>((a.unwrap() + b.unwrap() - sum.unwrap()).abs() &lt; <span class="number">1e-12</span>);
+<a href=#392 id=392 data-nosnippet>392</a>    }
+<a href=#393 id=393 data-nosnippet>393</a>}
 </code></pre></div></section></main></body></html>
