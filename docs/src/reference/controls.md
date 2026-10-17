@@ -10,12 +10,13 @@
 | **1h 8h 1d 7d** | show that span ending now, following live |
 | **⋯** | a custom span (`90m`, `2 days`) or a start and end date-time |
 | **● Live** | red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow |
+| **● host** | the archiver: green when it answers, red when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See [Connect](../how-to/connect.md#see-and-change-the-archiver) |
 | **⤢** | autoscale the value axis |
 | **⌂** | reset: back to the last preset, autoscale on |
 | **≡** | Log scale; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
 
-In a narrow window the presets become a drop-down, and ⤢ and ⌂ move into
-the ≡ menu.
+In a narrow window the presets become a drop-down, the archiver pill shows
+only its dot, and ⤢ and ⌂ move into the ≡ menu.
 
 ## On the plot
 

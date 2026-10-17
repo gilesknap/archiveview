@@ -57,5 +57,5 @@ its trace, and click its `✕` to remove it.
 
 ## With no archiver
 
-Without `--archiver` or a saved `archiver_url`, there is nothing to search:
+Without an archiver, there is nothing to search:
 the only row is **Add "…" as typed**, so type full names and press `Enter`.

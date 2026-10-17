@@ -12,8 +12,8 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 | argument | meaning |
 | --- | --- |
 | `PV ...` | PVs to plot. A plain name is Channel Access; `pva://name` is PV Access. With PVs given, archiveview starts a new view of them rather than opening the default view. |
-| `-a`, `--archiver URL` | the Archiver Appliance retrieval URL, e.g. `http://host:17668`. Phoebus's `pbraw://host:17668/retrieval` works too, as plain HTTP. `/retrieval` is added unless the URL ends with it. Overrides `archiver_url` in `settings.json`; with neither, the plot is live only. |
-| `--no-archiver` | use no archiver, even if `settings.json` names one: live values only. |
+| `-a`, `--archiver URL` | the Archiver Appliance retrieval URL, e.g. `http://host:17668`. Phoebus's `pbraw://host:17668/retrieval` works too, as plain HTTP. `/retrieval` is added unless the URL ends with it. Overrides the opened view's archiver and `archiver_url` in `settings.json`, and is remembered there for later runs (not by `--snapshot`). With no archiver at all the plot is live only. |
+| `--no-archiver` | use no archiver, even if the view or `settings.json` names one: live values only. |
 | `--view NAME` | open the saved view `NAME` from `~/.config/archiveview/views/`. Giving PVs as well is a usage error. |
 | `-r`, `--range SPAN` | the time span to show, ending now: `1h`, `8h`, `7d`, `90m`, `2 days`, `1 hour 30 min`. Default `1h`. |
 | `--theme system\|light\|dark` | the colour theme. Default: `theme` in `settings.json`, else `system` (follow the OS). |

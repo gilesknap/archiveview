@@ -9,5 +9,5 @@
 | `EPICS_PVA_ADDR_LIST`, `EPICS_PVA_AUTO_ADDR_LIST`, ... | live PVs | the standard PV Access client settings, for `pva://` PVs |
 | `LIBGL_ALWAYS_SOFTWARE` and friends | archiveview-ssh | set by the script; see [Run over ssh](../how-to/software-rendering.md) |
 
-The archiver URL has no environment variable; use `--archiver` or
-`settings.json`.
+The archiver URL has no environment variable; use `--archiver` (which is
+remembered in `settings.json`) or the archiver pill.
