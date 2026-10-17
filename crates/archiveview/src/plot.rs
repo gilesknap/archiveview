@@ -1739,6 +1739,24 @@ fn ease_values(shown: (f64, f64), target: (f64, f64), dt: f64) -> (f64, f64) {
 }
 
 /// The units of trace `t`: the live PV's, else the archive's.
+/// A tooltip's list of what can be done, one gesture a line, as
+/// "action — effect" in two columns (a proportional font does not keep
+/// indents made of spaces).
+fn gestures(ui: &mut egui::Ui, id: egui::Id, rows: &[(&str, &str)]) {
+    egui::Grid::new(id)
+        .num_columns(2)
+        .spacing([6.0, 2.0])
+        .show(ui, |ui| {
+            for (action, effect) in rows {
+                ui.add(egui::Label::new(*action).extend());
+                ui.add(
+                    egui::Label::new(egui::RichText::new(format!("— {effect}")).weak()).extend(),
+                );
+                ui.end_row();
+            }
+        });
+}
+
 fn units(t: &Trace) -> String {
     let live = t.pv.state().units;
     if !live.is_empty() {

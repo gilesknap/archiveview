@@ -10,8 +10,12 @@ use super::render::Frame;
 use super::{Plot, Trace};
 
 /// What can be done on an axis, as its tooltip says.
-const HINT: &str = "Drag or shift+scroll: zoom this axis · click: pick out its traces\n\
-                    Double-click its name: rename · right-click: scale";
+const GESTURES: &[(&str, &str)] = &[
+    ("Drag, shift+scroll", "zoom this axis"),
+    ("Click", "pick out its traces"),
+    ("Double-click its name", "rename it"),
+    ("Right-click", "its scale menu"),
+];
 
 /// What hovering an axis' name shows: its whole name (it may be cut off),
 /// its units and its traces, then what can be done on it.
@@ -39,8 +43,8 @@ impl AxisCard {
                 ui.label(if *visible { text } else { text.weak() });
             });
         }
-        ui.add_space(2.0);
-        ui.label(egui::RichText::new(HINT).small().weak());
+        ui.add_space(4.0);
+        super::gestures(ui, egui::Id::new("axis-gestures"), GESTURES);
     }
 }
 
@@ -96,7 +100,9 @@ impl Plot {
                 let card = self.axis_card(id, ui.visuals().dark_mode);
                 r.on_hover_ui_at_pointer(|ui| card.show(ui))
             } else {
-                r.on_hover_text_at_pointer(HINT)
+                r.on_hover_ui_at_pointer(|ui| {
+                    super::gestures(ui, egui::Id::new("axis-gestures"), GESTURES)
+                })
             };
             if r.double_clicked() && on_name {
                 // Its first click picked the axis out (or not): undone.

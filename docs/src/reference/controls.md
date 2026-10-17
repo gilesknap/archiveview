@@ -50,7 +50,8 @@ grey "—" while disconnected, and a "live only" mark when the archiver has no
 history of the PV. A long value is cut short with "…", and an array shows
 its length and first elements, e.g. `[936] 0, 0, 0, …`. Arrays are not
 plotted, and their chip says "not plotted". A `!` in place of the ✕ means
-the last archive request failed. Hover a chip for details.
+the last archive request failed. Hover a chip for its PV name, its live
+and archive status, and these gestures.
 
 ## Keys
 
