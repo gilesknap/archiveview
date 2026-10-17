@@ -76,12 +76,25 @@ pub struct ArchiverEdit {
 /// The custom range popover.
 #[derive(Default)]
 pub struct CustomState {
-    open: bool,
-    span: String,
-    from: String,
-    to: String,
-    error: Option<String>,
+    pub(super) open: bool,
+    pub(super) span: String,
+    pub(super) from: String,
+    pub(super) to: String,
+    /// Why the Last field, or the From and To fields, could not be shown.
+    pub(super) span_error: Option<String>,
+    pub(super) range_error: Option<String>,
+    /// Give the Last field the keyboard, its text selected, on the next
+    /// frame.
+    focus: bool,
 }
+
+/// Spans the popover offers as chips, beyond the pill's presets.
+const CHIPS: &[(f64, &str)] = &[
+    (2.0 * 3600.0, "2h"),
+    (12.0 * 3600.0, "12h"),
+    (3.0 * 86_400.0, "3d"),
+    (30.0 * 86_400.0, "30d"),
+];
 
 pub fn top_bar(
     plot: &mut Plot,
@@ -921,7 +934,7 @@ fn range_pill(plot: &mut Plot, ui: &mut egui::Ui, now: f64) {
             if is_custom {
                 open_custom(plot, now);
             } else {
-                plot.preset(PRESETS[i].0);
+                plot.pick_range(Window::live(PRESETS[i].0));
             }
         }
     }
@@ -959,7 +972,7 @@ fn range_combo(plot: &mut Plot, ui: &mut egui::Ui) {
         let current = plot.window.preset();
         for (i, (span, name)) in PRESETS.iter().enumerate() {
             if ui.selectable_label(current == Some(i), *name).clicked() {
-                plot.preset(*span);
+                plot.pick_range(Window::live(*span));
             }
         }
         if ui.selectable_label(current.is_none(), "Custom…").clicked() {
@@ -971,7 +984,9 @@ fn range_combo(plot: &mut Plot, ui: &mut egui::Ui) {
     }
 }
 
-fn open_custom(plot: &mut Plot, now: f64) {
+/// Open the custom range popover (or close it), filled in with the range
+/// shown, the Last field to type in.
+pub(super) fn open_custom(plot: &mut Plot, now: f64) {
     let c = &mut plot.custom;
     c.open = !c.open;
     let (from, to) = plot.window.range(now);
@@ -982,11 +997,14 @@ fn open_custom(plot: &mut Plot, now: f64) {
     } else {
         format_local(to)
     };
-    c.error = None;
+    c.span_error = None;
+    c.range_error = None;
+    c.focus = c.open;
 }
 
 /// The custom range popover under `anchor`: a span up to now, or fixed
-/// start and end times.
+/// start and end times. Enter in a field shows it; Esc or a click
+/// elsewhere closes it, showing nothing.
 fn custom_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect, now: f64) {
     if !plot.custom.open {
         return;
@@ -997,6 +1015,8 @@ fn custom_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect, now: f64) {
         anchor.bottom() + 6.0,
     );
     let mut apply: Option<Window> = None;
+    let span_id = plot.id.with("custom-span");
+    let live_span = plot.window.live.then_some(plot.window.span);
     let c = &mut plot.custom;
     let area = egui::Area::new(plot.id.with("custom-range"))
         .order(egui::Order::Foreground)
@@ -1008,65 +1028,95 @@ fn custom_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect, now: f64) {
                 .show(ui, |ui| {
                     ui.set_width(width - 24.0);
                     ui.spacing_mut().item_spacing.y = 8.0;
-                    ui.label(egui::RichText::new("Last").strong());
                     ui.horizontal(|ui| {
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut c.span)
-                                .hint_text("90m, 3h, 2 days")
-                                .desired_width(150.0),
-                        );
-                        let go = ui.button("Show").clicked()
-                            || (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
-                        if go {
-                            match parse_span(&c.span) {
-                                Some(s) => apply = Some(Window::live(s)),
-                                None => c.error = Some(format!("Not a span: {:?}", c.span)),
+                        ui.label(egui::RichText::new("Last").strong());
+                        ui.add_space(8.0);
+                        for (span, name) in CHIPS {
+                            let on = live_span.is_some_and(|s| (s - span).abs() < 0.5);
+                            if ui
+                                .selectable_label(on, *name)
+                                .on_hover_text(format!("The last {name}"))
+                                .clicked()
+                            {
+                                apply = Some(Window::live(*span));
                             }
                         }
                     });
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut c.span)
+                            .id(span_id)
+                            .hint_text("90m, 3h, 2 days  ⏎")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if std::mem::take(&mut c.focus) {
+                        r.request_focus();
+                        let n = c.span.chars().count();
+                        set_cursor(
+                            ui.ctx(),
+                            span_id,
+                            CCursorRange::two(CCursor::new(0), CCursor::new(n)),
+                        );
+                    }
+                    if r.changed() {
+                        c.span_error = None;
+                    }
+                    if entered(ui, &r) {
+                        match parse_span(&c.span) {
+                            Some(s) => apply = Some(Window::live(s)),
+                            None => {
+                                c.span_error = Some(format!("Not a span: {:?}", c.span));
+                                r.request_focus();
+                            }
+                        }
+                    }
+                    if let Some(e) = &c.span_error {
+                        ui.colored_label(ui.visuals().error_fg_color, e);
+                    }
                     ui.separator();
                     ui.label(egui::RichText::new("From … to").strong());
+                    let mut go = None;
                     egui::Grid::new("custom-range-grid")
                         .num_columns(2)
                         .spacing([8.0, 6.0])
                         .show(ui, |ui| {
                             ui.label("From");
-                            ui.add(
+                            let from = ui.add(
                                 egui::TextEdit::singleline(&mut c.from)
-                                    .hint_text("2026-10-17 09:00")
-                                    .desired_width(170.0),
+                                    .hint_text("2026-10-17 09:00  ⏎")
+                                    .desired_width(190.0),
                             );
                             ui.end_row();
                             ui.label("To");
-                            ui.add(
+                            let to = ui.add(
                                 egui::TextEdit::singleline(&mut c.to)
-                                    .hint_text("now")
-                                    .desired_width(170.0),
+                                    .hint_text("now  ⏎")
+                                    .desired_width(190.0),
                             );
                             ui.end_row();
-                        });
-                    if ui.button("Show range").clicked() {
-                        let to =
-                            if c.to.trim().eq_ignore_ascii_case("now") || c.to.trim().is_empty() {
-                                Some(now)
-                            } else {
-                                parse_local(&c.to)
-                            };
-                        match (parse_local(&c.from), to) {
-                            (Some(a), Some(b)) if a < b => {
-                                let mut w = Window::fixed(a, b);
-                                if b >= now {
-                                    w = Window::live(b - a);
-                                }
-                                apply = Some(w);
+                            if from.changed() || to.changed() {
+                                c.range_error = None;
                             }
-                            (Some(_), Some(_)) => c.error = Some("From must be before to".into()),
-                            _ => c.error = Some("Times read YYYY-MM-DD HH:MM[:SS] (local)".into()),
+                            for r in [from, to] {
+                                if entered(ui, &r) {
+                                    go = Some(r);
+                                }
+                            }
+                        });
+                    if let Some(r) = go {
+                        match fixed_range(&c.from, &c.to, now) {
+                            Ok(w) => apply = Some(w),
+                            Err(e) => {
+                                c.range_error = Some(e.into());
+                                r.request_focus();
+                            }
                         }
                     }
-                    if let Some(e) = &c.error {
+                    if let Some(e) = &c.range_error {
                         ui.colored_label(ui.visuals().error_fg_color, e);
                     }
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        ui.label(egui::RichText::new("Enter to show").small().weak());
+                    });
                 });
         });
     let away = ui.input(|i| {
@@ -1079,11 +1129,33 @@ fn custom_popover(plot: &mut Plot, ui: &mut egui::Ui, anchor: Rect, now: f64) {
         plot.custom.open = false;
     }
     if let Some(w) = apply {
-        plot.name_step("show a custom range");
         plot.custom.open = false;
-        plot.window = w;
-        plot.home_span = w.span;
-        plot.glide = 0.0;
+        plot.pick_range(w);
+    }
+}
+
+/// Enter was pressed in the single-line field `r` (which lets go of the
+/// keyboard on Enter).
+fn entered(ui: &egui::Ui, r: &egui::Response) -> bool {
+    r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))
+}
+
+/// The range from `from` to `to` (local times; an empty or `now` end is
+/// now), following now when it ends there.
+fn fixed_range(from: &str, to: &str, now: f64) -> Result<Window, &'static str> {
+    let to = if to.trim().eq_ignore_ascii_case("now") || to.trim().is_empty() {
+        Some(now)
+    } else {
+        parse_local(to)
+    };
+    match (parse_local(from), to) {
+        (Some(a), Some(b)) if a < b => Ok(if b >= now {
+            Window::live(b - a)
+        } else {
+            Window::fixed(a, b)
+        }),
+        (Some(_), Some(_)) => Err("From must be before to"),
+        _ => Err("Times read YYYY-MM-DD HH:MM[:SS] (local)"),
     }
 }
 
