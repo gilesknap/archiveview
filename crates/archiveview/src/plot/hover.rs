@@ -66,7 +66,9 @@ pub fn crosshair(
     }
     let mut rows = Vec::new();
     for (n, (trace, pts)) in plot.traces.iter().zip(data).enumerate() {
-        if !trace.visible {
+        let state = trace.pv.state();
+        // Arrays are not plotted: their chip has the value.
+        if !trace.visible || trace.is_array(&state) {
             continue;
         }
         let color = plot.color(trace, dark);
@@ -88,7 +90,6 @@ pub fn crosshair(
         if pt.v.is_finite() && f.data.expand(4.0).contains(at) {
             painter.circle(at, 4.0, color, Stroke::new(1.5, v.extreme_bg_color));
         }
-        let state = trace.pv.state();
         let prec = precision(trace, &state);
         let egu = units(trace);
         rows.push(Row {

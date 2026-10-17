@@ -59,12 +59,26 @@ impl Samples {
     }
 }
 
+/// Whether `v` is an array of more than one number. Arrays are not
+/// plotted: a time plot of element 0 says little about a waveform, and
+/// its chip shows the array instead.
+pub fn is_array(v: &pv::Value) -> bool {
+    match v {
+        pv::Value::DoubleArray(a) => a.len() > 1,
+        pv::Value::LongArray(a) => a.len() > 1,
+        _ => false,
+    }
+}
+
 /// What a PV update adds to the live samples: its value at its IOC time,
 /// a gap (at arrival time) if it disconnected, or nothing if it has no
-/// number.
+/// number (or is an array).
 fn sample(s: &PvState, arrived: f64) -> Option<(f64, f64)> {
     if !s.connected {
         return Some((arrived, f64::NAN));
+    }
+    if is_array(&s.value) {
+        return None;
     }
     let v = s.value.as_f64()?;
     let t = s
@@ -186,6 +200,16 @@ impl Trace {
         matches!(name.scheme, pv::Scheme::Ca | pv::Scheme::Pva).then(|| name.pv.clone())
     }
 
+    /// An array PV, known from its live value or its archived samples:
+    /// not plotted.
+    pub fn is_array(&self, state: &PvState) -> bool {
+        is_array(&state.value)
+            || self
+                .history
+                .as_ref()
+                .is_some_and(|h| h.kind == ValueKind::Waveform)
+    }
+
     /// The name to show: no `ca://` prefix, no `<type>` suffix.
     pub fn label(&self) -> String {
         plain_name(self.pv.name())
@@ -200,6 +224,8 @@ impl Trace {
         let live: Vec<(f64, f64)> = self.live.lock().since(from).collect();
         let connected = self.pv.connected();
         let (hist, binned, hist_to): (&[Sample], bool, f64) = match &self.history {
+            // Arrays are not plotted.
+            Some(h) if h.kind == ValueKind::Waveform => return Vec::new(),
             Some(h) => (&h.samples, h.binned, h.to),
             None => (&[], false, f64::NEG_INFINITY),
         };
@@ -412,6 +438,24 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(sample(&text, 5e9), None);
+    }
+
+    #[test]
+    fn arrays_are_not_plotted() {
+        let state = |value| PvState {
+            connected: true,
+            value,
+            ..Default::default()
+        };
+        let wave = pv::Value::DoubleArray(vec![1.0, 2.0, 3.0].into());
+        assert!(is_array(&wave));
+        assert_eq!(sample(&state(wave), 5e9), None);
+        // One element is a value like any other.
+        let one = pv::Value::LongArray(vec![7].into());
+        assert!(!is_array(&one));
+        assert_eq!(sample(&state(one), 5e9), Some((5e9, 7.0)));
+        // Disconnecting still makes a gap.
+        assert!(sample(&PvState::default(), 5e9).unwrap().1.is_nan());
     }
 
     #[test]

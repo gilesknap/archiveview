@@ -691,9 +691,12 @@ impl Plot {
                     if series.samples.is_empty() {
                         // Nothing to tell the type by.
                     } else if !scalar && done.op != Operator::Raw {
-                        // A waveform or text: ask again, raw.
+                        // Text: ask again, raw. A waveform is not plotted,
+                        // so what came is enough.
                         t.fetch.raw_only = Some(true);
-                        t.fetch.requested = None;
+                        if series.kind != ValueKind::Waveform {
+                            t.fetch.requested = None;
+                        }
                     } else if t.fetch.raw_only.is_none() {
                         t.fetch.raw_only = Some(!scalar);
                     }
@@ -746,6 +749,14 @@ impl Plot {
             // One request per trace at a time: when it is done, the next
             // frame asks for wherever the window is then.
             if t.fetch.not_archived || t.fetch.in_flight {
+                continue;
+            }
+            // An array is not plotted: once it is known to be archived,
+            // there is nothing more to fetch.
+            if t.history
+                .as_ref()
+                .is_some_and(|h| h.kind == ValueKind::Waveform)
+            {
                 continue;
             }
             let raw = t.fetch.raw_only.unwrap_or(false);
@@ -1433,6 +1444,11 @@ mod tests {
         assert!(t[0].fetch.error.is_none());
         assert_eq!(t[1].fetch.raw_only, Some(true));
         assert!(t[1].history.as_ref().is_some_and(|h| !h.binned));
+        // Archived, but an array: not plotted.
+        assert!(
+            t[1].points(f64::NEG_INFINITY, f64::INFINITY, now())
+                .is_empty()
+        );
         assert!(t[2].history.is_none(), "no archive for sim://");
         // Enums are fetched raw: whole state indices, not bin means.
         assert_eq!(t[3].fetch.raw_only, Some(true));
