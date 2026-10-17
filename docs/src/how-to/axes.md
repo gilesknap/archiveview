@@ -6,22 +6,27 @@ want, moving a trace takes a click or two.
 
 ## How a new PV picks its axis
 
-When a PV's first data arrives (its archived history, or its live value if
-it has no history), archiveview compares it with the axes already on the
-plot:
+When a PV's data arrives (its archived history, or a second of live values
+if it has no history), archiveview compares it with the axes already on the
+plot. PVs pick in the order of their chips, whatever order the archiver
+answers in, so a view always comes up the same way; a PV is drawn once it
+has picked.
 
 - **Units first.** A PV never joins an axis whose traces have other units:
-  a beam current in mA and a lifetime in h get an axis each.
+  a beam current in mA and a lifetime in h get an axis each. This holds
+  however many axes there are.
 - **Then size.** With the same units (or none), it joins an axis whose
   values are within about a factor of ten of its own, a little more when
   their ranges overlap. SA:X and SA:Y of a BPM, both in mm, share an axis; a
   current of 300 mA and one of 0.3 mA do not.
-- **States apart.** Enum and binary PVs only share axes with each other,
-  with ticks at whole numbers.
-- **Decades.** A PV whose values span several decades (a vacuum gauge) gets
+- **States apart.** An enum or binary PV gets an axis of its own, named
+  after it, with ticks at whole numbers. Only enums with the same states
+  share one ("State").
+- **Log scale.** A pressure, or a PV whose values span several decades, gets
   an axis on a log scale.
-- **About four axes at most.** Past four, a new PV joins the axis it is
-  closest to.
+- **About four axes.** Past four axes of values, a new PV joins the closest
+  axis with its units even when the sizes differ; with none, it still gets
+  its own.
 
 The choice is made once. Zooming, panning and reloading never move a trace
 to another axis; only you do.
@@ -60,6 +65,8 @@ An axis names itself from its traces:
    them apart: **Position X (mm)** and **Position Y (mm)**;
 3. without units, the PV's description, when the archiver gives one;
 4. otherwise **Axis 1**, **Axis 2**, ...
+
+An axis of states is named after its PV, or **State** when several share it.
 
 **Double-click a name** to type your own; Enter keeps it, Esc does not. Clear
 it to go back to the automatic name.

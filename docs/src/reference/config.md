@@ -67,7 +67,8 @@ one logs a warning).
 | `y.name` | the name typed for the axis; when absent it names itself |
 
 The value-axis fields were added without changing `version`: older files
-load (their traces pick axes as they are added), and an older archiveview
+load (their traces pick axes as they are added; `y` stays with the first
+visible PV, and `y.log` applies to every axis), and an older archiveview
 reads newer files with every trace on its unit's axis.
 
 View names can't be empty, start with `.`, or contain `/` or `\`. The view

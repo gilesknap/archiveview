@@ -155,9 +155,13 @@ pub struct Trace {
     /// Its value axis (an id in `Plot::axes`): `None` until it settles on
     /// one, when its first data arrives; then it moves only by hand.
     pub axis: Option<u32>,
-    /// When (seconds since 1970) it first had data to show, while it
-    /// waits for its archived history before settling.
+    /// When (seconds since 1970) it was first up to settle, and first
+    /// had data to show, while it waits to settle.
+    pub seen_at: Option<f64>,
     pub data_since: Option<f64>,
+    /// What its values looked like when it settled (or was first shown,
+    /// on an axis from a view): kept for scoring others, hidden or not.
+    pub stats: Option<super::axes::Stats>,
 }
 
 impl Trace {
@@ -182,7 +186,9 @@ impl Trace {
             history: None,
             fetch: FetchState::default(),
             axis: None,
+            seen_at: None,
             data_since: None,
+            stats: None,
         }
     }
 

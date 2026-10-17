@@ -32,7 +32,7 @@ impl Plot {
                 self.chip_drag = None;
                 match over {
                     Some(k) => {
-                        if let Some(id) = self.drawn.get(k).copied().flatten() {
+                        if let Some(id) = self.drawn.get(k).copied() {
                             self.move_trace(trace, Some(id));
                         }
                     }
@@ -45,8 +45,7 @@ impl Plot {
             }
         }
         for k in 0..f.axis_count() {
-            let (Some(id), Some(rect)) = (self.drawn.get(k).copied().flatten(), f.axis_rect(k))
-            else {
+            let (Some(id), Some(rect)) = (self.drawn.get(k).copied(), f.axis_rect(k)) else {
                 continue;
             };
             let r = ui
@@ -60,8 +59,13 @@ impl Plot {
                 .zip(pointer)
                 .is_some_and(|(t, p)| t.expand2(Vec2::new(4.0, 0.0)).contains(p));
             if r.double_clicked() && on_name {
+                // Its first click picked the axis out (or not): undone.
+                if let Some(before) = self.highlight_before.take() {
+                    self.axis_highlight = before;
+                }
                 self.start_rename(id);
             } else if r.clicked() {
+                self.highlight_before = Some(self.axis_highlight);
                 self.axis_highlight = (self.axis_highlight != Some(id)).then_some(id);
             }
             egui::Popup::context_menu(&r).show(|ui| self.axis_scale_menu(ui, id));
@@ -110,7 +114,7 @@ impl Plot {
         let Some(edit) = &mut self.renaming else {
             return;
         };
-        let Some(k) = self.drawn.iter().position(|d| *d == Some(edit.axis)) else {
+        let Some(k) = self.drawn.iter().position(|d| *d == edit.axis) else {
             self.renaming = None;
             return;
         };

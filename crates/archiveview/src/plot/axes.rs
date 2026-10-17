@@ -7,8 +7,9 @@
 //!
 //! Pure functions over [`Stats`] and names, so the rules are table-tested.
 
-/// Past this many axes a new trace joins the closest match rather than
-/// get an axis of its own.
+/// Past this many axes of values (axes of states aside) a new trace joins
+/// the closest axis it may, rather than get an axis of its own. Soft: with
+/// none it may join, it still gets one.
 pub const SOFT_LIMIT: usize = 4;
 
 /// What a trace's (or an axis's) values look like, for choosing an axis.
@@ -20,10 +21,15 @@ pub struct Stats {
     /// or a glitch to zero does not decide the scale.
     pub lo: f64,
     pub hi: f64,
+    /// The smallest and largest values.
+    pub min: f64,
+    pub max: f64,
     /// Every value is above zero (a log scale can show them all).
     pub positive: bool,
     /// Whole numbers: an enum or binary PV, drawn as states.
     pub whole: bool,
+    /// An enum's state names, when known (from the live PV).
+    pub states: Vec<String>,
 }
 
 impl Stats {
@@ -39,8 +45,11 @@ impl Stats {
             units: units.to_string(),
             lo: at(0.05),
             hi: at(0.95),
+            min: v[0],
+            max: v[v.len() - 1],
             positive: v[0] > 0.0,
             whole,
+            states: Vec::new(),
         })
     }
 
@@ -51,8 +60,11 @@ impl Stats {
             units: if a.units.is_empty() { b.units } else { a.units },
             lo: a.lo.min(b.lo),
             hi: a.hi.max(b.hi),
+            min: a.min.min(b.min),
+            max: a.max.max(b.max),
             positive: a.positive && b.positive,
             whole: a.whole && b.whole,
+            states: a.states,
         })
     }
 
@@ -62,33 +74,42 @@ impl Stats {
         self.lo.abs().max(self.hi.abs()).max(self.hi - self.lo)
     }
 
-    /// Spans several decades (vacuum pressure): best on a log scale.
+    /// Best on a log scale: positive values in units of pressure (vacuum
+    /// spans decades, if not always in one window), or spanning several
+    /// decades: two in the bulk of the values, or three in all.
     pub fn wants_log(&self) -> bool {
-        self.positive && !self.whole && self.lo > 0.0 && self.hi / self.lo >= 100.0
+        self.positive
+            && !self.whole
+            && self.min > 0.0
+            && (quantity(&self.units) == Some("Pressure")
+                || self.hi / self.lo >= 100.0
+                || self.max / self.min >= 1000.0)
     }
 }
 
 /// How well a trace with stats `t` fits an axis with stats `a`: `None`
-/// when it never may (different units, states among analogue values),
-/// else a score where up to 1 is a match and lower is better.
+/// when it never may (different units, states among values, states of
+/// another enum), else a score where up to 1 is a match and lower is
+/// better.
 ///
 /// The score is how many decades apart the two typical sizes are, over
 /// the decades allowed: one, and a little more for matching units and for
-/// ranges that overlap.
+/// ranges that overlap. Enums share only with enums of the same states.
 pub fn score(t: &Stats, a: &Stats) -> Option<f64> {
-    if t.whole != a.whole {
-        return None;
+    if t.whole || a.whole {
+        let same = t.whole && a.whole && !t.states.is_empty() && t.states == a.states;
+        return same.then_some(0.0);
     }
     let units = !t.units.is_empty() && !a.units.is_empty();
     if units && t.units != a.units {
         return None;
     }
     let (mt, ma) = (t.magnitude(), a.magnitude());
-    let decades = if mt > 0.0 && ma > 0.0 {
-        (mt / ma).log10().abs()
-    } else {
-        // Zero fits any scale.
-        0.0
+    let decades = match (mt > 0.0, ma > 0.0) {
+        (true, true) => (mt / ma).log10().abs(),
+        (false, false) => 0.0,
+        // All zero (0 % in a shutdown) says nothing of the scale.
+        _ => f64::INFINITY,
     };
     let overlap = t.lo <= a.hi && a.lo <= t.hi;
     let allowed = 1.0 + if units { 0.3 } else { 0.0 } + if overlap { 0.3 } else { 0.0 };
@@ -105,34 +126,23 @@ pub enum Choice {
 }
 
 /// The axis for a trace with stats `t`, among `axes` (id and stats of
-/// each axis with traces on it).
+/// each axis with traces on it); `unknown` more axes have traces but no
+/// stats yet (never shown), and count toward the limit.
 ///
-/// The best match within its score, else a new axis; at the
-/// [`SOFT_LIMIT`], the closest axis it may join even when not a match,
-/// then the closest by size whatever its units (states still apart).
-pub fn choose(t: &Stats, axes: &[(u32, Stats)]) -> Choice {
-    let best = |scores: &dyn Fn(&Stats) -> Option<f64>| {
-        axes.iter()
-            .filter_map(|(id, a)| scores(a).map(|s| (*id, s)))
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-    };
-    let matched = best(&|a| score(t, a));
-    match matched {
+/// The best match within its score, else a new axis. At the
+/// [`SOFT_LIMIT`] of axes of values, the closest axis it may join even
+/// when not a match; never one it may not (other units, states): then a
+/// new axis after all.
+pub fn choose(t: &Stats, axes: &[(u32, Stats)], unknown: usize) -> Choice {
+    let values = axes.iter().filter(|(_, a)| !a.whole).count() + unknown;
+    let best = axes
+        .iter()
+        .filter_map(|(id, a)| score(t, a).map(|s| (*id, s)))
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    match best {
         Some((id, s)) if s <= 1.0 => Choice::Join(id),
-        _ if axes.len() < SOFT_LIMIT => Choice::New,
-        Some((id, _)) => Choice::Join(id),
-        None => {
-            let anyhow = |a: &Stats| {
-                score(
-                    t,
-                    &Stats {
-                        units: String::new(),
-                        ..a.clone()
-                    },
-                )
-            };
-            best(&anyhow).map_or(Choice::New, |(id, _)| Choice::Join(id))
-        }
+        Some((id, _)) if !t.whole && values >= SOFT_LIMIT => Choice::Join(id),
+        _ => Choice::New,
     }
 }
 
@@ -142,20 +152,23 @@ pub struct Members<'a> {
     pub units: Vec<&'a str>,
     pub names: Vec<&'a str>,
     pub descs: Vec<&'a str>,
+    /// An axis of states (enums).
+    pub states: bool,
 }
 
 /// The quantity units measure, from a small table ("mA" → "Current").
 pub fn quantity(units: &str) -> Option<&'static str> {
     Some(match units.trim() {
         "A" | "mA" | "uA" | "µA" | "nA" | "pA" | "kA" => "Current",
-        "°C" | "degC" | "C°" | "K" | "mK" | "°F" | "degF" => "Temperature",
+        // "C" is degrees at facilities far more often than coulombs.
+        "°C" | "degC" | "C" | "C°" | "K" | "mK" | "°F" | "degF" => "Temperature",
         "mbar" | "mBar" | "bar" | "Torr" | "torr" | "mTorr" | "Pa" | "kPa" | "hPa" | "MPa" => {
             "Pressure"
         }
         "m" | "mm" | "um" | "µm" | "nm" | "cm" => "Position",
         "V" | "mV" | "kV" | "uV" | "µV" | "MV" => "Voltage",
         "Hz" | "kHz" | "MHz" | "GHz" => "Frequency",
-        "C" | "mC" | "uC" | "µC" | "nC" | "pC" | "fC" => "Charge",
+        "mC" | "uC" | "µC" | "nC" | "pC" | "fC" => "Charge",
         "s" | "ms" | "us" | "µs" | "ns" | "min" | "h" | "hr" | "hours" | "d" => "Time",
         "W" | "mW" | "kW" | "MW" => "Power",
         "deg" | "°" | "rad" | "mrad" | "urad" | "µrad" => "Angle",
@@ -173,11 +186,19 @@ pub fn quantity(units: &str) -> Option<&'static str> {
 ///    them apart: "Position X (mm)", "Position Y (mm)";
 /// 3. without units, the PVs' description, when known;
 /// 4. else "Axis N".
+///
+/// An axis of states is named after its PV, or "State" with several.
 pub fn names(axes: &[Members]) -> Vec<String> {
     let units: Vec<String> = axes.iter().map(axis_units).collect();
     axes.iter()
         .enumerate()
         .map(|(i, m)| {
+            if m.states {
+                return match m.names.as_slice() {
+                    [one] => one.to_string(),
+                    _ => "State".to_string(),
+                };
+            }
             let u = &units[i];
             // Layer 2: the others with these units, this one among them.
             let group: Vec<usize> = (0..axes.len()).filter(|&j| units[j] == *u).collect();
@@ -264,8 +285,19 @@ mod tests {
             units: units.into(),
             lo,
             hi,
+            min: lo,
+            max: hi,
             positive: lo > 0.0,
             whole: false,
+            states: Vec::new(),
+        }
+    }
+
+    fn states(names: &[&str]) -> Stats {
+        Stats {
+            whole: true,
+            states: names.iter().map(|s| s.to_string()).collect(),
+            ..stats("", 0.0, names.len() as f64 - 1.0)
         }
     }
 
@@ -273,10 +305,7 @@ mod tests {
     fn auto_join_scores() {
         // (what, trace, axis, joins). Ranges are the 5th..95th percentiles
         // seen at DLS.
-        let enum_ = Stats {
-            whole: true,
-            ..stats("", 0.0, 3.0)
-        };
+        let enum_ = states(&["Off", "On"]);
         let cases = [
             (
                 "DCCT lifetime does not join the beam current",
@@ -338,11 +367,34 @@ mod tests {
                 stats("", 0.0, 3.0),
                 false,
             ),
-            ("enums share an axis of states", enum_.clone(), enum_, true),
             (
-                "all zero fits any scale",
-                stats("mm", 0.0, 0.0),
-                stats("mm", 3.0, 9.0),
+                "enums with the same states share",
+                enum_.clone(),
+                enum_.clone(),
+                true,
+            ),
+            (
+                "enums with other states do not",
+                states(&["Shutdown", "User", "Special"]),
+                enum_,
+                false,
+            ),
+            (
+                "enums with states unknown do not",
+                states(&[]),
+                states(&[]),
+                false,
+            ),
+            (
+                "all zero (0 % in a shutdown) fits no scale",
+                stats("%", 0.0, 0.0),
+                stats("%", 0.0, 23.7),
+                false,
+            ),
+            (
+                "unless the axis is all zero too",
+                stats("%", 0.0, 0.0),
+                stats("%", 0.0, 0.0),
                 true,
             ),
         ];
@@ -356,33 +408,55 @@ mod tests {
     fn traces_choose_an_axis_and_respect_the_soft_limit() {
         let current = (0, stats("mA", 0.0, 300.0));
         let x = stats("mm", 0.0, 0.04);
-        assert_eq!(choose(&x, &[]), Choice::New);
-        assert_eq!(choose(&x, std::slice::from_ref(&current)), Choice::New);
+        assert_eq!(choose(&x, &[], 0), Choice::New);
+        assert_eq!(choose(&x, std::slice::from_ref(&current), 0), Choice::New);
         let axes = [current.clone(), (1, x.clone())];
-        assert_eq!(choose(&stats("mm", 0.0, 0.6), &axes), Choice::Join(1));
+        assert_eq!(choose(&stats("mm", 0.0, 0.6), &axes, 0), Choice::Join(1));
         // The better of two matches.
         let axes = [
             (0, stats("", 0.0, 1.0)),
             (1, stats("", 0.0, 5.0)),
             (2, stats("", 0.0, 50.0)),
         ];
-        assert_eq!(choose(&stats("", 0.0, 8.0), &axes), Choice::Join(1));
-        // Four axes: a fifth unit joins the closest it may.
+        assert_eq!(choose(&stats("", 0.0, 8.0), &axes, 0), Choice::Join(1));
+        // Four axes: same units join the closest even when far apart.
         let full = [
             current.clone(),
             (1, stats("h", 5.0, 13.0)),
             (2, stats("nC", 0.0, 0.01)),
             (3, stats("mm", 0.0, 1.0)),
         ];
-        assert_eq!(choose(&stats("mm", 50.0, 90.0), &full), Choice::Join(3));
-        // ... and with no units in common, the closest by size.
-        assert_eq!(choose(&stats("V", 9.0, 11.0), &full), Choice::Join(1));
-        // States never join analogue values: a new axis past the limit.
-        let state = Stats {
-            whole: true,
-            ..stats("", 0.0, 1.0)
-        };
-        assert_eq!(choose(&state, &full), Choice::New);
+        assert_eq!(choose(&stats("mm", 50.0, 90.0), &full, 0), Choice::Join(3));
+        // Other units never do: the limit is soft, a fifth axis.
+        assert_eq!(choose(&stats("V", 9.0, 11.0), &full, 0), Choice::New);
+        assert_eq!(choose(&stats("%", 0.0, 0.0), &full, 0), Choice::New);
+        // Axes not yet shown count; axes of states do not.
+        let three = &full[..3];
+        assert_eq!(choose(&stats("mm", 50.0, 90.0), three, 0), Choice::New);
+        let with_state = [
+            three,
+            &[(4, states(&["Off", "On"])), (5, stats("x", 50.0, 90.0))],
+        ]
+        .concat();
+        assert_eq!(
+            choose(&stats("x", 1000.0, 2000.0), &with_state, 0),
+            Choice::Join(5),
+            "four axes of values"
+        );
+        assert_eq!(
+            choose(&stats("x", 1000.0, 2000.0), &with_state[..4], 1),
+            Choice::New,
+            "three of values and one of states, plus one unknown, is four"
+        );
+        // States never join values, or other states: always their own.
+        assert_eq!(
+            choose(&states(&["Shutdown", "User"]), &with_state, 0),
+            Choice::New
+        );
+        assert_eq!(
+            choose(&states(&["Off", "On"]), &with_state, 0),
+            Choice::Join(4)
+        );
     }
 
     #[test]
@@ -404,6 +478,15 @@ mod tests {
         assert!(p.wants_log());
         assert!(!stats("h", 5.2, 12.7).wants_log());
         assert!(!stats("mA", -0.1, 300.0).wants_log());
+        // A gauge in mbar is on a log scale even in a quiet week; a vent
+        // spike in the full range counts too.
+        assert!(stats("mbar", 2e-10, 3e-10).wants_log());
+        assert!(!stats("mbar", 0.0, 3e-10).wants_log(), "not with a zero");
+        let spike = Stats {
+            max: 3e-7,
+            ..stats("", 2e-10, 3e-10)
+        };
+        assert!(spike.wants_log());
         let both = Stats::merge([&stats("mm", 0.0, 0.04), &stats("mm", -0.1, 0.6)]).unwrap();
         assert_eq!((both.lo, both.hi, both.units.as_str()), (-0.1, 0.6, "mm"));
     }
@@ -413,6 +496,7 @@ mod tests {
             units: units.to_vec(),
             names: names.to_vec(),
             descs: Vec::new(),
+            states: false,
         }
     }
 
@@ -466,6 +550,16 @@ mod tests {
             names(&[members(&[""], &["A"]), desc]),
             ["Axis 1", "Gun state"]
         );
+        // States: the PV, or "State" for several.
+        let state = |names: &[&'static str]| Members {
+            states: true,
+            ..members(&[""], names)
+        };
+        assert_eq!(
+            names(&[state(&["CS-CS-MSTAT-01:MODE"]), state(&["A:STA", "B:STA"])]),
+            ["CS-CS-MSTAT-01:MODE", "State"]
+        );
+        assert_eq!(quantity("C"), Some("Temperature"));
         // Mixed by hand: every unit shows.
         assert_eq!(
             names(&[members(&["degC", "V"], &["A", "B"])]),

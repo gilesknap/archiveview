@@ -83,9 +83,10 @@ pub fn crosshair(
         // A held raw value is where the hairline crosses its step; a bin
         // mean at the bin's centre.
         let x = if pt.step { p.x } else { f.xs.pos(pt.t) };
-        let ys = f.scale(plot.axis_of.get(n).copied().unwrap_or(0));
-        let at = Pos2::new(x, ys.pos(pt.v));
-        if pt.v.is_finite() && f.data.expand(4.0).contains(at) {
+        // A trace not yet on an axis is not drawn: no dot.
+        let axis = plot.axis_of.get(n).copied().flatten();
+        let at = Pos2::new(x, axis.map_or(f32::NAN, |k| f.scale(k).pos(pt.v)));
+        if axis.is_some() && pt.v.is_finite() && f.data.expand(4.0).contains(at) {
             painter.circle(at, 4.0, color, Stroke::new(1.5, v.extreme_bg_color));
         }
         let state = trace.pv.state();

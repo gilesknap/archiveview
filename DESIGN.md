@@ -140,12 +140,13 @@ Decimation:
 - Lines are anti-aliased with 1.5 pt stroke width, and 2.5 pt for the hovered trace.
 
 Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
-- Every trace carries an axis id (`Trace::axis`), `None` until it **settles**: once, when its first data is on screen and its archived history has come (or it has none, or it has waited 5 s with live data). Until then it is drawn on a provisional axis. After that only the user moves it; zooming, refetches and reloads never do.
-- Settling scores the trace against each axis with traces (`axes::score`), from the 5th..95th percentile of the visible values (so a glitch or a spike does not decide), the units and whether the values are whole (enums):
-  - differing units never join (missing units on either side: range only); enums join only enums;
-  - otherwise the score is the decades between the typical sizes (`max(|p5|, |p95|, p95 - p5)`) over the decades allowed: 1, plus 0.3 for matching units, plus 0.3 for overlapping ranges. At most 1 joins the best. DCCT SIGNAL (mA) and LIFETIME (h) split; EBPM SA:X and SA:Y (mm, 0.04 and 0.6) share.
-  - Otherwise a new axis, on a log scale when the values are all positive and p95/p5 ≥ 100 (vacuum). An axis from a view that no trace is on yet (an old file's `y`) is taken first, with its settings.
-  - A soft limit of four axes: past it the trace joins the closest axis it may, else the closest by size whatever its units (enums still apart).
+- Every trace carries an axis id (`Trace::axis`), `None` until it **settles**, once. It is ready when its data is on screen and its archived history has come; with live data only (no archive, not archived, or an error), after 1 s of it, so a first sample (often a 0) does not decide. Traces settle **in legend order**: a ready trace waits while an earlier one may still get data (its archive answer is due, or it is in its 1 s), until that one settles, turns out to have no data, or 5 s pass since it was added. So the grouping does not depend on which archive answer comes first. A trace is not drawn until it settles (no provisional axes squeezing the plot while a big view loads); its chip shows its spinner meanwhile, and snapshots wait for it (`is_loading`). After that only the user moves it; zooming, refetches and reloads never do.
+- Settling scores the trace against each axis with traces (`axes::score`), from the 5th..95th percentile of the values on screen (so a glitch or a spike does not decide), the units, and for enums their state names. Each trace keeps the stats it settled with (`Trace::stats`), so axes whose traces are hidden still score and count.
+  - Differing units never join, even past the limit (missing units on either side: range only).
+  - Enums join only enums with the same state names (from the live PV): unrelated enums get an axis each. Axes of states do not count toward the limit.
+  - Otherwise the score is the decades between the typical sizes (`max(|p5|, |p95|, p95 - p5)`) over the decades allowed: 1, plus 0.3 for matching units, plus 0.3 for overlapping ranges. At most 1 joins the best. All-zero values (0 % in a shutdown) fit no scale but another all-zero one. DCCT SIGNAL (mA) and LIFETIME (h) split; EBPM SA:X and SA:Y (mm, 0.04 and 0.6) share.
+  - Otherwise a new axis, on a log scale when the values are all positive and in units of pressure, or span decades (p95/p5 ≥ 100, or max/min ≥ 1000).
+  - A soft limit of four axes of values: past it the trace joins the closest axis it may (same or missing units) even when not a match; with none, it gets a fifth axis after all.
 - An axis goes when its last trace leaves (moved, removed). The axes are kept in the legend's order of their first trace, so the first chip's axis is always the first, whatever order the data came in.
 - **Layout.** The axes alternate sides, nearest the data first: first left, second right, third left of the first, fourth right of the second. Each side holds at most two of the usual four, every axis' labels sit next to the data, the data stays centred, and the common pair reads as the familiar two-sided chart. Axes with no visible trace are not drawn. The grid follows the first.
 - **Names** (`axes::names`), in layers used only when they add something: the quantity from a small units table and the units ("Current (mA)", unknown units as "(counts)"); for axes sharing units, the words of their PV names that the others' names lack ("Position X (mm)"); without units, the PVs' description when the archive meta has it (no extra request); else "Axis N". A name typed by the user wins. One trace: the name in its colour (and the labels too, with several axes); several: neutral, with a coloured dot per trace by the name.
@@ -268,7 +269,7 @@ Persistence follows bobview's `layout.rs`:
 }
 ```
 
-`y` is the first value axis and `axes` the others; a trace's `axis` counts `y` as 0. Both were added without a version bump: a file from before has no `axes` and no trace `axis`, so its traces settle as they are added and the first to settle takes `y`'s settings; an older program ignores the new fields.
+`y` is the first value axis and `axes` the others; a trace's `axis` counts `y` as 0. Both were added without a version bump: a file from before has no `axes` and no trace `axis`, so its traces settle as they are added; `y`'s settings are kept for its first visible PV (whichever settles first), and its `log: true` applies to every axis the others create. An older program ignores the new fields.
 
 `range` can also be `{ "kind": "absolute", "start": "2026-10-17T09:00:00Z", "end": "2026-10-17T12:00:00Z" }`.
 
