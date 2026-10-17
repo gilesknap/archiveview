@@ -6,6 +6,7 @@ archiveview keeps its files in `$XDG_CONFIG_HOME/archiveview` when
 ```
 ~/.config/archiveview/
 ├── settings.json
+├── history.json
 └── views/
     ├── default.json
     └── beam.json
@@ -41,6 +42,30 @@ saved over until it is fixed.
 
 A missing or unreadable `settings.json` gives the defaults (an unreadable
 one logs a warning).
+
+## history.json
+
+The search box's [recent searches](../how-to/search.md#reuse-a-recent-search),
+newest first, saved each time they change:
+
+```json
+{
+  "searches": [
+    { "text": "BL16I-EA-*" },
+    { "text": "SR01C-DI-EBPM-01:SA:.*", "regex": true }
+  ]
+}
+```
+
+| field | meaning |
+| --- | --- |
+| `searches[].text` | the text as typed |
+| `searches[].regex` | `true` when the `.*` toggle was on; default `false` |
+
+At most 50 are kept. A missing or unreadable file means no recent searches
+(an unreadable one logs a warning, and is replaced the next time a search
+is remembered). Delete it, or use **Clear search history** in the ≡ menu,
+to forget them.
 
 ## views/NAME.json
 

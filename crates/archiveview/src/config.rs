@@ -4,15 +4,17 @@
 //! - `settings.json`: [`Settings`].
 //! - `views/<name>.json`: a [`View`]; `views/default.json` opens at startup
 //!   when no PVs or `--view` are given.
+//! - `history.json`: the search box's recent searches ([`SearchHistory`]).
 //!
 //! Files are pretty JSON written atomically (hidden temp file, then rename).
 //! Only the standalone app uses this module; an embedding app keeps
-//! [`View`]s in its own config. (Adapted from bobview's `layout.rs`.)
+//! [`View`]s (and, if it wants, a [`SearchHistory`]) in its own config. (Adapted from bobview's `layout.rs`.)
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::history::SearchHistory;
 use crate::view::View;
 
 /// The view restored at startup.
@@ -143,6 +145,40 @@ impl Settings {
             log::warn!("cannot save settings in {}: {e}", dir.display());
         }
     }
+}
+
+/// The recent searches from `history.json`: empty when it is missing or
+/// bad (logging a warning for a bad one, which the next save replaces).
+pub fn load_history() -> SearchHistory {
+    config_dir().map_or_else(SearchHistory::default, |d| load_history_from(&d))
+}
+
+/// Write `history.json`, logging a warning on failure. Returns whether it
+/// was written.
+pub fn save_history(history: &SearchHistory) -> bool {
+    config_dir().is_some_and(|d| save_history_to(&d, history))
+}
+
+fn load_history_from(dir: &Path) -> SearchHistory {
+    let path = dir.join("history.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return SearchHistory::default();
+    };
+    // Duplicates and the cap are seen to as it is read.
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        log::warn!("{}: {e}: no recent searches", path.display());
+        SearchHistory::default()
+    })
+}
+
+fn save_history_to(dir: &Path, history: &SearchHistory) -> bool {
+    let written = serde_json::to_string_pretty(history)
+        .map_err(std::io::Error::other)
+        .and_then(|text| write_atomic(&dir.join("history.json"), &(text + "\n")));
+    if let Err(e) = &written {
+        log::warn!("cannot save the search history in {}: {e}", dir.display());
+    }
+    written.is_ok()
 }
 
 /// A name usable as a view file name: non-empty, no leading dot, no `/` or `\`.
@@ -344,6 +380,30 @@ mod tests {
         }
         assert_eq!(s.recent_archivers.len(), MAX_RECENT_ARCHIVERS);
         assert_eq!(s.recent_archivers[0], "http://19/retrieval");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn history_round_trip() {
+        let dir = temp("history");
+        assert!(load_history_from(&dir).is_empty());
+        let mut h = SearchHistory::default();
+        h.record("BL16I", false);
+        h.record("SR-DI.*:SIGNAL", true);
+        assert!(save_history_to(&dir, &h));
+        assert_eq!(load_history_from(&dir), h);
+        let text = std::fs::read_to_string(dir.join("history.json")).unwrap();
+        assert!(text.contains("\"regex\": true"), "{text}");
+        assert_eq!(text.matches("regex").count(), 1, "false is left out");
+        // Hand-edited: cleaned up. Corrupt: empty.
+        std::fs::write(
+            dir.join("history.json"),
+            r#"{"searches":[{"text":"a"},{"text":"a"},{"text":"b","regex":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(load_history_from(&dir).searches().len(), 2);
+        std::fs::write(dir.join("history.json"), "{ bad").unwrap();
+        assert!(load_history_from(&dir).is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
 

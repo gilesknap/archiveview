@@ -12,6 +12,12 @@ pub enum Icon {
     Fit,
     Menu,
     Search,
+    /// A recent search.
+    Clock,
+    /// Already on the plot.
+    Check,
+    /// Forget, clear.
+    Cross,
 }
 
 impl Icon {
@@ -52,6 +58,20 @@ impl Icon {
                     .collect();
                 vec![ring, vec![[10.0, 10.0], [14.0, 14.0]]]
             }
+            Icon::Clock => {
+                let ring = (0..=24)
+                    .map(|i| {
+                        let a = (i as f32 * 15.0).to_radians();
+                        [8.0 + 6.0 * a.cos(), 8.0 + 6.0 * a.sin()]
+                    })
+                    .collect();
+                vec![ring, vec![[8.0, 4.5], [8.0, 8.0], [10.5, 9.5]]]
+            }
+            Icon::Check => vec![vec![[3.0, 8.5], [6.5, 12.0], [13.0, 4.5]]],
+            Icon::Cross => vec![
+                vec![[4.5, 4.5], [11.5, 11.5]],
+                vec![[11.5, 4.5], [4.5, 11.5]],
+            ],
         }
     }
 
