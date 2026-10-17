@@ -250,7 +250,8 @@ primary selection, the way EDM and MEDM pass PV names around:</p>
 (double-click selects a whole name in most terminals).</li>
 </ul>
 <p>Several names separated by spaces, commas, semicolons or new lines add
-several PVs. Quotes and brackets around a name are dropped. A word can be a
+several PVs. Quotes and brackets around a name are dropped, as are those
+around a list (<code>(SR:X, SR:Y)</code>). A word can be a
 PV name if, after an optional <code>ca://</code> or <code>pva://</code>, it has only the
 characters EPICS record names use (letters, digits, <code>_ - + : [ ] &lt; &gt; { } $</code>,
 and <code>.</code> before a field, as in <code>BL01T:X.VAL</code>) and at least one letter.
@@ -260,6 +261,13 @@ lines among other words (<code>INFO:root:Connected</code>), URLs, command-line f
 (<code>-a</code>) and words ending in <code>.</code> or <code>:</code> are left out. Numbered names such as
 <code>SR:BPM:01</code> and <code>DLS:01</code> are names, and a <code>ca://</code> or <code>pva://</code> name is
 always taken as it is.</p>
+<p>bobview's local and simulated PVs are names too: <code>loc://foo</code>,
+<code>loc://x&lt;VLong&gt;(7)</code>, <code>sim://ramp</code>, <code>sim://sine(0, 10, 0.1)</code> (the commas and
+spaces inside the brackets do not split it). A <code>sim://</code> name must be one
+of bobview's simulations: <code>sine</code>, <code>sawtooth</code>, <code>ramp</code>, <code>noise</code>,
+<code>gaussianNoise</code>, <code>flipflop</code> or <code>const</code>. No archiver has them, so they
+are plotted live only. Formulas (<code>=…</code>, <code>eq://…</code>) are not taken from a
+selection; add them from bobview with right-click → Trend.</p>
 <ul>
 <li><strong>A single word</strong> is added if it can be a name, so names with no
 structure at all (<code>TEMP1</code>, <code>BEAMCURRENT</code>) work: double-click one in a
