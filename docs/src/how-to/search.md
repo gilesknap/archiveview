@@ -53,7 +53,9 @@ Globs are not expanded on the command line; each argument is one PV.
 
 Each PV has a chip along the bottom of the plot. Click a chip to hide its
 trace (the dot turns hollow) and again to show it. Hover a chip to highlight
-its trace, and click its `✕` to remove it.
+its trace: it is drawn bolder and on top, with its min/max band, while the
+others dim. That finds a trace hidden under another with the same values,
+or under the bands of busy PVs. Click its `✕` to remove it.
 
 ## With no archiver
 

@@ -48,5 +48,6 @@ archiveview never writes to PVs.
 
 The plot's chips show a PV's state: a spinner while its history loads, a
 grey "—" when it is disconnected (hover for the reason), and a "live only"
-mark when the archiver has no record of it (HTTP 404). For more detail run
+mark when the archiver has no record of it (HTTP 404). A `!` on a chip
+means its last archive request failed; hover the chip for the error. For more detail run
 with `ARCHIVEVIEW_LOG=debug`, which logs every archiver request.
