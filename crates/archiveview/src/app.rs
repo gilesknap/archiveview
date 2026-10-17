@@ -84,6 +84,7 @@ impl ArchiveApp {
             }
         }));
         let mut plot = Plot::new(&pvs, opts.archiver);
+        plot.set_search_history(config::load_history());
 
         let mut view_name = None;
         let mut notice = None;
@@ -166,6 +167,9 @@ impl ArchiveApp {
 
         if let Some(action) = action {
             self.apply(&ctx, action, now);
+        }
+        if self.plot.search_history_changed() {
+            config::save_history(self.plot.search_history());
         }
         self.toast(&ctx, now);
 

@@ -28,6 +28,7 @@ use egui::{Color32, Pos2, Rect, Sense, Vec2};
 use pv::PvManager;
 
 use crate::axis;
+use crate::history::SearchHistory;
 use crate::view::{self, TraceView, View, YAxis};
 use fetch::Fetcher;
 pub use series::now;
@@ -110,6 +111,10 @@ pub struct Plot {
     /// Keyboard shortcuts apply: the plot was clicked last.
     active: bool,
     search: bar::SearchState,
+    /// The search box's recent searches, and whether the user changed
+    /// them since [`Plot::search_history_changed`] last said so.
+    history: SearchHistory,
+    history_changed: bool,
     custom: bar::CustomState,
 }
 
@@ -196,6 +201,8 @@ impl Plot {
             highlight: None,
             active: false,
             search: bar::SearchState::default(),
+            history: SearchHistory::default(),
+            history_changed: false,
             custom: bar::CustomState::default(),
         }
     }
@@ -338,6 +345,26 @@ impl Plot {
         };
         self.home_span = self.window.span;
         self.snap = true;
+    }
+
+    /// Offer `history` as the search box's recent searches (a plot starts
+    /// with none). The plot keeps them in memory only: the standalone app
+    /// loads and saves them as `history.json`.
+    pub fn set_search_history(&mut self, history: SearchHistory) {
+        self.history = history;
+        self.history_changed = false;
+    }
+
+    /// The recent searches, as the user has added to and pruned them.
+    pub fn search_history(&self) -> &SearchHistory {
+        &self.history
+    }
+
+    /// True once after each change the user makes to the recent searches
+    /// (a search used, one forgotten, all cleared): when a host that keeps
+    /// them should save them.
+    pub fn search_history_changed(&mut self) -> bool {
+        std::mem::take(&mut self.history_changed)
     }
 
     /// True while any archive fetch or search is in flight, or one is due
@@ -1373,6 +1400,7 @@ mod tests {
         h.until(|p| p.search.results.iter().any(|n| n == "MOCK:SINE"));
         h.key(egui::Key::Enter);
         assert_eq!(h.plot.names(), ["MOCK:SINE"]);
+        assert_eq!(h.plot.search.text, "SINE", "kept, to add more");
         // Its history arrives, binned.
         h.until(|p| !p.is_loading());
         let t = &h.plot.traces[0];
@@ -1380,6 +1408,142 @@ mod tests {
         assert!(!hist.samples.is_empty());
         assert_eq!(hist.meta.egu.as_deref(), Some("mA"));
         assert_eq!(t.fetch.raw_only, Some(false));
+    }
+
+    /// The search box has the keyboard.
+    fn search_focused(h: &Harness) -> bool {
+        h.ctx.memory(|m| m.has_focus(h.plot.id.with("search")))
+    }
+
+    /// The search box's selection, as character indices.
+    fn search_selection(h: &Harness) -> Option<(usize, usize)> {
+        let state = egui::text_edit::TextEditState::load(&h.ctx, h.plot.id.with("search"))?;
+        let r = state.cursor.char_range()?;
+        let (a, b) = (r.primary.index, r.secondary.index);
+        let (a, b): (usize, usize) = (a.into(), b.into());
+        Some((a.min(b), a.max(b)))
+    }
+
+    #[test]
+    fn the_search_stays_after_adding_and_is_remembered() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut h = Harness::new(Plot::new(&pvs, Some(client)));
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.key(egui::Key::Slash);
+        h.frame(vec![egui::Event::Text("MOCK:S".into())]);
+        h.until(|p| p.search.results.len() >= 2);
+        let first = h.plot.search.results[0].clone();
+        let second = h.plot.search.results[1].clone();
+
+        // Enter adds the first match, and the text, list and focus stay.
+        h.key(egui::Key::Enter);
+        assert_eq!(h.plot.names(), std::slice::from_ref(&first));
+        assert_eq!(h.plot.search.text, "MOCK:S");
+        assert!(h.plot.search.open && h.plot.search.results.len() >= 2);
+        assert!(search_focused(&h));
+        // The search is remembered, once.
+        assert!(h.plot.search_history_changed());
+        assert!(!h.plot.search_history_changed());
+        let texts = |p: &Plot| -> Vec<String> {
+            let h = p.search_history().searches();
+            h.iter().map(|s| s.text.clone()).collect()
+        };
+        assert_eq!(texts(&h.plot), ["MOCK:S"]);
+        // Enter on the ticked row again does nothing; the next adds.
+        h.key(egui::Key::Enter);
+        assert_eq!(h.plot.names().len(), 1);
+        h.key(egui::Key::ArrowDown);
+        h.key(egui::Key::Enter);
+        assert_eq!(h.plot.names(), [first, second]);
+
+        // Esc closes the list and keeps the text; a second Esc clears it.
+        h.key(egui::Key::Escape);
+        assert!(!h.plot.search.open && search_focused(&h));
+        assert_eq!(h.plot.search.text, "MOCK:S");
+        h.key(egui::Key::Escape);
+        assert!(h.plot.search.text.is_empty() && !search_focused(&h));
+
+        // The empty box lists the recent search; picking one searches it.
+        h.key(egui::Key::Slash);
+        assert!(h.plot.search.open && search_focused(&h));
+        let r = super::bar::rows_text(&h.plot);
+        assert_eq!(r, ["MOCK:S"]);
+        h.key(egui::Key::ArrowDown);
+        h.key(egui::Key::Enter);
+        assert_eq!(h.plot.search.text, "MOCK:S");
+        assert_eq!(h.plot.names().len(), 2, "nothing added");
+        assert_eq!(search_selection(&h), Some((6, 6)), "the cursor at the end");
+        h.until(|p| p.search.searched == "MOCK:S" && !p.search.results.is_empty());
+    }
+
+    #[test]
+    fn coming_back_to_the_search_box_selects_its_text() {
+        let pvs = PvManager::new();
+        let mut h = Harness::new(Plot::new(&pvs, None));
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.key(egui::Key::Slash);
+        h.frame(vec![egui::Event::Text("A:B".into())]);
+        assert_eq!(search_selection(&h), Some((3, 3)));
+        // A click on the plot closes the list and leaves the text.
+        h.button(MIDDLE, true);
+        h.button(MIDDLE, false);
+        assert!(!search_focused(&h) && !h.plot.search.open);
+        assert_eq!(h.plot.search.text, "A:B");
+        // Clicking the box again selects it all, so typing replaces it.
+        let bx = Pos2::new(60.0, 14.0);
+        h.frame(vec![egui::Event::PointerMoved(bx)]);
+        h.button(bx, true);
+        h.button(bx, false);
+        h.frame(vec![]);
+        assert!(search_focused(&h) && h.plot.search.open);
+        assert_eq!(search_selection(&h), Some((0, 3)));
+        h.frame(vec![egui::Event::Text("C".into())]);
+        assert_eq!(h.plot.search.text, "C");
+    }
+
+    #[test]
+    fn a_recent_search_shows_while_typing_and_can_be_forgotten() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        let mut hist = SearchHistory::default();
+        hist.record("A:C", false);
+        hist.record("A:B", false);
+        p.set_search_history(hist);
+        assert!(!p.search_history_changed(), "set by the host: not a change");
+        let mut h = Harness::new(p);
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.key(egui::Key::Slash);
+        h.frame(vec![egui::Event::Text("a:".into())]);
+        assert_eq!(
+            super::bar::rows_text(&h.plot),
+            ["A:B", "A:C", "+  Add “a:” as typed"]
+        );
+        // The ✕ at the right of the first row, under the "Recent" heading.
+        let popup = h
+            .ctx
+            .memory(|m| m.area_rect(h.plot.id.with("search-popup")))
+            .expect("the popup");
+        let margin = h.ctx.global_style().spacing.menu_margin;
+        let x = Pos2::new(
+            popup.right() - f32::from(margin.right) - 13.0,
+            popup.top() + f32::from(margin.top) + 26.0,
+        );
+        h.frame(vec![egui::Event::PointerMoved(x)]);
+        h.button(x, true);
+        h.button(x, false);
+        let left: Vec<&str> = h
+            .plot
+            .search_history()
+            .searches()
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        assert_eq!(left, ["A:C"]);
+        assert!(h.plot.search_history_changed());
+        assert_eq!(h.plot.search.text, "a:", "the box is left as it was");
+        assert!(h.plot.names().is_empty());
     }
 
     #[test]

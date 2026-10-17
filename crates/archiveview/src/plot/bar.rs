@@ -3,11 +3,13 @@
 //! the `≡` menu.
 
 use archiver::Search;
+use egui::text::{CCursor, CCursorRange};
 use egui::{Align, Color32, Key, Layout, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
 use super::timeaxis::{format_local, format_span, parse_local, parse_span};
 use super::window::{PRESETS, Window};
 use super::{Plot, now};
+use crate::history::{RecentSearch, SearchHistory};
 use crate::icons::{self, Icon};
 
 /// Wait this long after typing before searching (seconds).
@@ -23,21 +25,27 @@ const COMPACT_WIDTH: f32 = 600.0;
 /// The search box.
 #[derive(Default)]
 pub struct SearchState {
-    text: String,
+    pub(super) text: String,
     regex: bool,
     /// The text as last searched for, and when it was last edited.
-    searched: String,
+    pub(super) searched: String,
     edited_at: f64,
     /// The latest search's number; older answers are dropped.
     asked: u64,
     waiting: bool,
     pub(super) results: Vec<String>,
     error: Option<String>,
-    /// The highlighted row of the popup.
-    selected: usize,
-    open: bool,
+    /// The highlighted row of the popup, once the arrows or the pointer
+    /// have moved it (else `default_row`).
+    selected: Option<usize>,
+    pub(super) open: bool,
     /// Give the box the keyboard on the next frame (`/`).
     pub focus: bool,
+    /// As `focus`, but keeping the cursor where it is: the box lent the
+    /// focus to the popup for a click.
+    refocus: bool,
+    /// Select all the text, until the click that focused the box is let go.
+    select_all: bool,
 }
 
 /// The custom range popover.
@@ -75,6 +83,14 @@ pub fn top_bar(
             }
             if ui.checkbox(&mut plot.y.log, "Log scale").changed() {
                 plot.fit_log_range();
+            }
+            let any = !plot.history.is_empty();
+            if ui
+                .add_enabled(any, egui::Button::new("Clear search history"))
+                .clicked()
+            {
+                plot.history.clear();
+                plot.history_changed = true;
             }
             if let Some(menu) = menu {
                 ui.separator();
@@ -153,23 +169,39 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
     let icon = Rect::from_min_size(rect.min + Vec2::new(8.0, 0.0), Vec2::new(h * 0.6, h));
     Icon::Search.paint(ui.painter(), icon, h * 0.5, ui.visuals().weak_text_color());
 
+    // The plotted PVs, to tick them in the list.
+    let plotted: Vec<String> = plot.traces.iter().map(|t| t.pv.name().key()).collect();
+
     // Keys for the result list, taken before the text field sees them.
     let s = &mut plot.search;
-    let rows = rows(s, plot.archiver.is_some());
-    if focused && s.open {
+    let rows = rows(s, plot.archiver.is_some(), &plot.history);
+    let mut moved = false;
+    if focused {
         let (down, up) = ui.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::NONE, Key::ArrowDown),
-                i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
+                s.open && i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
             )
         });
-        if down && s.selected + 1 < rows.len() {
-            s.selected += 1;
-        }
-        if up {
-            s.selected = s.selected.saturating_sub(1);
+        let n = rows.len();
+        let at = s.selected.or_else(|| default_row(&rows));
+        if !s.open {
+            // ↓ in a closed box brings the list back.
+            s.open = down;
+        } else if n > 0 && (down || up) {
+            s.selected = Some(match at {
+                Some(i) if down => (i + 1).min(n - 1),
+                Some(i) => i.saturating_sub(1),
+                None => 0,
+            });
+            moved = true;
         }
     }
+    // The highlighted row: what Enter picks.
+    let picked = s
+        .selected
+        .or_else(|| default_row(&rows))
+        .filter(|&i| i < rows.len());
 
     // On the right inside the box: ✕ to clear when there is text, and the
     // regex toggle while the box has the focus or the pointer (or regex is
@@ -224,18 +256,42 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
             .id(edit_id)
             .frame(egui::Frame::NONE)
             .hint_text(hint)
-            .desired_width(inner.width()),
+            .desired_width(inner.width())
+            // Esc is ours: it closes the list before it leaves the box.
+            .event_filter(egui::EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                escape: true,
+                ..Default::default()
+            }),
     );
-    if std::mem::take(&mut s.focus) {
+    let refocus = std::mem::take(&mut s.refocus);
+    if std::mem::take(&mut s.focus) || refocus {
         resp.request_focus();
+    }
+    if resp.gained_focus() {
+        s.open = true;
+        // Coming back to the box selects its text, so typing replaces it
+        // (→ or End to edit it instead); not when the list took the focus
+        // for a moment.
+        s.select_all = !refocus;
     }
     if resp.changed() {
         s.edited_at = now;
-        s.selected = 0;
-        s.open = !s.text.trim().is_empty();
-    }
-    if resp.gained_focus() && !s.text.trim().is_empty() {
+        s.selected = None;
         s.open = true;
+        s.select_all = false;
+    }
+    if s.select_all {
+        // Until the click that focused the box is let go, unless it drags
+        // out a selection of its own.
+        if resp.dragged() {
+            s.select_all = false;
+        } else {
+            let all = CCursorRange::two(CCursor::new(0), CCursor::new(s.text.chars().count()));
+            set_cursor(ui.ctx(), edit_id, all);
+            s.select_all = ui.input(|i| i.pointer.any_down());
+        }
     }
 
     // The regex toggle, inside the box on the right.
@@ -258,27 +314,15 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
             ui.painter()
                 .circle_filled(button.center(), 9.0, v.widgets.hovered.weak_bg_fill);
         }
-        let k = Stroke::new(
-            1.4,
-            if r.hovered() {
-                v.text_color()
-            } else {
-                v.weak_text_color()
-            },
-        );
-        let (m, d) = (button.center(), 3.5);
-        ui.painter()
-            .line_segment([m + Vec2::new(-d, -d), m + Vec2::new(d, d)], k);
-        ui.painter()
-            .line_segment([m + Vec2::new(d, -d), m + Vec2::new(-d, d)], k);
+        let color = if r.hovered() {
+            v.text_color()
+        } else {
+            v.weak_text_color()
+        };
+        Icon::Cross.paint(ui.painter(), button, 11.0, color);
         if r.clicked() {
-            s.text.clear();
-            s.searched.clear();
-            s.results.clear();
-            s.error = None;
-            s.waiting = false;
-            s.open = false;
-            s.focus = true;
+            clear(s);
+            s.refocus = true;
             ui.ctx().request_repaint();
         }
     }
@@ -290,7 +334,7 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
             s.regex = !s.regex;
             s.searched.clear();
             s.edited_at = now;
-            s.focus = true;
+            s.refocus = true;
             ui.ctx().request_repaint();
         }
         let v = ui.visuals();
@@ -334,26 +378,26 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
             .request_repaint_after(std::time::Duration::from_millis(60));
     }
 
-    // Enter adds the highlighted row, or what was typed.
-    let mut add: Vec<String> = Vec::new();
+    // Enter picks the highlighted row. The box keeps the focus, the text
+    // and the list, to add more from the same search.
+    let mut pick = None;
     let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
     if enter {
-        if let Some(row) = rows.get(s.selected) {
-            add = row.names();
-        }
+        pick = picked;
         resp.request_focus();
     }
     if focused && ui.input(|i| i.key_pressed(Key::Escape)) {
         if s.open {
             s.open = false;
         } else {
-            s.text.clear();
+            clear(s);
             ui.ctx().memory_mut(|m| m.surrender_focus(edit_id));
         }
     }
 
-    // The popup of results.
-    if s.open && !text.is_empty() {
+    // The popup: recent searches, then the archiver's matches.
+    let mut forget = None;
+    if s.open && (!rows.is_empty() || !text.is_empty()) {
         let pos = rect.left_bottom() + Vec2::new(0.0, 4.0);
         let area = egui::Area::new(plot.id.with("search-popup"))
             .order(egui::Order::Foreground)
@@ -369,25 +413,38 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
                             .min_scrolled_height((rows.len() as f32 * 26.0).min(320.0))
                             .show(ui, |ui| {
                                 for (i, row) in rows.iter().enumerate() {
-                                    let picked = i == s.selected;
-                                    let label = row.label();
-                                    let r = ui.add(
-                                        egui::Button::selectable(picked, label)
-                                            .min_size(Vec2::new(ui.available_width(), 24.0)),
-                                    );
-                                    if picked && enter {
+                                    let recent = matches!(row, Row::Recent(_));
+                                    if recent && i == 0 {
+                                        ui.label(egui::RichText::new("Recent").small().weak());
+                                    } else if !recent
+                                        && i > 0
+                                        && matches!(rows[i - 1], Row::Recent(_))
+                                    {
+                                        ui.separator();
+                                    }
+                                    let on = Some(i) == picked;
+                                    let id = plot.id.with(("search-row", i));
+                                    let (r, x) = popup_row(ui, row, on, row.plotted(&plotted), id);
+                                    if on && (enter || moved) {
                                         r.scroll_to_me(None);
                                     }
                                     if r.hovered() && ui.input(|i| i.pointer.delta() != Vec2::ZERO)
                                     {
-                                        s.selected = i;
+                                        s.selected = Some(i);
                                     }
                                     if r.clicked() {
-                                        add = row.names();
+                                        pick = Some(i);
+                                        s.refocus = true;
+                                    }
+                                    if x {
+                                        forget = Some(i);
+                                        s.refocus = true;
                                     }
                                 }
                             });
-                        let note = if s.waiting {
+                        let note = if text.is_empty() {
+                            None
+                        } else if s.waiting {
                             Some("Searching the archiver…".to_string())
                         } else if let Some(e) = &s.error {
                             Some(format!("Search failed: {e}"))
@@ -412,7 +469,7 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
                         }
                     });
             });
-        // A click anywhere else closes it.
+        // A click anywhere else closes it, keeping the text.
         let clicked_away = ui.input(|i| {
             i.pointer.any_pressed()
                 && i.pointer
@@ -424,17 +481,149 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         }
     }
 
-    if !add.is_empty() {
-        s.text.clear();
-        s.searched.clear();
-        s.results.clear();
-        s.open = false;
-        plot.add_pvs(&add);
+    if let Some(Row::Recent(r)) = forget.map(|i| &rows[i])
+        && plot.history.forget(r)
+    {
+        s.selected = None;
+        plot.history_changed = true;
     }
+    match pick.map(|i| &rows[i]) {
+        // A recent search: back in the box, searched straight away.
+        Some(Row::Recent(r)) => {
+            s.text = r.text.clone();
+            s.regex = r.regex;
+            s.edited_at = now - SEARCH_DELAY;
+            s.selected = None;
+            s.open = true;
+            let end = CCursor::new(s.text.chars().count());
+            set_cursor(ui.ctx(), edit_id, CCursorRange::one(end));
+            ui.ctx().request_repaint();
+        }
+        // Already plotted: nothing to do.
+        Some(row) if !row.plotted(&plotted) => {
+            // A search that found something to add is worth remembering.
+            if plot.history.record(&text, s.regex) {
+                plot.history_changed = true;
+            }
+            plot.add_pvs(&row.names());
+        }
+        _ => {}
+    }
+}
+
+/// Empty the box, the list and the search.
+fn clear(s: &mut SearchState) {
+    s.text.clear();
+    s.searched.clear();
+    s.results.clear();
+    s.error = None;
+    s.waiting = false;
+    s.selected = None;
+    s.open = false;
+}
+
+/// Put the search box's cursor (or selection) at `range`, from the next
+/// frame.
+fn set_cursor(ctx: &egui::Context, id: egui::Id, range: CCursorRange) {
+    let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(range));
+    state.store(ctx, id);
+}
+
+/// One row of the popup, drawn as a selectable button: a recent search
+/// has a clock, and a ✕ on hover (returning true when clicked) to forget
+/// it; a PV already plotted is dimmed and ticked.
+fn popup_row(
+    ui: &mut egui::Ui,
+    row: &Row,
+    picked: bool,
+    plotted: bool,
+    id: egui::Id,
+) -> (egui::Response, bool) {
+    let h = 24.0;
+    let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
+    let hovered = ui.rect_contains_pointer(rect);
+    let v = ui.visuals().clone();
+    if picked {
+        ui.painter().rect_filled(rect, 6.0, v.selection.bg_fill);
+    } else if hovered {
+        ui.painter()
+            .rect_filled(rect, 6.0, v.widgets.hovered.weak_bg_fill);
+    }
+    let fg = if picked {
+        v.selection.stroke.color
+    } else {
+        v.text_color()
+    };
+    let weak = if picked {
+        fg.gamma_multiply(0.7)
+    } else {
+        v.weak_text_color()
+    };
+    let mut left = rect.left() + 8.0;
+    let mut right = rect.right() - 4.0;
+    let mut forget = false;
+    let slot = |x: f32| Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0));
+    match row {
+        Row::Recent(recent) => {
+            Icon::Clock.paint(ui.painter(), slot(left + 7.0), 13.0, weak);
+            left += 22.0;
+            let button = slot(right - 9.0);
+            right -= 22.0;
+            let x = ui
+                .interact(button, id.with("forget"), Sense::click())
+                .on_hover_text("Forget this search");
+            if hovered || x.hovered() {
+                if x.hovered() {
+                    let fill = if picked {
+                        fg.gamma_multiply(0.25)
+                    } else {
+                        v.widgets.active.weak_bg_fill
+                    };
+                    ui.painter().circle_filled(button.center(), 9.0, fill);
+                }
+                let color = if x.hovered() { fg } else { weak };
+                Icon::Cross.paint(ui.painter(), button, 11.0, color);
+            }
+            forget = x.clicked();
+            if recent.regex {
+                ui.painter().text(
+                    Pos2::new(right, rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    ".*",
+                    egui::FontId::monospace(12.0),
+                    weak,
+                );
+                right -= 24.0;
+            }
+        }
+        _ if plotted => {
+            Icon::Check.paint(ui.painter(), slot(right - 9.0), 13.0, weak);
+            right -= 22.0;
+        }
+        _ => {}
+    }
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let clip = Rect::from_min_max(rect.min, Pos2::new(right, rect.max.y));
+    ui.painter_at(clip).text(
+        Pos2::new(left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        row.text(),
+        font,
+        if plotted { weak } else { fg },
+    );
+    let r = if plotted {
+        r.on_hover_text("Already on the plot")
+    } else {
+        r
+    };
+    (r, forget)
 }
 
 /// A row of the search popup.
 enum Row {
+    /// A recent search: picking it puts it back in the box.
+    Recent(RecentSearch),
     /// What was typed, added as it is (one or more names).
     Typed(Vec<String>),
     Found(String),
@@ -443,26 +632,50 @@ enum Row {
 impl Row {
     fn names(&self) -> Vec<String> {
         match self {
+            Row::Recent(_) => Vec::new(),
             Row::Typed(n) => n.clone(),
             Row::Found(n) => vec![n.clone()],
         }
     }
 
-    fn label(&self) -> egui::RichText {
+    fn text(&self) -> String {
         match self {
-            Row::Typed(n) => egui::RichText::new(format!("+  Add “{}” as typed", n.join("”, “"))),
-            Row::Found(n) => egui::RichText::new(n),
+            Row::Recent(r) => r.text.clone(),
+            Row::Typed(n) => format!("+  Add “{}” as typed", n.join("”, “")),
+            Row::Found(n) => n.clone(),
         }
+    }
+
+    /// Whether all its PVs are on the plot already (`plotted` holds their
+    /// `PvName::key`s).
+    fn plotted(&self, plotted: &[String]) -> bool {
+        let names = self.names();
+        !names.is_empty()
+            && names
+                .iter()
+                .all(|n| plotted.contains(&pv::PvName::parse(n.trim()).key()))
     }
 }
 
-/// The popup's rows, the first highlighted (what Enter adds): a match
-/// that is exactly the text typed, then the other archiver matches, then
-/// the text as typed (unless it is a pattern, or exactly a match). Text
-/// that can only be added as typed (a `pva://` or `sim://` name, or
-/// several names) comes first instead.
-fn rows(s: &SearchState, archiver: bool) -> Vec<Row> {
+/// The recent searches shown above the matches while typing.
+const RECENT_SHOWN: usize = 5;
+
+/// The popup's rows. With the box empty, the recent searches. Else up to
+/// [`RECENT_SHOWN`] recent searches holding the text, then a match that
+/// is exactly the text typed, then the other archiver matches, then the
+/// text as typed (unless it is a pattern, or exactly a match). Text that
+/// can only be added as typed (a `pva://` or `sim://` name, or several
+/// names) comes before the matches instead.
+fn rows(s: &SearchState, archiver: bool, history: &SearchHistory) -> Vec<Row> {
     let text = s.text.trim();
+    if text.is_empty() {
+        return history
+            .searches()
+            .iter()
+            .cloned()
+            .map(Row::Recent)
+            .collect();
+    }
     let mut found: Vec<&String> = if s.searched == text {
         s.results.iter().collect()
     } else {
@@ -488,7 +701,22 @@ fn rows(s: &SearchState, archiver: bool) -> Vec<Row> {
             rows.push(row);
         }
     }
-    rows
+    let recent = history.matching(text).into_iter().take(RECENT_SHOWN);
+    recent.cloned().map(Row::Recent).chain(rows).collect()
+}
+
+/// The row highlighted until the arrows move it: the first that adds
+/// something, so Enter adds the best match rather than refilling the box
+/// with a recent search. None with only recent searches.
+fn default_row(rows: &[Row]) -> Option<usize> {
+    rows.iter().position(|r| !matches!(r, Row::Recent(_)))
+}
+
+/// The popup's rows as shown, for tests.
+#[cfg(test)]
+pub fn rows_text(plot: &Plot) -> Vec<String> {
+    let rows = rows(&plot.search, plot.archiver.is_some(), &plot.history);
+    rows.iter().map(Row::text).collect()
 }
 
 /// Whether typing has paused for a search not yet sent.
@@ -515,7 +743,7 @@ pub fn take_found(plot: &mut Plot, _now: f64) {
                 s.error = Some(e);
             }
         }
-        s.selected = 0;
+        s.selected = None;
     }
 }
 
@@ -830,23 +1058,32 @@ mod tests {
         }
     }
 
+    fn none() -> SearchHistory {
+        SearchHistory::default()
+    }
+
     #[test]
     fn rows_list_matches_then_the_text() {
         let s = state("SINE", "SINE", &["MOCK:SINE", "MOCK:SINE2"]);
-        let r = rows(&s, true);
+        let r = rows(&s, true, &none());
         assert_eq!(r.len(), 3);
         assert_eq!(r[0].names(), ["MOCK:SINE"]);
         assert_eq!(r[2].names(), ["SINE"]);
         // Stale results are not offered.
         let s = state("SIN", "SINE", &["MOCK:SINE"]);
-        assert_eq!(rows(&s, true).len(), 1);
+        assert_eq!(rows(&s, true, &none()).len(), 1);
         // A pattern is not a PV name; several names add together.
-        assert_eq!(rows(&state("MOCK:*", "", &[]), true).len(), 0);
-        let r = rows(&state("a:b, c:d", "", &[]), false);
+        assert_eq!(rows(&state("MOCK:*", "", &[]), true, &none()).len(), 0);
+        let r = rows(&state("a:b, c:d", "", &[]), false, &none());
         assert_eq!(r[0].names(), ["a:b", "c:d"]);
         // An exact match is not offered twice.
         assert_eq!(
-            rows(&state("MOCK:SINE", "MOCK:SINE", &["MOCK:SINE"]), true).len(),
+            rows(
+                &state("MOCK:SINE", "MOCK:SINE", &["MOCK:SINE"]),
+                true,
+                &none()
+            )
+            .len(),
             1
         );
     }
@@ -855,11 +1092,40 @@ mod tests {
     fn enter_adds_an_exact_match_before_other_matches() {
         // BL:M1:RBV sorts first, but M1:RBV is what was typed.
         let s = state("M1:RBV", "M1:RBV", &["BL:M1:RBV", "M1:RBV", "M1:RBV2"]);
-        let r = rows(&s, true);
+        let r = rows(&s, true, &none());
         assert_eq!(r[0].names(), ["M1:RBV"]);
         assert_eq!(r.len(), 3, "and not again as typed");
         // A name only addable as typed comes first.
         let s = state("pva://M1:RBV", "pva://M1:RBV", &["X:pva"]);
-        assert_eq!(rows(&s, true)[0].names(), ["pva://M1:RBV"]);
+        assert_eq!(rows(&s, true, &none())[0].names(), ["pva://M1:RBV"]);
+    }
+
+    #[test]
+    fn recent_searches_come_first_but_enter_adds_a_match() {
+        let mut h = none();
+        for t in ["SR-DI", "BL16I-EA-*", "BL16I-MO", "BL16I"] {
+            h.record(t, false);
+        }
+        // An empty box lists them all, newest first, none highlighted.
+        let r = rows(&state("", "", &[]), true, &h);
+        let texts: Vec<String> = r.iter().map(Row::text).collect();
+        assert_eq!(texts, ["BL16I", "BL16I-MO", "BL16I-EA-*", "SR-DI"]);
+        assert_eq!(default_row(&r), None);
+        // Typing: those holding the text (not the text itself), then the
+        // matches; Enter would add the first match.
+        let r = rows(&state("bl16i", "bl16i", &["BL16I-EA-01"]), true, &h);
+        let texts: Vec<String> = r.iter().map(Row::text).collect();
+        assert_eq!(texts[..3], ["BL16I-MO", "BL16I-EA-*", "BL16I-EA-01"]);
+        assert_eq!(default_row(&r), Some(2));
+        assert!(r[0].names().is_empty(), "a recent search adds nothing");
+    }
+
+    #[test]
+    fn plotted_rows_are_known_by_key() {
+        let plotted = vec![pv::PvName::parse("MOCK:SINE").key()];
+        assert!(Row::Found("ca://MOCK:SINE".into()).plotted(&plotted));
+        assert!(!Row::Found("MOCK:RAMP".into()).plotted(&plotted));
+        let both = Row::Typed(vec!["MOCK:SINE".into(), "MOCK:RAMP".into()]);
+        assert!(!both.plotted(&plotted));
     }
 }
