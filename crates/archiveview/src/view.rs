@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 /// The view file format's version. Files with a newer one are refused.
+/// Additions an older program can ignore (value axes after the first, a
+/// trace's axis, axis names) keep the version.
 pub const VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -16,8 +18,14 @@ pub struct View {
     pub pvs: Vec<TraceView>,
     #[serde(default)]
     pub range: Range,
+    /// The first value axis (the only one, in files from before there
+    /// were several).
     #[serde(default)]
     pub y: YAxis,
+    /// The value axes after `y`: a trace's `axis` counts `y` as 0, so
+    /// these are 1, 2, ...
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axes: Vec<YAxis>,
     /// The archiver's retrieval URL when the view was saved, if any.
     /// Opening the view switches to it. (Added after version 1 without a
     /// bump: older files simply lack it.)
@@ -32,8 +40,17 @@ impl Default for View {
             pvs: Vec::new(),
             range: Range::default(),
             y: YAxis::default(),
+            axes: Vec::new(),
             archiver: None,
         }
+    }
+}
+
+impl View {
+    /// The value axes in the order a trace's `axis` counts them: `y`,
+    /// then `axes`.
+    pub fn value_axes(&self) -> impl Iterator<Item = &YAxis> {
+        std::iter::once(&self.y).chain(&self.axes)
     }
 }
 
@@ -47,6 +64,12 @@ pub struct TraceView {
     pub color: Option<String>,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub visible: bool,
+    /// Its value axis: 0 for `y`, 1 for the first of `axes`, and so on.
+    /// Absent (files from before there were several axes, or a trace
+    /// whose data had not come yet), it joins an axis by itself when its
+    /// data arrives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis: Option<usize>,
 }
 
 /// The time range shown.
@@ -66,7 +89,7 @@ impl Default for Range {
     }
 }
 
-/// The value axis.
+/// A value axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct YAxis {
     #[serde(default = "yes")]
@@ -78,6 +101,10 @@ pub struct YAxis {
     pub max: Option<f64>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub log: bool,
+    /// The name the user gave it. Without one it names itself from its
+    /// traces' units and names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Default for YAxis {
@@ -87,6 +114,7 @@ impl Default for YAxis {
             min: None,
             max: None,
             log: false,
+            name: None,
         }
     }
 }
@@ -130,11 +158,13 @@ mod tests {
                     name: "SR-DI-DCCT-01:SIGNAL".into(),
                     color: None,
                     visible: true,
+                    axis: None,
                 },
                 TraceView {
                     name: "bl01t:SUM".into(),
                     color: Some("#d62728".into()),
                     visible: false,
+                    axis: None,
                 },
             ],
             ..View::default()
@@ -162,6 +192,68 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(abs.range, Range::Absolute { .. }));
+    }
+
+    #[test]
+    fn views_keep_their_value_axes() {
+        let v = View {
+            pvs: vec![
+                TraceView {
+                    name: "SR-DI-DCCT-01:SIGNAL".into(),
+                    color: None,
+                    visible: true,
+                    axis: Some(0),
+                },
+                TraceView {
+                    name: "SR-DI-DCCT-01:LIFETIME".into(),
+                    color: None,
+                    visible: true,
+                    axis: Some(1),
+                },
+            ],
+            axes: vec![YAxis {
+                autoscale: false,
+                min: Some(1.0),
+                max: Some(100.0),
+                log: true,
+                name: Some("Lifetime".into()),
+            }],
+            ..View::default()
+        };
+        let json = serde_json::to_value(&v).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "version": 1,
+                "pvs": [
+                    { "name": "SR-DI-DCCT-01:SIGNAL", "axis": 0 },
+                    { "name": "SR-DI-DCCT-01:LIFETIME", "axis": 1 }
+                ],
+                "range": { "kind": "relative", "secs": 3600.0 },
+                "y": { "autoscale": true },
+                "axes": [
+                    { "autoscale": false, "min": 1.0, "max": 100.0, "log": true, "name": "Lifetime" }
+                ]
+            })
+        );
+        assert_eq!(serde_json::from_value::<View>(json).unwrap(), v);
+        assert_eq!(v.value_axes().count(), 2);
+    }
+
+    #[test]
+    fn files_from_before_several_axes_load() {
+        // As the first release wrote them: one `y`, no trace axes.
+        let old = r##"{
+          "version": 1,
+          "pvs": [ { "name": "SR-DI-DCCT-01:SIGNAL" }, { "name": "bl01t:SUM", "color": "#d62728", "visible": false } ],
+          "range": { "kind": "relative", "secs": 3600 },
+          "y": { "autoscale": false, "min": 0, "max": 300, "log": true }
+        }"##;
+        let v: View = serde_json::from_str(old).unwrap();
+        assert!(v.pvs.iter().all(|t| t.axis.is_none()));
+        assert!(v.axes.is_empty());
+        assert_eq!((v.y.min, v.y.max, v.y.log), (Some(0.0), Some(300.0), true));
+        assert_eq!(v.y.name, None);
     }
 
     #[test]

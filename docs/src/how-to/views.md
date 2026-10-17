@@ -46,7 +46,8 @@ new plot of just those PVs rather than adding to the restored one; with
 | --- | --- |
 | a relative range (e.g. the last 8 hours) | that span ending now, following live |
 | an absolute range | exactly those start and end times |
-| autoscale off, with a min and max | that value range |
+| which trace is on which value axis | as saved: traces do not pick again |
+| an axis' autoscale, or its min and max, log scale and name | as saved |
 | a trace's colour and hidden state | as saved |
 | the archiver | switched to, unless `--archiver` or `--no-archiver` is given |
 

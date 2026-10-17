@@ -29,15 +29,16 @@ value axes zoom to it.
 
 ## Zoom values
 
-The value axis scales itself to the visible data, including the min/max
-bands. Traces with different units each get their own axis (up to three: the
-first on the left, the others on the right, labelled in the trace's colour).
-The left axis is the one you can set yourself; the others always scale
-themselves:
+Each value axis scales itself to its traces' visible data, including the
+min/max bands. Traces with different units, or values of very different
+sizes, get axes of their own; see [Work with value axes](axes.md).
 
-- **Drag** on the value axis (the labels on the left) to pan values, or
-  shift- or ctrl-**scroll** over the plot to zoom them.
-- Doing either turns autoscale off. The **⤢** button, or `A`, turns it back on.
+- **Drag** up or down on an axis (its labels), or shift- or ctrl-**scroll**
+  over it, to zoom that axis alone.
+- Shift- or ctrl-**scroll** over the data zooms every axis about the pointer,
+  and dragging the plot pans the values of any axis that is zoomed.
+- Zooming an axis turns its autoscale off. The **⤢** button, or `A`, turns it
+  back on for all of them.
 
 ## Follow now, or look at the past
 

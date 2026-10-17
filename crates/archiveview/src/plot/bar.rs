@@ -100,15 +100,20 @@ pub fn top_bar(
         egui::Popup::menu(&menu_button).show(|ui| {
             if compact {
                 if ui.button("Autoscale values").clicked() {
-                    plot.y.autoscale = true;
+                    plot.autoscale();
                 }
                 if ui.button("Reset view").clicked() {
                     plot.reset();
                 }
                 ui.separator();
             }
-            if ui.checkbox(&mut plot.y.log, "Log scale").changed() {
-                plot.fit_log_range();
+            let mut log = plot.all_log();
+            if ui
+                .checkbox(&mut log, "Log scale")
+                .on_hover_text("Every value axis; right-click an axis for its own")
+                .changed()
+            {
+                plot.set_log(log);
             }
             let any = !plot.history.is_empty();
             if ui
@@ -127,6 +132,8 @@ pub fn top_bar(
                 egui::RichText::new(
                     "drag: pan · wheel: zoom time · shift+wheel: zoom values\n\
                      shift+drag: zoom to box · double-click: reset\n\
+                     over an axis: drag or shift+wheel zooms it alone\n\
+                     chip's dot or drag a chip onto an axis: move its trace\n\
                      middle-click, ctrl+V: add the selected or copied PVs\n\
                      / search · ←→ pan · +/- zoom · L live · A autoscale",
                 )
@@ -143,11 +150,11 @@ pub fn top_bar(
             {
                 plot.reset();
             }
-            if icons::button(ui, Icon::Fit, plot.y.autoscale)
+            if icons::button(ui, Icon::Fit, plot.autoscaling())
                 .on_hover_text("Autoscale values (A)")
                 .clicked()
             {
-                plot.y.autoscale = true;
+                plot.autoscale();
             }
         }
         archiver_pill(plot, ui, compact, now);

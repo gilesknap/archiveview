@@ -85,8 +85,11 @@ points per pixel column (first, min, max, last), which keeps every peak
 while drawing a bounded number of segments. Gaps (NaN values, and the
 archiver's disconnection markers) break the line. Autoscale covers the
 visible values including the bands, and the value axes animate to their new
-ranges. Traces with different units get a value axis each (up to three), so
-a current in mA and a voltage of a few volts are both readable.
+ranges. A trace picks a value axis once, when its first data arrives: by
+units, then by the size of its values, so a current in mA and a lifetime in
+hours are both readable while the two planes of a BPM share one axis. The
+rules are pure functions over a trace's value statistics (`plot/axes.rs`),
+tested as a table.
 
 ## The widget and the app
 

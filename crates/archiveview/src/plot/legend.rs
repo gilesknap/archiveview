@@ -52,6 +52,15 @@ impl Chips {
 }
 
 impl Chip {
+    /// Where its colour dot is, with room to click it.
+    fn dot_rect(&self, origin: Vec2) -> Rect {
+        let r = self.rect.translate(origin);
+        Rect::from_center_size(
+            Pos2::new(r.left() + PAD + DOT / 2.0, r.center().y),
+            Vec2::new(DOT + 10.0, HEIGHT),
+        )
+    }
+
     fn close_rect(&self, origin: Vec2) -> Rect {
         let r = self.rect.translate(origin);
         Rect::from_center_size(
@@ -146,6 +155,9 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             });
         }
         note.push("Click to hide or show; ✕ to remove".into());
+        if !array {
+            note.push("Its dot, or drag it onto an axis: choose its value axis".into());
+        }
         let mark = marks(
             plot.archiver.is_some(),
             &t.fetch,
@@ -216,23 +228,50 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         Sense::hover(),
     );
     chips.origin = rect.min.to_vec2();
+    #[cfg(test)]
+    plot.seen.1.clear();
     let mut highlight = None;
     let mut toggle = None;
     let mut remove = None;
     for c in &chips.chips {
+        // An array is not plotted: no value axis to choose.
+        let array = plot.traces.iter().any(|t| t.id == c.trace && t.is_array());
         let r = ui
             .interact(
                 c.rect.translate(chips.origin),
                 plot.id.with(("chip", c.trace)),
-                Sense::click(),
+                if array {
+                    Sense::click()
+                } else {
+                    Sense::click_and_drag()
+                },
             )
             .on_hover_text(&c.note);
+        #[cfg(test)]
+        plot.seen
+            .1
+            .push((c.rect.translate(chips.origin), c.dot_rect(chips.origin)));
+        if r.drag_started() && !array {
+            plot.chip_drag = Some(c.trace);
+        }
         let x = ui.interact(
             c.close_rect(chips.origin),
             plot.id.with(("chip-x", c.trace)),
             Sense::click(),
         );
-        if r.hovered() || x.hovered() {
+        // The colour dot: a menu of the value axes.
+        let dot = (!array).then(|| {
+            ui.interact(
+                c.dot_rect(chips.origin),
+                plot.id.with(("chip-dot", c.trace)),
+                Sense::click(),
+            )
+            .on_hover_text("Choose its value axis")
+        });
+        if let Some(dot) = &dot {
+            egui::Popup::menu(dot).show(|ui| plot.axis_menu(ui, c.trace));
+        }
+        if r.hovered() || x.hovered() || dot.is_some_and(|d| d.hovered()) {
             highlight = Some(c.trace);
         }
         if x.clicked() {
@@ -250,9 +289,10 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         plot.traces.retain(|t| t.id != id);
         highlight = None;
     }
-    // Only a drawn trace is picked out: visible, and not an array.
-    plot.highlight = highlight
-        .filter(|id| (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array()));
+    // Only a drawn trace is picked out: visible, not an array, on an axis.
+    plot.highlight = highlight.filter(|id| {
+        (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array() && t.axis.is_some())
+    });
 }
 
 /// The quiet words after a chip's value, saying why it has no line or no
@@ -364,7 +404,9 @@ pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark:
         );
         let color = plot.color(t, dark);
         let dot = Pos2::new(rect.left() + PAD + DOT / 2.0, rect.center().y);
-        if t.fetch.in_flight {
+        // Fetching, or with data but not yet on an axis (so not drawn).
+        let waiting = t.visible && !t.is_array() && t.axis.is_none() && t.data_since.is_some();
+        if t.fetch.in_flight || waiting {
             // A small spinner while fetching.
             let a0 = (time * 6.0) as f32;
             let pts: Vec<Pos2> = (0..=12)
