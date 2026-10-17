@@ -24,6 +24,10 @@ const PRIMARY_DEBOUNCE: f64 = 0.15;
 /// How long the "Restored last session" notice shows (seconds).
 const RESTORED_SECS: f64 = 8.0;
 
+/// The zoom is saved this long after its last change (seconds), not at
+/// each step of a run of them.
+const ZOOM_SAVE_DELAY: f64 = 0.5;
+
 /// The interface zoom's steps (`−` and `+` in the `≡` menu, ctrl+=/−),
 /// as a browser's: round percentages, 50% to 300%.
 const ZOOM_STEPS: [f32; 13] = [
@@ -162,6 +166,8 @@ pub struct ArchiveApp {
     /// The interface zoom: egui's zoom factor, relative to the desktop's
     /// scale (1 is 100%).
     zoom: f32,
+    /// The zoom changed at this time (egui time) and is not saved yet.
+    zoom_unsaved: Option<f64>,
     /// Where the `≡` menu's zoom row was drawn: `−`, the percentage, `+`.
     #[cfg(test)]
     zoom_row: [egui::Rect; 3],
@@ -284,6 +290,7 @@ impl ArchiveApp {
             reading: None,
             selected: None,
             zoom,
+            zoom_unsaved: None,
             #[cfg(test)]
             zoom_row: [egui::Rect::NOTHING; 3],
         }
@@ -292,6 +299,14 @@ impl ArchiveApp {
     /// The interface zoom (1 is 100%).
     pub fn zoom(&self) -> f32 {
         self.zoom
+    }
+
+    /// Save the zoom in `settings.json`: for now the app's, until there
+    /// are windows and layouts, when each window keeps its own.
+    fn save_zoom(&mut self) {
+        self.zoom_unsaved = None;
+        let zoom = self.zoom;
+        self.settings.change(|s| s.ui_zoom = zoom);
     }
 
     /// Ctrl+= (or ctrl++), ctrl+− and ctrl+0, read before the plot sees
@@ -461,6 +476,13 @@ impl ArchiveApp {
         }
         self.paste(&ctx, now);
         self.toast(&ctx, now);
+        if let Some(at) = self.zoom_unsaved {
+            if now - at >= ZOOM_SAVE_DELAY {
+                self.save_zoom();
+            } else {
+                ctx.request_repaint_after(Duration::from_secs_f64(ZOOM_SAVE_DELAY - (now - at)));
+            }
+        }
 
         let title = match self.plot.title() {
             t if t.is_empty() => "archiveview".to_string(),
@@ -481,6 +503,9 @@ impl ArchiveApp {
     /// there could not be read; and the recent searches, if saving them
     /// last failed.
     pub fn exit(&mut self) {
+        if self.zoom_unsaved.is_some() {
+            self.save_zoom();
+        }
         if self.history_unsaved {
             self.history_unsaved = !config::save_history(self.plot.search_history());
         }
@@ -534,22 +559,25 @@ impl ArchiveApp {
                 format!("Deleted view “{name}”")
             }),
             Action::Theme(theme) => {
-                self.settings.theme = theme;
-                self.settings.save();
+                self.settings.change(|s| s.theme = theme);
                 apply_theme(ctx, theme);
                 return;
             }
             Action::Zoom(zoom) => {
-                if zoom == self.zoom {
-                    return;
-                }
+                // Saved shortly (a run of steps once), even when unchanged:
+                // ctrl+0 at a --ui-scale of 1 still saves 100%.
                 self.zoom = zoom;
                 ctx.set_zoom_factor(zoom);
-                // In the settings until there are windows and layouts:
-                // then each window's, in its layout.
-                self.settings.ui_zoom = zoom;
-                self.settings.save();
-                let mut notice = Notice::new(format!("Zoom {}", percent(zoom)), false, 1.5);
+                self.zoom_unsaved = Some(now);
+                let end = if zoom >= ZOOM_STEPS[ZOOM_STEPS.len() - 1] {
+                    " (largest)"
+                } else if zoom <= ZOOM_STEPS[0] {
+                    " (smallest)"
+                } else {
+                    ""
+                };
+                let text = format!("Zoom {}{end}", percent(zoom));
+                let mut notice = Notice::new(text, false, 1.5);
                 notice.until = now + notice.secs;
                 self.notice = Some(notice);
                 return;
@@ -838,6 +866,7 @@ mod tests {
 
     #[test]
     fn middle_click_adds_the_selected_pvs_and_says_so() {
+        let (_lock, dir) = config_home("middle");
         let ctx = egui::Context::default();
         let mut app = ArchiveApp::new(&ctx, Options::default());
         app.plot.set_archiver(None);
@@ -972,6 +1001,7 @@ mod tests {
         app.set_selection(&ctx, None);
         std::thread::sleep(Duration::from_millis(1500));
         assert!(late.lock().is_empty(), "{:?}", late.lock());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Point `XDG_CONFIG_HOME` at an empty directory of the test's own,
@@ -981,9 +1011,9 @@ mod tests {
         let lock = LOCK.lock();
         let dir = std::env::temp_dir().join(format!("archiveview-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
-        // SAFETY: only these tests set the environment, in turn; the
-        // config module's read their config from directories they are
-        // given.
+        // SAFETY: only these tests set the environment, in turn, and only
+        // they read it (the config module's tests use directories they are
+        // given).
         unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
         (lock, dir)
     }
@@ -1049,6 +1079,12 @@ mod tests {
             frame(app, vec![]);
         };
         let saved = || Settings::load().ui_zoom;
+        // Long enough (in egui time) for a change to be saved.
+        let wait = |app: &mut ArchiveApp| {
+            for _ in 0..12 {
+                frame(app, vec![]);
+            }
+        };
         frame(&mut app, vec![]);
         assert_eq!(app.zoom(), 1.0);
         assert_eq!(ctx.zoom_factor(), 1.0);
@@ -1058,7 +1094,15 @@ mod tests {
         assert_eq!(app.zoom(), 1.1);
         assert_eq!(ctx.zoom_factor(), 1.1);
         assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 110%");
+        assert_eq!(saved(), 1.0, "not at once");
+        // Another archiveview saves an archiver meanwhile: kept.
+        let mut other = Settings::load();
+        other.remember_archiver("http://other/retrieval");
+        other.save();
+        wait(&mut app);
         assert_eq!(saved(), 1.1);
+        let back = Settings::load().archiver_url;
+        assert_eq!(back.as_deref(), Some("http://other/retrieval"));
         // Ctrl++ (shift held for the +) too.
         key(
             &mut app,
@@ -1073,6 +1117,7 @@ mod tests {
         assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 90%");
         ctrl(&mut app, egui::Key::Num0);
         assert_eq!(app.zoom(), 1.0);
+        wait(&mut app);
         assert_eq!(saved(), 1.0);
         // Not the plot's time zoom.
         let range = app.plot.view().range;
@@ -1110,6 +1155,7 @@ mod tests {
         assert_eq!(app.zoom(), 1.1);
         pick(&mut app, 2);
         assert_eq!(app.zoom(), 1.25);
+        wait(&mut app);
         assert_eq!(saved(), 1.25);
         pick(&mut app, 1);
         assert_eq!(app.zoom(), 1.0);
@@ -1117,17 +1163,40 @@ mod tests {
         assert_eq!(app.zoom(), 0.9);
         assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 90%");
 
+        // At the ends: it says so.
+        for _ in 0..12 {
+            ctrl(&mut app, egui::Key::Equals);
+        }
+        assert_eq!(app.zoom(), 3.0);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 300% (largest)");
+        for _ in 0..12 {
+            ctrl(&mut app, egui::Key::Minus);
+        }
+        assert_eq!(app.zoom(), 0.5);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Zoom 50% (smallest)");
+        ctrl(&mut app, egui::Key::Plus);
+        ctrl(&mut app, egui::Key::Plus);
+        ctrl(&mut app, egui::Key::Plus);
+        // Exit saves what is not saved yet.
+        app.exit();
+        assert_eq!(saved(), 0.8);
+
         // The next start begins at the saved zoom; --ui-scale wins.
         let app = ArchiveApp::new(&ctx, Options::default());
-        assert_eq!(app.zoom(), 0.9);
-        let app = ArchiveApp::new(
+        assert_eq!(app.zoom(), 0.8);
+        let mut app = ArchiveApp::new(
             &ctx,
             Options {
-                ui_scale: Some(1.5),
+                ui_scale: Some(1.0),
                 ..Options::default()
             },
         );
-        assert_eq!(app.zoom(), 1.5);
+        assert_eq!(app.zoom(), 1.0);
+        // Ctrl+0 there changes nothing on screen, but saves 100%.
+        frame(&mut app, vec![]);
+        ctrl(&mut app, egui::Key::Num0);
+        wait(&mut app);
+        assert_eq!(saved(), 1.0);
         std::fs::remove_dir_all(&dir).ok();
     }
 

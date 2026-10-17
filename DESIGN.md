@@ -300,8 +300,11 @@ scale, so it multiplies a HiDPI scale as bobview's `--ui-scale` does.
   takes them before the plot draws, so they work while a text field has the
   focus (they mean nothing to one), and never reach the plot's `+`/`-`.
   Ctrl+scroll is left alone: it zooms values.
-- Each change shows "Zoom 125%" for 1.5 s and is saved in `settings.json`
-  (`ui_zoom`). Once there are windows and layouts it moves to each window's
+- Each change shows "Zoom 125%" for 1.5 s ("Zoom 300% (largest)" at an
+  end) and is saved in `settings.json` (`ui_zoom`) 0.5 s after the last
+  step, and on exit. It is written into the file as it is then
+  (`Settings::change`, as the theme is), so what another instance saved
+  meanwhile stays. Once there are windows and layouts it moves to each window's
   layout. `--ui-scale` / `ARCHIVEVIEW_UI_SCALE` give the starting zoom and
   win over the saved one; snapshots start at 100% unless `--ui-scale` is
   given.

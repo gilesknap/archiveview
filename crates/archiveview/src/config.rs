@@ -119,6 +119,22 @@ impl Settings {
         }
     }
 
+    /// Make one change to `settings.json` as it is now, not as this run
+    /// loaded it, so what another archiveview saved since (an archiver,
+    /// say) is kept; and to `self`.
+    pub fn change(&mut self, f: impl Fn(&mut Self)) {
+        f(self);
+        if let Some(d) = config_dir() {
+            Self::change_in(&d, f);
+        }
+    }
+
+    fn change_in(dir: &Path, f: impl Fn(&mut Self)) {
+        let mut now = Self::load_from(dir);
+        f(&mut now);
+        now.save_to(dir);
+    }
+
     /// Make `url` (a retrieval base) the archiver to use from now on, and
     /// the first of the recent ones.
     pub fn remember_archiver(&mut self, url: &str) {
@@ -380,6 +396,22 @@ mod tests {
             back.archiver_url.as_deref(),
             Some("http://other:17668/retrieval")
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_change_keeps_what_another_instance_saved() {
+        let dir = temp("change");
+        let mut mine = Settings::load_from(&dir);
+        let mut other = Settings::load_from(&dir);
+        other.remember_archiver("http://other/retrieval");
+        other.save_to(&dir);
+        Settings::change_in(&dir, |s| s.ui_zoom = 1.5);
+        mine.ui_zoom = 1.5;
+        let back = Settings::load_from(&dir);
+        assert_eq!(back.ui_zoom, 1.5);
+        assert_eq!(back.archiver_url.as_deref(), Some("http://other/retrieval"));
+        assert_ne!(back, mine, "not this run's copy");
         std::fs::remove_dir_all(&dir).ok();
     }
 
