@@ -93,8 +93,6 @@ pub struct ArchiveApp {
     settings: Settings,
     /// A repaint is already asked for: PV updates coalesce into one.
     asked: Arc<AtomicBool>,
-    /// The view last opened or saved.
-    view_name: Option<String>,
     /// The saved views, as last listed.
     views: Vec<String>,
     /// The "Save as…" field.
@@ -193,7 +191,6 @@ impl ArchiveApp {
             None
         };
 
-        let mut view_name = None;
         plot.add_pvs(&opts.pvs);
         if let Some((name, mut v)) = opened {
             // Its archiver is chosen above, in its place among the others.
@@ -205,7 +202,9 @@ impl ArchiveApp {
                     ..Notice::new("Restored last session", false, RESTORED_SECS)
                 });
             }
-            view_name = Some(name);
+            // The view last opened or saved: the plot keeps it with each
+            // undo step, so undoing an opened view brings back the name.
+            plot.set_view_name(Some(&name));
         }
         if let Some(secs) = opts.range {
             plot.set_range(&Range::Relative { secs });
@@ -217,7 +216,6 @@ impl ArchiveApp {
             plot,
             settings,
             asked,
-            view_name,
             views: config::list_views(),
             save_as: String::new(),
             notice,
@@ -266,12 +264,12 @@ impl ArchiveApp {
         let Self {
             plot,
             settings,
-            view_name,
             views,
             save_as,
             forced_theme,
             ..
         } = self;
+        let view_name = plot.view_name().map(str::to_string);
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             let mut menu = |ui: &mut egui::Ui| {
                 action = view_menu(
@@ -342,7 +340,7 @@ impl ArchiveApp {
                     if name == DEFAULT_VIEW {
                         self.keep_default = false;
                     }
-                    self.view_name = Some(name.clone());
+                    self.plot.set_view_name(Some(&name));
                     self.save_as.clear();
                     format!("Saved view “{name}”")
                 })
@@ -350,7 +348,7 @@ impl ArchiveApp {
             Action::Open(name) => config::load_view(&name).map(|v| {
                 let before = self.plot.archiver().cloned();
                 self.plot.set_view(&v);
-                self.view_name = Some(name.clone());
+                self.plot.set_view_name(Some(&name));
                 match self.plot.archiver() {
                     Some(a) if before.as_ref() != Some(a) => {
                         format!("Opened view “{name}” from {}", a.host())
@@ -362,8 +360,8 @@ impl ArchiveApp {
                 if name == DEFAULT_VIEW {
                     self.keep_default = false;
                 }
-                if self.view_name.as_deref() == Some(name.as_str()) {
-                    self.view_name = None;
+                if self.plot.view_name() == Some(name.as_str()) {
+                    self.plot.set_view_name(None);
                 }
                 format!("Deleted view “{name}”")
             }),
@@ -380,7 +378,7 @@ impl ArchiveApp {
                     range: range.unwrap_or_default(),
                     ..View::default()
                 });
-                self.view_name = None;
+                self.plot.set_view_name(None);
                 self.notice = None;
                 return;
             }

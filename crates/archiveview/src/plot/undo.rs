@@ -11,9 +11,9 @@
 //!
 //! Restoring diffs rather than rebuilds: a trace in both states keeps its
 //! data and live connection, so undoing a zoom fetches nothing new. A
-//! trace taken off the plot is parked (its history kept, its channel
-//! closed), so undoing its removal brings it back with its colour, axis,
-//! place and history.
+//! trace taken off the plot is parked (its history and live samples kept,
+//! its channel closed), so undoing its removal brings it back with its
+//! colour, axis, place and data.
 
 use std::collections::VecDeque;
 
@@ -29,9 +29,9 @@ pub const MAX_STEPS: usize = 100;
 /// step: a burst of scrolling or keys.
 pub const GAP: f64 = 0.5;
 
-/// Parked traces keep at most this many archived samples between them;
-/// past it the oldest forget theirs, to be fetched again if they come
-/// back.
+/// Parked traces keep at most this many samples (archived and live)
+/// between them; past it the oldest forget theirs, their history fetched
+/// again if they come back.
 const PARKED_SAMPLES: usize = 1_000_000;
 
 /// What the plot shows, as a step keeps it.
@@ -42,6 +42,8 @@ pub struct Snapshot {
     default_log: bool,
     traces: Vec<TraceState>,
     axes: Vec<ValueAxis>,
+    /// The host's name for the view shown ([`Plot::set_view_name`]).
+    view_name: Option<String>,
 }
 
 impl Snapshot {
@@ -111,10 +113,19 @@ pub struct Undo {
     /// Traces taken off the plot that a step may bring back, oldest
     /// first.
     parked: Vec<Parked>,
-    /// Counts pointer presses, to keep a drag one step however slow.
+    /// Each axis as it was when it first appeared, for steps that learn
+    /// of a trace settling on it later.
+    born: Vec<ValueAxis>,
+    /// Counts pointer and key presses, to keep a drag or a held key one
+    /// step however slow.
     pub press: u64,
     /// Hide the buttons and ignore the keys (a host with its own undo).
     pub hidden: bool,
+    /// Record nothing ([`Plot::set_undo_enabled`]).
+    off: bool,
+    /// Ignore egui's smoothed scrolling until the wheel turns again: the
+    /// tail of a scroll undone must not zoom on.
+    pub hold_scroll: bool,
 }
 
 #[cfg(test)]
@@ -144,6 +155,43 @@ impl Plot {
     /// [`Plot::undo`] and [`Plot::redo`].
     pub fn set_undo_controls(&mut self, on: bool) {
         self.undo.hidden = !on;
+    }
+
+    /// Record undo steps (on by default). Off, the lists are cleared and
+    /// nothing is recorded, nor kept for it (removed traces are dropped at
+    /// once), and the controls do nothing: for a host with an undo of its
+    /// own that has no use for the plot's. On again, recording starts
+    /// from the state then.
+    pub fn set_undo_enabled(&mut self, on: bool) {
+        let u = &mut self.undo;
+        if on == !u.off {
+            return;
+        }
+        u.off = !on;
+        u.done.clear();
+        u.undone.clear();
+        u.parked.clear();
+        u.born.clear();
+        u.open = None;
+        u.hint = None;
+        u.last = None;
+        if on {
+            self.undo.last = Some(self.capture());
+        }
+    }
+
+    /// The host's name for the view shown (the standalone app's saved
+    /// view), kept with each undo step: undoing the opening of a view
+    /// brings back the name of the one before. Setting it is no step.
+    pub fn set_view_name(&mut self, name: Option<&str>) {
+        // Not compared for changes: the next step's state before it takes
+        // the name in, and a view opened just before keeps the old one.
+        self.view_name = name.map(str::to_string);
+    }
+
+    /// The name given with [`Plot::set_view_name`], as undo has left it.
+    pub fn view_name(&self) -> Option<&str> {
+        self.view_name.as_deref()
     }
 
     /// Undo the last step (a zoom, a reset, a trace removed, ...): true if
@@ -208,6 +256,7 @@ impl Plot {
                 })
                 .collect(),
             axes: self.axes.clone(),
+            view_name: self.view_name.clone(),
         }
     }
 
@@ -215,17 +264,20 @@ impl Plot {
     /// what changed before it is recorded first. Within a change already
     /// named (opening a view sets its range), the first name stands.
     pub(super) fn name_step(&mut self, label: impl Into<String>) {
-        if self.undo.hint.is_none() {
+        if self.undo.hint.is_none() && !self.undo.off {
             self.commit(false);
             self.undo.hint = Some(label.into());
         }
     }
 
     /// Record what changed since the state was last seen, if anything:
-    /// a new step, or more of the open one (a gesture, while the pointer
-    /// is `down` in the press it began with, or a burst). Settling is
+    /// a new step, or more of the open one (a gesture, while a button or
+    /// key is `down` in the press it began with, or a burst). Settling is
     /// not a change, but the steps learn of it.
     pub(super) fn commit(&mut self, down: bool) {
+        if self.undo.off {
+            return;
+        }
         let current = self.capture();
         let Some(last) = self.undo.last.take() else {
             self.undo.last = Some(current);
@@ -233,6 +285,14 @@ impl Plot {
         };
         let hint = self.undo.hint.take();
         let settled = settled(&last, &current);
+        for a in &current.axes {
+            if last.axis(a.id).is_none() && !self.undo.born.iter().any(|b| b.id == a.id) {
+                self.undo.born.push(ValueAxis {
+                    shown: None,
+                    ..a.clone()
+                });
+            }
+        }
         if let Some(change) = changed(&last, &current) {
             let at = now();
             let press = self.undo.press;
@@ -252,6 +312,10 @@ impl Plot {
                 self.undo.done.back_mut().expect("open").label = label;
                 if let Some(o) = &mut self.undo.open {
                     o.at = at;
+                    // A drag begun in a scroll's step: one step to its end.
+                    if down {
+                        o.press = Some(press);
+                    }
                 }
             } else {
                 // A step named by its code (a reset, a preset) takes in
@@ -288,8 +352,12 @@ impl Plot {
                 let pv = self.pvs.subscribe(&p.name);
                 Trace::revive(p, pv)
             } else {
-                // Not kept (it never should be lost): as new.
-                Trace::new(ts.id, &ts.name, self.pvs.subscribe(&ts.name))
+                // Not kept (it never should be lost): as new, with an id
+                // of its own, so no answer for the old one is taken.
+                debug_assert!(false, "trace {} neither shown nor parked", ts.id);
+                let id = self.next_trace;
+                self.next_trace += 1;
+                Trace::new(id, &ts.name, self.pvs.subscribe(&ts.name))
             };
             t.color = ts.color.clone();
             t.slot = ts.slot;
@@ -314,7 +382,9 @@ impl Plot {
         self.window = s.window;
         self.home_span = s.home_span;
         self.default_log = s.default_log;
+        self.view_name = s.view_name.clone();
         self.glide = 0.0;
+        self.undo.hold_scroll = true;
         self.changed_at = now();
         self.undo.open = None;
         self.undo.hint = None;
@@ -327,16 +397,18 @@ impl Plot {
         if self.highlight == Some(t.id) {
             self.highlight = None;
         }
+        if self.undo.off {
+            return;
+        }
         let parked = &mut self.undo.parked;
         parked.push(t.park());
-        let len = |p: &Parked| p.history.as_ref().map_or(0, |h| h.samples.len());
-        let mut total: usize = parked.iter().map(len).sum();
+        let mut total: usize = parked.iter().map(Parked::samples).sum();
         for p in parked.iter_mut() {
             if total <= PARKED_SAMPLES {
                 break;
             }
-            total -= len(p);
-            p.forget_history();
+            total -= p.samples();
+            p.forget_data();
         }
     }
 
@@ -347,21 +419,29 @@ impl Plot {
         }
     }
 
-    /// Drop the parked traces no step can bring back.
+    /// Drop the parked traces no step can bring back, and the first
+    /// look of axes neither shown nor in a step.
     fn forget_parked(&mut self) {
         let Undo {
             done,
             undone,
             parked,
+            born,
             ..
         } = &mut self.undo;
-        parked
-            .retain(|p| (done.iter().chain(undone.iter())).any(|s| s.state.trace(p.id).is_some()));
+        let steps = || done.iter().chain(undone.iter());
+        parked.retain(|p| steps().any(|s| s.state.trace(p.id).is_some()));
+        let axes = &self.axes;
+        born.retain(|b| {
+            axes.iter().any(|a| a.id == b.id) || steps().any(|s| s.state.axis(b.id).is_some())
+        });
     }
 
     /// The traces `ids` settled, as they are in `after` (the state now):
     /// every step learns of it, so undoing never unsettles a trace, nor
-    /// brings one back to settle again.
+    /// brings one back to settle again. A step without the axis it
+    /// settled on gets the axis as it first appeared (not renamed or
+    /// rescaled since).
     fn learn_settling(&mut self, ids: &[u64], after: &Snapshot) {
         if ids.is_empty() {
             return;
@@ -369,7 +449,9 @@ impl Plot {
         let settled: Vec<&TraceState> = (after.traces.iter())
             .filter(|t| ids.contains(&t.id))
             .collect();
-        let Undo { done, undone, .. } = &mut self.undo;
+        let Undo {
+            done, undone, born, ..
+        } = &mut self.undo;
         for step in done.iter_mut().chain(undone.iter_mut()) {
             let s = &mut step.state;
             for t in &settled {
@@ -392,9 +474,12 @@ impl Plot {
                         a.reserved = None;
                     }
                     None => {
-                        if let Some(a) = after.axis(id) {
+                        let first = born.iter().find(|a| a.id == id).or(after.axis(id));
+                        if let Some(a) = first {
                             s.axes.push(ValueAxis {
                                 shown: None,
+                                used: true,
+                                reserved: None,
                                 ..a.clone()
                             });
                         }

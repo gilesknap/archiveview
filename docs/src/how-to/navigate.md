@@ -90,10 +90,13 @@ What can be undone is everything that changes what the plot shows:
 - traces: adding PVs, removing one (it comes back with its colour, its axis,
   its place in the legend and its history, without fetching it again),
   hiding or showing one, moving one to another axis, and renaming an axis;
-- opening a view, **Start empty**, and the restored session.
+- opening a view, **Start empty**, and the restored session (the view's
+  name in the ≡ menu comes back too; the archiver does not, so switch it
+  back in the archiver pill if the view changed it).
 
 One gesture is one step: a drag from press to release, or a run of scrolls
-or key presses with no pause longer than about half a second. Time moving on
+or key presses with no pause longer than about half a second, or an arrow
+key held down. Time moving on
 while Live is not a step. A new change after undoing clears what could be
 redone. About 100 steps are kept, for the session only: they are not saved
 with views.
