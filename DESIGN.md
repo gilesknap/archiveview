@@ -63,6 +63,12 @@ impl Plot {
     pub fn is_loading(&self) -> bool;
     pub fn ui(&mut self, ui: &mut egui::Ui);   // fills the space ui offers
     pub fn set_range(&mut self, range: &view::Range);
+    // Undo and redo (the plot keeps the lists; see "Undo and redo"):
+    pub fn undo(&mut self) -> bool;
+    pub fn redo(&mut self) -> bool;
+    pub fn undo_label(&self) -> Option<&str>;   // "zoom", for "Undo zoom"
+    pub fn redo_label(&self) -> Option<&str>;
+    pub fn set_undo_controls(&mut self, on: bool);  // ↶ ↷ and the keys; on by default
     // As ui, with the host's items (views, settings) added to the ≡ menu:
     pub fn ui_with_menu(&mut self, ui: &mut egui::Ui, menu: &mut dyn FnMut(&mut egui::Ui));
 }
@@ -193,7 +199,7 @@ Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🔍 Search PVs…            │ 1h  8h  1d  7d  ⋯ │ ● Live │ ● host │ ⤢  ⌂ │  ≡ │  ← slim top bar (one row, ~36 pt)
+│ 🔍 Search PVs…        │ 1h  8h  1d  7d  ⋯ │ ● Live │ ● host │ ↶ ↷ ⤢ ⌂ │  ≡ │  ← slim top bar (one row, ~36 pt)
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 300 ┤                                                     ┆ ╭─────────────╮ │
 │     │        ╱‾‾‾╲            ▒▒▒                          ┆ │ Tue 17 14:32:05│ │
@@ -217,9 +223,10 @@ Top bar (`egui::Panel::top` inside `Plot::ui`, styled like bobview's toolbar):
 - **Time-range pill.** A segmented control: 1h, 8h, 1d, 7d and `⋯`. The `⋯` popover holds a span field and two date-time fields. The active segment is filled with the accent colour. When the range is custom, or has been zoomed, no segment is lit and the pill shows the span as text, e.g. "3h 20m".
 - **Live toggle.** A pill reading `● Live`. While following now its red dot shows; it pulses (a halo animated with `ctx.input(|i| i.time)`, repainting at about 15 fps) for 3 s after following starts and while the pointer is over the plot, and is still otherwise. When not following, it reads `○ Live` and clicking it jumps to now.
 - **Archiver pill.** `● host` (e.g. `archappl.diamond.ac.uk`), right of the Live pill: a green dot when the archiver answers, amber when it fails (not red, which is the Live dot beside it), a spinner while checking, a hollow grey dot and "No archiver" without one. Hover shows the retrieval URL, the appliance version, the state, and the last error with when it happened. Click opens a popover: the URL in an editable field (Enter or Use), the recent archivers, and "No archiver (live only)". On a compact bar it is the dot alone.
+- **Undo** (`↶`) and **Redo** (`↷`) icon buttons, greyed out with nothing to undo or redo; the tooltip names the step ("Undo zoom (Ctrl+Z)"). Hidden with `Plot::set_undo_controls(false)`.
 - **Autoscale** (`⤢`) and **Reset** (`⌂`, bobview `Icon::Home`) icon buttons.
 - **`≡` menu.** This belongs to the app only, not the widget, and is added by `ArchiveApp` to the right. It holds Log scale and Clear search history (the widget's own items), then Views (Save NAME, a Save as… field, Save as default, Open ▸, Delete ▸, "Save default on exit", on by default), Theme (System/Light/Dark) and a summary of the gestures. That is the whole menu.
-- **Narrow windows** (under about 600 pt). The range pill collapses to a combo, the archiver pill to its dot, and autoscale and reset move into the menu.
+- **Narrow windows** (under about 600 pt). The range pill collapses to a combo, the archiver pill to its dot, and undo, redo, autoscale and reset move into the menu.
 
 Plot area (fills the rest):
 
@@ -255,6 +262,7 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 | shift- or ctrl-scroll, or drag on a value axis | zoom values: the axis under the pointer, or every axis over the data; turns autoscale off |
 | secondary-drag or shift-drag a box | zoom to the box (time and value) |
 | double-click | reset: autoscale on, back to the preset span (live if it was live) |
+| mouse back / forward buttons | undo / redo |
 | hover | crosshair readout |
 
 Transitions animate over about 150 ms with ease-out.
@@ -263,6 +271,21 @@ Keyboard (only when no text field has focus):
 - `/` focuses search and `Esc` closes popups or clears search.
 - `←`/`→` pan by 10% of the span, and `+`/`-` (or `=`) zoom time ×0.8 or ×1.25 about the centre.
 - `L` toggles live, `A` autoscales and `Home` resets.
+- `Ctrl+Z` undoes, `Ctrl+Shift+Z` and `Ctrl+Y` redo (`⌘` on a Mac).
+
+### Undo and redo
+
+`Plot` keeps the undo and redo lists (`plot/undo.rs`), so they work wherever
+it is embedded. They are snapshot-based, not command-based:
+
+- **What a step keeps.** The state from before it: the time window and home span, each trace (id, name, colour, palette slot, hidden flag, axis id, the stats it settled with) and each value axis (id, name, autoscale, fixed range, log, and whether it is used or kept for a view's trace). That is what `Plot::view` saves plus what views don't, so an undone trace keeps its axis and still counts for scoring.
+- **Noticing changes.** The state is compared with the last one seen at the start and end of every frame, and when `undo`, `redo` or `add_pvs` is called, so every path that changes the plot (the host's calls included) is recorded, without each one having to. A change of the window or an axis' range is navigation; anything else (traces, axis moves, names, log scales) is always a step of its own. Navigation within about 0.5 s of the last change, or while the pointer stays down in the press that began the step, joins that step: one drag, scroll burst or run of keys is one step, and the label is described from the whole of it.
+- **What is not a step.** Live's own motion (a live window's state does not change as time passes), easing, settling (a trace taking its first axis, axes coming and going with it), fetches, the archiver, search text and history, an axis picked out, and the app's settings and files.
+- **Labels** say what changed: "add X", "remove X", "hide X", "move X to Time (h)" (the axis as named when it was dropped on), "rename axis to “Beam”", "log scale", "autoscale", "zoom values", "zoom", "pan". Code that knows better names its step (`Plot::name_step`): "reset", "show the last 8h", "show a custom range", "zoom to box", "pause", "follow now", "open view", "clear the plot". A named step is never joined by what follows.
+- **Restoring diffs, it doesn't rebuild.** Traces in both states keep their data, fetch state and live connection, so undoing a zoom fetches nothing it has not already got. Axes keep their ids, so the axes in both keep easing from where they are drawn.
+- **Parking.** Removing a trace (✕, `remove_pv`, `set_view` replacing it, or an undo) parks it: its subscription is dropped, so the channel disconnects, but its history and fetch state are kept. Undoing brings it back with its id, colour, axis, legend place and history, subscribed again and without a fetch while the window is covered. A parked trace goes when no step refers to it. Parked histories are limited to a million samples between them, the oldest forgotten first (fetched again if they come back), and a new archiver forgets them all.
+- **Settling is learnt.** When a trace settles, every step that has it unsettled is told its axis (and that axis, if the step lacks it) and stats, so undoing never sends a trace back to settle again, and an undone removal brings it back settled.
+- At most 100 steps are kept, for the session only (not in views). A new change after undoing clears the redo list. Undoing a step moves the state it replaced onto the redo list.
 
 ### Palette and theme
 

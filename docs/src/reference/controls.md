@@ -11,12 +11,13 @@
 | **⋯** | a custom span (`90m`, `2 days`) or a start and end date-time |
 | **● Live** | red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow |
 | **● host** | the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See [Connect](../how-to/connect.md#see-and-change-the-archiver) |
+| **↶** **↷** | undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See [Undo and redo](../how-to/navigate.md#undo-and-redo) |
 | **⤢** | autoscale every value axis |
 | **⌂** | reset: back to the last preset, autoscale on |
 | **≡** | Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
 
 In a narrow window the presets become a drop-down, the archiver pill shows
-only its dot, and ⤢ and ⌂ move into the ≡ menu.
+only its dot, and ↶ ↷, ⤢ and ⌂ move into the ≡ menu.
 
 ## On the plot
 
@@ -33,6 +34,7 @@ only its dot, and ⤢ and ⌂ move into the ≡ menu.
 | hover a value axis' name | its full name, units and traces (with their colours), and the gestures |
 | double-click a value axis' name | rename it (Enter keeps, Esc cancels, empty is automatic) |
 | right-click a value axis | its menu: Log scale, Autoscale, Rename… |
+| mouse back and forward buttons | undo and redo, as in a browser |
 | hover | crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap) |
 
 ## Legend chips
@@ -65,6 +67,8 @@ These work whenever no text box has the focus.
 | `L` | follow now, or stop following |
 | `A` | autoscale |
 | `Home` | reset |
+| `Ctrl+Z` (`⌘Z` on a Mac) | undo |
+| `Ctrl+Shift+Z` or `Ctrl+Y` | redo |
 
 In the search list, `↑` `↓` move and `Enter` adds (or, on a recent search,
 searches for it again).

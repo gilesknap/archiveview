@@ -58,3 +58,34 @@ thinned the data into bins, the card also shows the bin's min and max.
 
 Double-click the plot, press `Home`, or click **⌂**: the time range returns
 to the last preset and autoscale turns on.
+
+## Undo and redo
+
+Explore freely: zoom in to look at something, then step back. **↶** and
+**↷** in the bar undo and redo, as do `Ctrl+Z` and `Ctrl+Shift+Z` (or
+`Ctrl+Y`), and the mouse's back and forward buttons, which suit stepping
+through a zoom history. Each button's tooltip names the step, such as "Undo
+zoom" or "Redo move SR-DI-DCCT-01:LIFETIME to Time (h)". In a narrow window
+they are in the **≡** menu.
+
+What can be undone is everything that changes what the plot shows:
+
+- the time range: zooming and panning however done, presets, a custom
+  range, and leaving or returning to Live (undo returns to Live if that is
+  where the step started);
+- each value axis: its zoom and pan, autoscale, log scale and a fixed range;
+- a reset, as one step, so an accidental double-click can be undone;
+- traces: adding PVs, removing one (it comes back with its colour, its axis,
+  its place in the legend and its history, without fetching it again),
+  hiding or showing one, moving one to another axis, and renaming an axis;
+- opening a view, **Start empty**, and the restored session.
+
+One gesture is one step: a drag from press to release, or a run of scrolls
+or key presses with no pause longer than about half a second. Time moving on
+while Live is not a step. A new change after undoing clears what could be
+redone. About 100 steps are kept, for the session only: they are not saved
+with views.
+
+Settings and files are not undone: the search text and recent searches, the
+theme and UI zoom, the archiver, saving or deleting a view, the window's size
+and position, and an axis picked out by a click.
