@@ -80,8 +80,14 @@ What the widget does, and doesn't, assume:
   the search box. `plot.take_search_selection()` gives text the user
   selected in the search box, for the host to make the primary selection,
   and `plot.take_pasted()` says what a paste added (`.message()` for a
-  toast). The standalone app does all this in `app.rs`, with
-  `archiveview::selection`.
+  toast). A middle-click stays in `take_middle_click()` until taken (a
+  later one replaces it); `paste_pvs` and `paste_into_search` ask for a
+  repaint themselves, so the host can answer between frames, from another
+  thread's result. Read the selection off the UI thread: X11 asks its
+  owner, which can take seconds. The standalone app does all this in
+  `app.rs`, with `archiveview::selection` (a `Worker` thread, a 2 s limit,
+  and setting the primary only once a selection has been steady for
+  150 ms).
 
 To save a plot in the host's own layout files, store `plot.view()` (it is
 `serde`-serialisable) and restore it with `plot.set_view(&view)`. A view

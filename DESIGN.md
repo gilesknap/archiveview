@@ -267,6 +267,11 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 
 Transitions animate over about 150 ms with ease-out.
 
+Keyboard (only when no text field has focus):
+- `/` focuses search and `Esc` closes popups or clears search.
+- `←`/`→` pan by 10% of the span, and `+`/`-` (or `=`) zoom time ×0.8 or ×1.25 about the centre.
+- `L` toggles live, `A` autoscales and `Home` resets.
+
 ### Selection
 
 Cross-application drag and drop isn't possible (winit delivers only dropped
@@ -278,33 +283,44 @@ then middle-click the plot.
   middle-click (`button_clicked`, so never a middle drag, which still pans)
   on the plot or legend, on the plot's own layer, is reported by
   `take_middle_click()`; one in the search box (where egui has already put
-  the cursor) likewise. The host answers with `paste_pvs` or
-  `paste_into_search`. Ctrl+V needs no host: egui-winit turns it into
+  the cursor; not on its ✕ or regex toggle) likewise. It stays there until
+  taken. The host answers with `paste_pvs` or `paste_into_search`, which
+  ask for a repaint. Ctrl+V needs no host: egui-winit turns it into
   `Event::Paste` with the clipboard's text, which the plot takes when the
-  keyboard shortcuts apply.
+  keyboard shortcuts apply. Pasted PVs go through one `add_pvs` call, as
+  the search box's do.
 - **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace, commas
-  and semicolons, drop quotes and brackets around a word, keep words that
-  (after an optional `ca://`/`pva://`) are only record-name characters
-  (plus `{}` and `$`), have a letter, and neither start nor end with `.`
-  or `:`. Plain words count: some sites' names have no colon. Numbers,
-  times and URLs are left out. A paste naming more than `MAX_PASTE` (20)
-  adds none and says so: a screenful pasted by accident would otherwise
-  subscribe to every word on it. `Pasted::message` words the toast.
+  and semicolons, drop quotes and brackets around a word. A word can be a
+  name if (after an optional `ca://`/`pva://`) it is only record-name
+  characters (plus `{}` and `$`), has a letter, doesn't start with `-`/`+`
+  (flags) or start or end with `.`/`:`, and isn't a time, date,
+  `host:port`, `a::b` path or log prefix. A one-word selection is taken if
+  it can be a name (some sites' names have no structure: `TEMP1`); in
+  several words only those with a scheme or structure (`:`, `-`, `_`,
+  braces, a digit, `.FIELD`) are, so prose, shell lines and code add
+  nothing. A paste naming more than `MAX_PASTE` (20) adds none and says
+  so: a screenful pasted by accident would otherwise subscribe to it all.
+  `Pasted::message` words the toast.
 - **egui does not set the primary selection**, so the search box reports
-  newly selected text (once the pointer is up) and the app sets it.
+  newly selected text (once the pointer is up), but not the select-all it
+  makes itself on focus (kept apart until a press or key in the box). The
+  app sets the primary once the selection has been steady for 150 ms, not
+  at every shift+arrow (a round trip each over `ssh -X`).
 - **`ArchiveApp`** reads through a `selection::Selection` trait (tests
-  inject text). `SystemSelection`, behind the `app` feature, uses
-  smithay-clipboard on the app's own Wayland connection (as egui-winit
-  reads its clipboard; arboard alone would need the data-control protocol,
-  which GNOME lacks) and arboard on X11, including over `ssh -X`. Both are
-  already in the tree through egui-winit, at the same versions. With no
-  primary selection, or nothing in it, middle-click reads the clipboard.
-  The Wayland clipboard is dropped in `on_exit`, before the display goes.
-
-Keyboard (only when no text field has focus):
-- `/` focuses search and `Esc` closes popups or clears search.
-- `←`/`→` pan by 10% of the span, and `+`/`-` (or `=`) zoom time ×0.8 or ×1.25 about the centre.
-- `L` toggles live, `A` autoscales and `Home` resets.
+  inject text) owned by a `selection::Worker` thread: an X11 read asks the
+  selection's owner, up to 4 s per format, and smithay's has no timeout,
+  so the UI thread never reads. A click is answered when the text arrives,
+  or after 2 s says it could not be read (a late answer is dropped).
+  `selection::system`, behind the `app` feature, uses smithay-clipboard on
+  the app's own Wayland connection (as egui-winit reads its clipboard;
+  arboard alone would need the data-control protocol, which GNOME lacks)
+  and arboard on X11, including over `ssh -X`, on egui-winit's platforms
+  (Linux and the BSDs). All of it is in the tree already through
+  egui-winit, at the same versions. Middle-click reads the clipboard only
+  where there is no primary selection (`has_primary`: macOS, Windows, or a
+  compositor whose globals lack `zwp_primary_selection_device_manager_v1`),
+  never because the primary is empty. The worker, and with it the Wayland
+  clipboard, goes in `on_exit`, before the display does.
 
 ### Palette and theme
 

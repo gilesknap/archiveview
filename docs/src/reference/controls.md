@@ -33,7 +33,7 @@ only its dot, and ⤢ and ⌂ move into the ≡ menu.
 | hover a value axis' name | its full name, units and traces (with their colours), and the gestures |
 | double-click a value axis' name | rename it (Enter keeps, Esc cancels, empty is automatic) |
 | right-click a value axis | its menu: Log scale, Autoscale, Rename… |
-| middle-click (here or on the legend) | add the PVs in the primary selection (the text last selected anywhere), or in the clipboard where there is no primary selection. See [Add PVs from another window](../how-to/search.md#add-pvs-from-another-window) |
+| middle-click (here or on the legend) | add the PVs in the primary selection (the text last selected anywhere), or in the clipboard where there is no primary selection (macOS, Windows). At most 20 at once. See [Add PVs from another window](../how-to/search.md#add-pvs-from-another-window) |
 | `Ctrl+V` (pointer over the plot) | add the PVs in the clipboard |
 | hover | crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap) |
 
