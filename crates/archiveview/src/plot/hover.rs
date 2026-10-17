@@ -160,7 +160,7 @@ pub fn crosshair(
     // time tag there.
     let y = (p.y - height / 2.0).clamp(
         f.outer.top() + 4.0,
-        (f.data.bottom() - height - 4.0).max(f.outer.top()),
+        (f.data.bottom() - height - 4.0).max(f.outer.top() + 4.0),
     );
     let card = Rect::from_min_size(
         Pos2::new(x.max(f.outer.left() + 4.0), y),

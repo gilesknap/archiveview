@@ -40,7 +40,7 @@ use crate::history::SearchHistory;
 use crate::view::{self, TraceView, View, YAxis};
 use axes::{Choice, Members, Stats};
 use fetch::Fetcher;
-pub use paste::{MiddleClick, Pasted, pv_names};
+pub use paste::{MAX_PASTE, MiddleClick, Pasted, pv_names};
 pub use series::now;
 use series::{History, Pt, Trace};
 pub use status::{ArchiverState, ArchiverStatus};
@@ -437,13 +437,20 @@ impl Plot {
     }
 
     /// Add the PVs named in pasted `text` (the primary selection after a
-    /// middle-click, or the clipboard): see [`pv_names`]. Says what it did,
+    /// middle-click, or the clipboard): see [`pv_names`]. More than
+    /// [`MAX_PASTE`] adds none (a screenful selected by accident). Says what it did,
     /// as [`Plot::take_pasted`] does after.
     pub fn paste_pvs(&mut self, text: &str) -> Pasted {
         let mut pasted = Pasted::default();
+        let names = pv_names(text);
+        if names.len() > MAX_PASTE {
+            pasted.too_many = names.len();
+            self.paste.pasted = Some(pasted.clone());
+            return pasted;
+        }
         let plotted: Vec<String> = self.traces.iter().map(|t| t.pv.name().key()).collect();
         let mut adding = Vec::new();
-        for name in pv_names(text) {
+        for name in names {
             let key = pv::PvName::parse(&name).key();
             if plotted.contains(&key) {
                 pasted.present.push(name);
@@ -3312,13 +3319,21 @@ mod tests {
         let pvs = PvManager::new();
         let mut p = Plot::new(&pvs, None);
         p.add_pvs(&names(&["A:B"]));
-        let pasted = p.paste_pvs("A:B, C:D\nhello pva://E:F ca://C:D");
+        let pasted = p.paste_pvs("A:B, C:D\n12:30:00 pva://E:F ca://C:D");
         assert_eq!(pasted.added, ["C:D", "pva://E:F"]);
         assert_eq!(pasted.present, ["A:B"]);
         assert_eq!(p.take_pasted(), Some(pasted));
         assert_eq!(p.names(), ["A:B", "C:D", "pva://E:F"]);
-        let none = p.paste_pvs("nothing here");
-        assert!(none.added.is_empty() && none.text == "nothing here");
+        let none = p.paste_pvs("42, 12:30:00");
+        assert!(none.added.is_empty() && none.text == "42, 12:30:00");
+        // A screenful adds nothing.
+        let screen: Vec<String> = (0..30).map(|i| format!("W{i}")).collect();
+        let many = p.paste_pvs(&screen.join(" "));
+        assert_eq!((many.too_many, many.added.len()), (30, 0));
+        assert_eq!(p.names().len(), 3);
+        // MAX_PASTE of them is fine.
+        let twenty = p.paste_pvs(&screen[..MAX_PASTE].join(" "));
+        assert_eq!(twenty.added.len(), MAX_PASTE);
 
         // Ctrl+V over the plot: egui's paste event.
         let mut h = Harness::new(p);
@@ -3330,7 +3345,7 @@ mod tests {
         // Not while the search box has the keyboard: it is pasted there.
         h.key(egui::Key::Slash);
         h.frame(vec![egui::Event::Paste("I:J".into())]);
-        assert_eq!(h.plot.names().len(), 4);
+        assert_eq!(h.plot.names().len(), 4 + MAX_PASTE);
         assert_eq!(h.plot.search.text(), "I:J");
     }
 

@@ -75,10 +75,19 @@ primary selection, the way EDM and MEDM pass PV names around:
 - In a terminal, an editor or a web page, select the name with the mouse
   (double-click selects a whole name in most terminals).
 
-Several names separated by spaces, commas or new lines add several PVs.
-Only words that look like PV names are used: a name with a colon in it
-(`SR-DI-DCCT-01:SIGNAL`), or one starting `ca://` or `pva://`. Anything else
-is left out, and if nothing is left the note says so.
+Several names separated by spaces, commas, semicolons or new lines add
+several PVs. Quotes and brackets around a name are dropped. A word is used
+if it could be a PV name: after an optional `ca://` or `pva://`, only the
+characters EPICS record names use (letters, digits, `_ - + : [ ] < > { } $`,
+and `.` before a field, as in `BL01T:X.VAL`) and at least one letter. A
+plain word such as `TEMP1` counts, since some sites' names have no colon.
+Numbers, times such as `12:30:00`, URLs, and words ending in `.` or `:` are
+left out. If nothing is left, the note says so.
+
+One paste adds at most 20 PVs. If the selection names more (most likely a
+screenful selected by accident), nothing is added and the note says how
+many it named; middle-click in the search box to paste the text there and
+pick from it.
 
 Middle-click in the search box pastes the selection there instead, at the
 cursor, so you can edit it or search with it. Text you select in the search

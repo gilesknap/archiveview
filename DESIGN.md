@@ -282,10 +282,14 @@ then middle-click the plot.
   `paste_into_search`. Ctrl+V needs no host: egui-winit turns it into
   `Event::Paste` with the clipboard's text, which the plot takes when the
   keyboard shortcuts apply.
-- **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace and
-  commas, drop quotes, keep words with a `ca://`/`pva://` prefix or an inner
-  colon, a letter, and only record-name characters (plus `{}`). Prose,
-  times and URLs are left out. `Pasted::message` words the toast.
+- **Parsing** (`plot/paste.rs`, `pv_names`): split on whitespace, commas
+  and semicolons, drop quotes and brackets around a word, keep words that
+  (after an optional `ca://`/`pva://`) are only record-name characters
+  (plus `{}` and `$`), have a letter, and neither start nor end with `.`
+  or `:`. Plain words count: some sites' names have no colon. Numbers,
+  times and URLs are left out. A paste naming more than `MAX_PASTE` (20)
+  adds none and says so: a screenful pasted by accident would otherwise
+  subscribe to every word on it. `Pasted::message` words the toast.
 - **egui does not set the primary selection**, so the search box reports
   newly selected text (once the pointer is up) and the app sets it.
 - **`ArchiveApp`** reads through a `selection::Selection` trait (tests

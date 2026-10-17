@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(app.plot.names().last().unwrap(), "CLIP:BOARD");
         assert_eq!(app.notice.as_ref().unwrap().text, "Added CLIP:BOARD");
         // Nothing usable: the toast says so.
-        select(&mut app, Some("just words"), None);
+        select(&mut app, Some("42 12:30:00 https://example.com/x"), None);
         for events in click(on_plot) {
             frame(&mut app, events);
         }
