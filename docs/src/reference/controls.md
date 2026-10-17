@@ -7,8 +7,8 @@
 | search box | find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. Middle-click pastes the primary selection. See [Find and add PVs](../how-to/search.md) |
 | `.*` (in the search box, shown while it has the focus) | search with a regular expression instead of a glob |
 | ✕ (in the search box) | clear it |
-| **1h 8h 1d 7d** | show that span ending now, following live |
-| **⋯** | a custom span (`90m`, `2 days`, or a 2h 12h 3d 30d chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See [Choose a time range](../how-to/navigate.md#choose-a-time-range) |
+| **1h 8h 1d 1w** | show that span ending now, following live |
+| **⋯** | a custom span (`90m`, `2 days`, `1y`, or a 2h 12h 3d 4w 1y chip) or a start and end date-time; Enter in a field shows it, Esc or a click away closes it unchanged. See [Choose a time range](../how-to/navigate.md#choose-a-time-range) |
 | **● Live** | red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow |
 | **● host** | the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See [Connect](../how-to/connect.md#see-and-change-the-archiver) |
 | **↶** **↷** | undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See [Undo and redo](../how-to/navigate.md#undo-and-redo) |

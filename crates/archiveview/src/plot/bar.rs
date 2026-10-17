@@ -94,7 +94,8 @@ const CHIPS: &[(f64, &str)] = &[
     (2.0 * 3600.0, "2h"),
     (12.0 * 3600.0, "12h"),
     (3.0 * 86_400.0, "3d"),
-    (30.0 * 86_400.0, "30d"),
+    (28.0 * 86_400.0, "4w"),
+    (365.0 * 86_400.0, "1y"),
 ];
 
 /// Where in the `≡` menu a host's items go ([`Plot::ui_with_menu`]).
@@ -1008,7 +1009,7 @@ pub fn take_found(plot: &mut Plot, now: f64) -> bool {
 
 // --- time range ---------------------------------------------------------------
 
-/// The segmented control: 1h 8h 1d 7d and a custom segment showing a span
+/// The segmented control: 1h 8h 1d 1w and a custom segment showing a span
 /// that is not a preset.
 fn range_pill(plot: &mut Plot, ui: &mut egui::Ui, now: f64) {
     let h = icons::height(ui);
