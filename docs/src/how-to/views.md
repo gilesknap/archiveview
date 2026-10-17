@@ -36,7 +36,8 @@ choice is kept in `settings.json`.
 | --- | --- |
 | a relative range (e.g. the last 8 hours) | that span ending now, following live |
 | an absolute range | exactly those start and end times |
-| autoscale off, with a min and max | that value range |
+| which trace is on which value axis | as saved: traces do not pick again |
+| an axis' autoscale, or its min and max, log scale and name | as saved |
 | a trace's colour and hidden state | as saved |
 
 The archiver URL is not part of a view; it comes from `--archiver` or

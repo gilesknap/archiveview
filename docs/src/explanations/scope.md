@@ -20,7 +20,8 @@ property sheets, trace tables, axis configuration dialogs, archive data
 source lists and long context menus. archiveview has none of these. In v1 it
 also leaves out:
 
-- choosing value axes by hand (traces get one per unit, up to three);
+- axis dialogs: value axes are chosen automatically, and moved from a
+  chip's dot or by dragging the chip;
 - exporting data (CSV, spreadsheet);
 - statistics, formulas and waveform views;
 - `.plt` files;

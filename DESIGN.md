@@ -139,9 +139,18 @@ Decimation:
 - Zero-length segments are deduplicated, because they would produce NaN triangles (bobview `plot::line`).
 - Lines are anti-aliased with 1.5 pt stroke width, and 2.5 pt for the hovered trace.
 
-Value axes:
-- One per distinct unit among the visible traces, in legend order, up to three; traces with yet more units share the third. The first is left of the data; the others stack outward on the right, their labels and title (the unit) in the trace's colour when one trace has the axis. With one unit there is one axis, as before.
-- The first axis takes the fixed range, the log scale and value zooming (box zoom, axis drag, shift-scroll). The others always autoscale to their own traces (log too when the scale is log).
+Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
+- Every trace carries an axis id (`Trace::axis`), `None` until it **settles**: once, when its first data is on screen and its archived history has come (or it has none, or it has waited 5 s with live data). Until then it is drawn on a provisional axis. After that only the user moves it; zooming, refetches and reloads never do.
+- Settling scores the trace against each axis with traces (`axes::score`), from the 5th..95th percentile of the visible values (so a glitch or a spike does not decide), the units and whether the values are whole (enums):
+  - differing units never join (missing units on either side: range only); enums join only enums;
+  - otherwise the score is the decades between the typical sizes (`max(|p5|, |p95|, p95 - p5)`) over the decades allowed: 1, plus 0.3 for matching units, plus 0.3 for overlapping ranges. At most 1 joins the best. DCCT SIGNAL (mA) and LIFETIME (h) split; EBPM SA:X and SA:Y (mm, 0.04 and 0.6) share.
+  - Otherwise a new axis, on a log scale when the values are all positive and p95/p5 ≥ 100 (vacuum). An axis from a view that no trace is on yet (an old file's `y`) is taken first, with its settings.
+  - A soft limit of four axes: past it the trace joins the closest axis it may, else the closest by size whatever its units (enums still apart).
+- An axis goes when its last trace leaves (moved, removed). The axes are kept in the legend's order of their first trace, so the first chip's axis is always the first, whatever order the data came in.
+- **Layout.** The axes alternate sides, nearest the data first: first left, second right, third left of the first, fourth right of the second. Each side holds at most two of the usual four, every axis' labels sit next to the data, the data stays centred, and the common pair reads as the familiar two-sided chart. Axes with no visible trace are not drawn. The grid follows the first.
+- **Names** (`axes::names`), in layers used only when they add something: the quantity from a small units table and the units ("Current (mA)", unknown units as "(counts)"); for axes sharing units, the words of their PV names that the others' names lack ("Position X (mm)"); without units, the PVs' description when the archive meta has it (no extra request); else "Axis N". A name typed by the user wins. One trace: the name in its colour (and the labels too, with several axes); several: neutral, with a coloured dot per trace by the name.
+- **Per axis:** autoscale or a fixed range, log scale, name. Value zooming acts on the axis under the pointer (axis drag, shift- or ctrl-scroll), or on every drawn axis about the pointer over the data; box zoom sets every axis; dragging the plot pans the fixed ones; `A`, ⤢, reset and double-click autoscale all. ≡ ▸ Log scale sets every axis; right-clicking an axis gives its own Log scale, Autoscale and Rename.
+- **Moving traces:** a chip's colour dot opens a menu of the axes plus "New axis"; dragging a chip onto an axis moves it there, and dropping it elsewhere on the plot gives it a new axis. Clicking an axis picks out its traces (the others dim) until clicked again; double-clicking its name edits it.
 - Autoscaling covers the visible min/max including envelopes, padded with `axis::nice_range`.
 - Turning the log scale on with a fixed range at or below zero goes back to autoscaling.
 - Range changes animate over about 150 ms, using `ctx.animate_value_with_time` on lo and hi.
@@ -202,6 +211,7 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 
 - Each chip is a pill with a colour dot, the PV name (without `ca://` or `<type>`), the latest value and EGU in tabular figures, and an ✕ that appears on hover.
 - Click toggles visibility: a hidden trace's chip is greyed with a hollow dot.
+- Clicking the colour dot opens a menu of the value axes plus "New axis"; dragging the chip onto an axis moves its trace there.
 - Hovering a chip highlights its trace (thicker line) and dims the others to 25% alpha.
 - A disconnected trace's value shows a grey "—" and the chip's tooltip says why.
 - While a trace is fetching, a small spinner replaces the dot.
@@ -213,7 +223,7 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 | drag (primary) in plot | pan time; leaves live. A kinetic glide follows release (velocity decays about 5×/s) |
 | scroll wheel / trackpad pinch (`zoom_delta`) | zoom time about the pointer |
 | horizontal trackpad scroll | pan time |
-| shift- or ctrl-scroll, or drag on the value axis | zoom or pan values; turns autoscale off |
+| shift- or ctrl-scroll, or drag on a value axis | zoom values: the axis under the pointer, or every axis over the data; turns autoscale off |
 | secondary-drag or shift-drag a box | zoom to the box (time and value) |
 | double-click | reset: autoscale on, back to the preset span (live if it was live) |
 | hover | crosshair readout |
@@ -251,11 +261,14 @@ Persistence follows bobview's `layout.rs`:
 ```json
 {
   "version": 1,
-  "pvs": [ { "name": "SR-DI-DCCT-01:SIGNAL" }, { "name": "bl01t:SUM", "color": "#d62728", "visible": false } ],
+  "pvs": [ { "name": "SR-DI-DCCT-01:SIGNAL", "axis": 0 }, { "name": "bl01t:SUM", "color": "#d62728", "visible": false, "axis": 1 } ],
   "range": { "kind": "relative", "secs": 3600 },
-  "y": { "autoscale": true }
+  "y": { "autoscale": true },
+  "axes": [ { "autoscale": false, "min": 0, "max": 20, "log": false, "name": "Sum" } ]
 }
 ```
+
+`y` is the first value axis and `axes` the others; a trace's `axis` counts `y` as 0. Both were added without a version bump: a file from before has no `axes` and no trace `axis`, so its traces settle as they are added and the first to settle takes `y`'s settings; an older program ignores the new fields.
 
 `range` can also be `{ "kind": "absolute", "start": "2026-10-17T09:00:00Z", "end": "2026-10-17T12:00:00Z" }`.
 
@@ -359,6 +372,6 @@ Errors and encoding:
 
 - `crates/archiver`: the Archiver Appliance client (`ArchiverClient`, queries, JSON decoding, time).
 - `crates/mockarchiver`: the mock appliance (`MockArchiver`, the synthetic `MOCK:*` and testioc PVs) and its binary.
-- `crates/archiveview/src/plot.rs` and `plot/`: the embeddable `Plot` widget (series, fetch, window, timeaxis, render, bar, legend, hover).
+- `crates/archiveview/src/plot.rs` and `plot/`: the embeddable `Plot` widget (series, fetch, window, timeaxis, render, bar, legend, hover, axes, axisui).
 - `crates/archiveview/src/app.rs`, `main.rs`, `config.rs`, `view.rs`, `snapshot.rs`: the standalone app, its CLI, settings, saved views and snapshot mode.
 - `.github/`, `docs/`, `scripts/`, `install.sh`: CI, the mdBook documentation, packaging and installation.

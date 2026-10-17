@@ -10,9 +10,9 @@
 | **1h 8h 1d 7d** | show that span ending now, following live |
 | **⋯** | a custom span (`90m`, `2 days`) or a start and end date-time |
 | **● Live** | red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow |
-| **⤢** | autoscale the value axis |
+| **⤢** | autoscale every value axis |
 | **⌂** | reset: back to the last preset, autoscale on |
-| **≡** | Log scale; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
+| **≡** | Log scale (every value axis); then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
 
 In a narrow window the presets become a drop-down, and ⤢ and ⌂ move into
 the ≡ menu.
@@ -24,10 +24,13 @@ the ≡ menu.
 | drag | pan time, with a glide after a quick release; stops following live |
 | scroll wheel, trackpad pinch | zoom time about the pointer |
 | horizontal trackpad swipe | pan time |
-| shift- or ctrl-scroll | zoom values about the pointer; turns autoscale off |
-| drag up or down on the value axis | zoom values; turns autoscale off |
+| shift- or ctrl-scroll | over an axis: zoom that axis; over the data: zoom every axis about the pointer; turns autoscale off |
+| drag up or down on a value axis | zoom that axis; turns its autoscale off |
 | right-drag, or shift-drag | zoom to the box, time and values |
 | double-click | reset |
+| click a value axis | pick out its traces, dimming the others; again to undo |
+| double-click a value axis' name | rename it (Enter keeps, Esc cancels, empty is automatic) |
+| right-click a value axis | its menu: Log scale, Autoscale, Rename… |
 | hover | crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap) |
 
 ## Legend chips
@@ -37,6 +40,8 @@ the ≡ menu.
 | click | hide or show the trace |
 | hover | highlight the trace and dim the others |
 | click ✕ | remove the PV |
+| click the colour dot | choose the trace's value axis, or New axis |
+| drag onto a value axis | move the trace to that axis; dropped elsewhere on the plot, to a new axis of its own |
 
 A chip shows the latest value and units, a spinner while history loads, a
 grey "—" while disconnected, and a "live only" mark when the archiver has no
