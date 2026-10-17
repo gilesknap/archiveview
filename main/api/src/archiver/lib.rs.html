@@ -351,142 +351,145 @@
 <a href=#351 id=351 data-nosnippet>351</a>    <span class="doccomment">/// From the URL the user gave, e.g. `http://host:17668` or
 <a href=#352 id=352 data-nosnippet>352</a>    /// `http://host:17668/retrieval/`: strips trailing slashes and appends
 <a href=#353 id=353 data-nosnippet>353</a>    /// `/retrieval` unless it already ends so. Only `http` and `https` are
-<a href=#354 id=354 data-nosnippet>354</a>    /// accepted; a bare `host:port` gets `http://`.
-<a href=#355 id=355 data-nosnippet>355</a>    </span><span class="kw">pub fn </span>new(url: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">let </span><span class="kw-2">mut </span>url = url.trim().trim_end_matches(<span class="string">'/'</span>).to_string();
-<a href=#357 id=357 data-nosnippet>357</a>        <span class="kw">if </span>url.is_empty() {
-<a href=#358 id=358 data-nosnippet>358</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(Error::BadUrl(<span class="string">"empty"</span>.into()));
-<a href=#359 id=359 data-nosnippet>359</a>        }
-<a href=#360 id=360 data-nosnippet>360</a>        <span class="kw">if </span>!url.contains(<span class="string">"://"</span>) {
-<a href=#361 id=361 data-nosnippet>361</a>            url = <span class="macro">format!</span>(<span class="string">"http://{url}"</span>);
-<a href=#362 id=362 data-nosnippet>362</a>        }
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">if </span>!(url.starts_with(<span class="string">"http://"</span>) || url.starts_with(<span class="string">"https://"</span>)) {
-<a href=#364 id=364 data-nosnippet>364</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(Error::BadUrl(<span class="macro">format!</span>(
-<a href=#365 id=365 data-nosnippet>365</a>                <span class="string">"{url}: only http and https are supported"
-<a href=#366 id=366 data-nosnippet>366</a>            </span>)));
-<a href=#367 id=367 data-nosnippet>367</a>        }
-<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">if </span>!url.ends_with(<span class="string">"/retrieval"</span>) {
-<a href=#369 id=369 data-nosnippet>369</a>            url.push_str(<span class="string">"/retrieval"</span>);
+<a href=#354 id=354 data-nosnippet>354</a>    /// accepted, plus Phoebus's `pbraw://` (the same service over plain
+<a href=#355 id=355 data-nosnippet>355</a>    /// HTTP); a bare `host:port` gets `http://`.
+<a href=#356 id=356 data-nosnippet>356</a>    </span><span class="kw">pub fn </span>new(url: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#357 id=357 data-nosnippet>357</a>        <span class="kw">let </span><span class="kw-2">mut </span>url = url.trim().trim_end_matches(<span class="string">'/'</span>).to_string();
+<a href=#358 id=358 data-nosnippet>358</a>        <span class="kw">if </span>url.is_empty() {
+<a href=#359 id=359 data-nosnippet>359</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(Error::BadUrl(<span class="string">"empty"</span>.into()));
+<a href=#360 id=360 data-nosnippet>360</a>        }
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(rest) = url.strip_prefix(<span class="string">"pbraw://"</span>) {
+<a href=#362 id=362 data-nosnippet>362</a>            url = <span class="macro">format!</span>(<span class="string">"http://{rest}"</span>);
+<a href=#363 id=363 data-nosnippet>363</a>        } <span class="kw">else if </span>!url.contains(<span class="string">"://"</span>) {
+<a href=#364 id=364 data-nosnippet>364</a>            url = <span class="macro">format!</span>(<span class="string">"http://{url}"</span>);
+<a href=#365 id=365 data-nosnippet>365</a>        }
+<a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">if </span>!(url.starts_with(<span class="string">"http://"</span>) || url.starts_with(<span class="string">"https://"</span>)) {
+<a href=#367 id=367 data-nosnippet>367</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(Error::BadUrl(<span class="macro">format!</span>(
+<a href=#368 id=368 data-nosnippet>368</a>                <span class="string">"{url}: only http and https are supported"
+<a href=#369 id=369 data-nosnippet>369</a>            </span>)));
 <a href=#370 id=370 data-nosnippet>370</a>        }
-<a href=#371 id=371 data-nosnippet>371</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-<a href=#372 id=372 data-nosnippet>372</a>            base: url,
-<a href=#373 id=373 data-nosnippet>373</a>            timeout_secs: <span class="number">30</span>,
-<a href=#374 id=374 data-nosnippet>374</a>        })
-<a href=#375 id=375 data-nosnippet>375</a>    }
-<a href=#376 id=376 data-nosnippet>376</a>
-<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">pub fn </span>with_timeout_secs(<span class="kw-2">mut </span><span class="self">self</span>, secs: u64) -&gt; <span class="self">Self </span>{
-<a href=#378 id=378 data-nosnippet>378</a>        <span class="self">self</span>.timeout_secs = secs;
-<a href=#379 id=379 data-nosnippet>379</a>        <span class="self">self
-<a href=#380 id=380 data-nosnippet>380</a>    </span>}
-<a href=#381 id=381 data-nosnippet>381</a>
-<a href=#382 id=382 data-nosnippet>382</a>    <span class="doccomment">/// The normalised retrieval base, e.g. `http://host:17668/retrieval`.
-<a href=#383 id=383 data-nosnippet>383</a>    </span><span class="kw">pub fn </span>base(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str {
-<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.base
-<a href=#385 id=385 data-nosnippet>385</a>    }
-<a href=#386 id=386 data-nosnippet>386</a>
-<a href=#387 id=387 data-nosnippet>387</a>    <span class="doccomment">/// `getData.json` with `from`/`to` as `YYYY-MM-DDTHH:MM:SS.mmmZ` and
-<a href=#388 id=388 data-nosnippet>388</a>    /// every parameter percent-encoded.
-<a href=#389 id=389 data-nosnippet>389</a>    </span><span class="kw">pub fn </span>data_url(<span class="kw-2">&amp;</span><span class="self">self</span>, q: <span class="kw-2">&amp;</span>Query) -&gt; String {
-<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">let </span><span class="kw-2">mut </span>url = <span class="macro">format!</span>(
-<a href=#391 id=391 data-nosnippet>391</a>            <span class="string">"{}/data/getData.json?pv={}&amp;from={}&amp;to={}"</span>,
-<a href=#392 id=392 data-nosnippet>392</a>            <span class="self">self</span>.base,
-<a href=#393 id=393 data-nosnippet>393</a>            encode(<span class="kw-2">&amp;</span>q.op.wrap(<span class="kw-2">&amp;</span>q.pv)),
-<a href=#394 id=394 data-nosnippet>394</a>            encode(<span class="kw-2">&amp;</span>format_time(q.from)),
-<a href=#395 id=395 data-nosnippet>395</a>            encode(<span class="kw-2">&amp;</span>format_time(q.to)),
-<a href=#396 id=396 data-nosnippet>396</a>        );
-<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">if </span>q.fetch_latest_metadata {
-<a href=#398 id=398 data-nosnippet>398</a>            url.push_str(<span class="string">"&amp;fetchLatestMetadata=true"</span>);
-<a href=#399 id=399 data-nosnippet>399</a>        }
-<a href=#400 id=400 data-nosnippet>400</a>        url
-<a href=#401 id=401 data-nosnippet>401</a>    }
-<a href=#402 id=402 data-nosnippet>402</a>
-<a href=#403 id=403 data-nosnippet>403</a>    <span class="doccomment">/// `bpl/getMatchingPVs?pv=...&amp;limit=N` or `?regex=...&amp;limit=N`.
-<a href=#404 id=404 data-nosnippet>404</a>    </span><span class="kw">pub fn </span>search_url(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>Search) -&gt; String {
-<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let </span>key = <span class="kw">match </span>s.mode {
-<a href=#406 id=406 data-nosnippet>406</a>            SearchMode::Glob =&gt; <span class="string">"pv"</span>,
-<a href=#407 id=407 data-nosnippet>407</a>            SearchMode::Regex =&gt; <span class="string">"regex"</span>,
-<a href=#408 id=408 data-nosnippet>408</a>        };
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="macro">format!</span>(
-<a href=#410 id=410 data-nosnippet>410</a>            <span class="string">"{}/bpl/getMatchingPVs?{key}={}&amp;limit={}"</span>,
-<a href=#411 id=411 data-nosnippet>411</a>            <span class="self">self</span>.base,
-<a href=#412 id=412 data-nosnippet>412</a>            encode(<span class="kw-2">&amp;</span>s.pattern),
-<a href=#413 id=413 data-nosnippet>413</a>            s.limit
-<a href=#414 id=414 data-nosnippet>414</a>        )
-<a href=#415 id=415 data-nosnippet>415</a>    }
-<a href=#416 id=416 data-nosnippet>416</a>
-<a href=#417 id=417 data-nosnippet>417</a>    <span class="doccomment">/// `bpl/getMetadata?pv=...`.
-<a href=#418 id=418 data-nosnippet>418</a>    </span><span class="kw">pub fn </span>metadata_url(<span class="kw-2">&amp;</span><span class="self">self</span>, pv: <span class="kw-2">&amp;</span>str) -&gt; String {
-<a href=#419 id=419 data-nosnippet>419</a>        <span class="macro">format!</span>(<span class="string">"{}/bpl/getMetadata?pv={}"</span>, <span class="self">self</span>.base, encode(pv))
-<a href=#420 id=420 data-nosnippet>420</a>    }
-<a href=#421 id=421 data-nosnippet>421</a>}
-<a href=#422 id=422 data-nosnippet>422</a>
-<a href=#423 id=423 data-nosnippet>423</a><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
-<a href=#424 id=424 data-nosnippet>424</a></span><span class="kw">impl </span>ArchiverClient {
-<a href=#425 id=425 data-nosnippet>425</a>    <span class="doccomment">/// Fetch and decode one PV's data. `Ok(None)` when the archiver has no
-<a href=#426 id=426 data-nosnippet>426</a>    /// data in the range (a `[ ]` response); `Err(Http{404})` when the PV is
-<a href=#427 id=427 data-nosnippet>427</a>    /// not archived. Blocking: call from a worker thread.
-<a href=#428 id=428 data-nosnippet>428</a>    </span><span class="kw">pub fn </span>get_data(<span class="kw-2">&amp;</span><span class="self">self</span>, q: <span class="kw-2">&amp;</span>Query) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;TimeSeries&gt;&gt; {
-<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">let </span>body = <span class="self">self</span>.get(<span class="kw-2">&amp;</span><span class="self">self</span>.data_url(q))<span class="question-mark">?</span>;
-<a href=#430 id=430 data-nosnippet>430</a>        <span class="kw">let </span>bins = <span class="macro">matches!</span>(q.op, Operator::Optimized(<span class="kw">_</span>));
-<a href=#431 id=431 data-nosnippet>431</a>        <span class="prelude-val">Ok</span>(decode::data(<span class="kw-2">&amp;</span>body, bins)<span class="question-mark">?</span>.into_iter().next())
-<a href=#432 id=432 data-nosnippet>432</a>    }
-<a href=#433 id=433 data-nosnippet>433</a>
-<a href=#434 id=434 data-nosnippet>434</a>    <span class="doccomment">/// The archived PV names matching `s`, sorted. Blocking.
-<a href=#435 id=435 data-nosnippet>435</a>    </span><span class="kw">pub fn </span>search(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>Search) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span><span class="kw-2">mut </span>names = parse_names(<span class="kw-2">&amp;</span><span class="self">self</span>.get(<span class="kw-2">&amp;</span><span class="self">self</span>.search_url(s))<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#437 id=437 data-nosnippet>437</a>        names.sort();
-<a href=#438 id=438 data-nosnippet>438</a>        names.dedup();
-<a href=#439 id=439 data-nosnippet>439</a>        <span class="prelude-val">Ok</span>(names)
-<a href=#440 id=440 data-nosnippet>440</a>    }
-<a href=#441 id=441 data-nosnippet>441</a>
-<a href=#442 id=442 data-nosnippet>442</a>    <span class="doccomment">/// The PV's archive type info. Blocking.
-<a href=#443 id=443 data-nosnippet>443</a>    </span><span class="kw">pub fn </span>metadata(<span class="kw-2">&amp;</span><span class="self">self</span>, pv: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;PvInfo&gt; {
-<a href=#444 id=444 data-nosnippet>444</a>        parse_metadata(<span class="kw-2">&amp;</span><span class="self">self</span>.get(<span class="kw-2">&amp;</span><span class="self">self</span>.metadata_url(pv))<span class="question-mark">?</span>)
-<a href=#445 id=445 data-nosnippet>445</a>    }
-<a href=#446 id=446 data-nosnippet>446</a>}
-<a href=#447 id=447 data-nosnippet>447</a>
-<a href=#448 id=448 data-nosnippet>448</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#449 id=449 data-nosnippet>449</a>// Decoding (usable without HTTP, e.g. by a browser build)
-<a href=#450 id=450 data-nosnippet>450</a>// ---------------------------------------------------------------------------
-<a href=#451 id=451 data-nosnippet>451</a>
-<a href=#452 id=452 data-nosnippet>452</a></span><span class="doccomment">/// Decode a `getData.json` body: one [`TimeSeries`] per PV, empty for
-<a href=#453 id=453 data-nosnippet>453</a>/// `[ ]`. Tolerates bare `NaN`/`Infinity`/`-Infinity`, string or numeric
-<a href=#454 id=454 data-nosnippet>454</a>/// `PREC`/`LOPR`/`HOPR`, unknown keys, and `fields` objects. A severity-3
-<a href=#455 id=455 data-nosnippet>455</a>/// sample whose `fields` hold `cnxlostepsecs` becomes a [`Sample::gap`].
-<a href=#456 id=456 data-nosnippet>456</a>/// A 5-element array `val` on a scalar PV is an `optimized` bin
-<a href=#457 id=457 data-nosnippet>457</a>/// (`binned = true`); other arrays are waveforms (element 0 plotted).
-<a href=#458 id=458 data-nosnippet>458</a>///
-<a href=#459 id=459 data-nosnippet>459</a>/// Without knowing the request, a series whose every array value has five
-<a href=#460 id=460 data-nosnippet>460</a>/// elements with a whole, non-negative count is taken as bins;
-<a href=#461 id=461 data-nosnippet>461</a>/// [`ArchiverClient::get_data`] only does that for `optimized` requests.
-<a href=#462 id=462 data-nosnippet>462</a></span><span class="kw">pub fn </span>parse_data(body: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TimeSeries&gt;&gt; {
-<a href=#463 id=463 data-nosnippet>463</a>    decode::data(body, <span class="bool-val">true</span>)
-<a href=#464 id=464 data-nosnippet>464</a>}
-<a href=#465 id=465 data-nosnippet>465</a>
-<a href=#466 id=466 data-nosnippet>466</a><span class="doccomment">/// Decode a JSON array of PV names (`getMatchingPVs`, `getAllPVs`).
-<a href=#467 id=467 data-nosnippet>467</a></span><span class="kw">pub fn </span>parse_names(body: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#468 id=468 data-nosnippet>468</a>    decode::names(body)
-<a href=#469 id=469 data-nosnippet>469</a>}
-<a href=#470 id=470 data-nosnippet>470</a>
-<a href=#471 id=471 data-nosnippet>471</a><span class="doccomment">/// Decode a `getMetadata` body.
-<a href=#472 id=472 data-nosnippet>472</a></span><span class="kw">pub fn </span>parse_metadata(body: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;PvInfo&gt; {
-<a href=#473 id=473 data-nosnippet>473</a>    decode::metadata(body)
-<a href=#474 id=474 data-nosnippet>474</a>}
-<a href=#475 id=475 data-nosnippet>475</a>
-<a href=#476 id=476 data-nosnippet>476</a><span class="doccomment">/// Percent-encode a query parameter value (everything but RFC 3986
-<a href=#477 id=477 data-nosnippet>477</a>/// unreserved characters).
-<a href=#478 id=478 data-nosnippet>478</a></span><span class="kw">fn </span>encode(s: <span class="kw-2">&amp;</span>str) -&gt; String {
-<a href=#479 id=479 data-nosnippet>479</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = String::with_capacity(s.len() * <span class="number">3 </span>/ <span class="number">2</span>);
-<a href=#480 id=480 data-nosnippet>480</a>    <span class="kw">for </span>b <span class="kw">in </span>s.bytes() {
-<a href=#481 id=481 data-nosnippet>481</a>        <span class="kw">if </span>b.is_ascii_alphanumeric() || <span class="macro">matches!</span>(b, <span class="string">b'-' </span>| <span class="string">b'.' </span>| <span class="string">b'_' </span>| <span class="string">b'~'</span>) {
-<a href=#482 id=482 data-nosnippet>482</a>            out.push(b <span class="kw">as </span>char);
-<a href=#483 id=483 data-nosnippet>483</a>        } <span class="kw">else </span>{
-<a href=#484 id=484 data-nosnippet>484</a>            out.push_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"%{b:02X}"</span>));
-<a href=#485 id=485 data-nosnippet>485</a>        }
-<a href=#486 id=486 data-nosnippet>486</a>    }
-<a href=#487 id=487 data-nosnippet>487</a>    out
-<a href=#488 id=488 data-nosnippet>488</a>}
-<a href=#489 id=489 data-nosnippet>489</a>
-<a href=#490 id=490 data-nosnippet>490</a><span class="attr">#[cfg(test)]
-<a href=#491 id=491 data-nosnippet>491</a></span><span class="kw">mod </span>tests;
+<a href=#371 id=371 data-nosnippet>371</a>        <span class="kw">if </span>!url.ends_with(<span class="string">"/retrieval"</span>) {
+<a href=#372 id=372 data-nosnippet>372</a>            url.push_str(<span class="string">"/retrieval"</span>);
+<a href=#373 id=373 data-nosnippet>373</a>        }
+<a href=#374 id=374 data-nosnippet>374</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+<a href=#375 id=375 data-nosnippet>375</a>            base: url,
+<a href=#376 id=376 data-nosnippet>376</a>            timeout_secs: <span class="number">30</span>,
+<a href=#377 id=377 data-nosnippet>377</a>        })
+<a href=#378 id=378 data-nosnippet>378</a>    }
+<a href=#379 id=379 data-nosnippet>379</a>
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">pub fn </span>with_timeout_secs(<span class="kw-2">mut </span><span class="self">self</span>, secs: u64) -&gt; <span class="self">Self </span>{
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="self">self</span>.timeout_secs = secs;
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="self">self
+<a href=#383 id=383 data-nosnippet>383</a>    </span>}
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="doccomment">/// The normalised retrieval base, e.g. `http://host:17668/retrieval`.
+<a href=#386 id=386 data-nosnippet>386</a>    </span><span class="kw">pub fn </span>base(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str {
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.base
+<a href=#388 id=388 data-nosnippet>388</a>    }
+<a href=#389 id=389 data-nosnippet>389</a>
+<a href=#390 id=390 data-nosnippet>390</a>    <span class="doccomment">/// `getData.json` with `from`/`to` as `YYYY-MM-DDTHH:MM:SS.mmmZ` and
+<a href=#391 id=391 data-nosnippet>391</a>    /// every parameter percent-encoded.
+<a href=#392 id=392 data-nosnippet>392</a>    </span><span class="kw">pub fn </span>data_url(<span class="kw-2">&amp;</span><span class="self">self</span>, q: <span class="kw-2">&amp;</span>Query) -&gt; String {
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span><span class="kw-2">mut </span>url = <span class="macro">format!</span>(
+<a href=#394 id=394 data-nosnippet>394</a>            <span class="string">"{}/data/getData.json?pv={}&amp;from={}&amp;to={}"</span>,
+<a href=#395 id=395 data-nosnippet>395</a>            <span class="self">self</span>.base,
+<a href=#396 id=396 data-nosnippet>396</a>            encode(<span class="kw-2">&amp;</span>q.op.wrap(<span class="kw-2">&amp;</span>q.pv)),
+<a href=#397 id=397 data-nosnippet>397</a>            encode(<span class="kw-2">&amp;</span>format_time(q.from)),
+<a href=#398 id=398 data-nosnippet>398</a>            encode(<span class="kw-2">&amp;</span>format_time(q.to)),
+<a href=#399 id=399 data-nosnippet>399</a>        );
+<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">if </span>q.fetch_latest_metadata {
+<a href=#401 id=401 data-nosnippet>401</a>            url.push_str(<span class="string">"&amp;fetchLatestMetadata=true"</span>);
+<a href=#402 id=402 data-nosnippet>402</a>        }
+<a href=#403 id=403 data-nosnippet>403</a>        url
+<a href=#404 id=404 data-nosnippet>404</a>    }
+<a href=#405 id=405 data-nosnippet>405</a>
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="doccomment">/// `bpl/getMatchingPVs?pv=...&amp;limit=N` or `?regex=...&amp;limit=N`.
+<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="kw">pub fn </span>search_url(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>Search) -&gt; String {
+<a href=#408 id=408 data-nosnippet>408</a>        <span class="kw">let </span>key = <span class="kw">match </span>s.mode {
+<a href=#409 id=409 data-nosnippet>409</a>            SearchMode::Glob =&gt; <span class="string">"pv"</span>,
+<a href=#410 id=410 data-nosnippet>410</a>            SearchMode::Regex =&gt; <span class="string">"regex"</span>,
+<a href=#411 id=411 data-nosnippet>411</a>        };
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="macro">format!</span>(
+<a href=#413 id=413 data-nosnippet>413</a>            <span class="string">"{}/bpl/getMatchingPVs?{key}={}&amp;limit={}"</span>,
+<a href=#414 id=414 data-nosnippet>414</a>            <span class="self">self</span>.base,
+<a href=#415 id=415 data-nosnippet>415</a>            encode(<span class="kw-2">&amp;</span>s.pattern),
+<a href=#416 id=416 data-nosnippet>416</a>            s.limit
+<a href=#417 id=417 data-nosnippet>417</a>        )
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="doccomment">/// `bpl/getMetadata?pv=...`.
+<a href=#421 id=421 data-nosnippet>421</a>    </span><span class="kw">pub fn </span>metadata_url(<span class="kw-2">&amp;</span><span class="self">self</span>, pv: <span class="kw-2">&amp;</span>str) -&gt; String {
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="macro">format!</span>(<span class="string">"{}/bpl/getMetadata?pv={}"</span>, <span class="self">self</span>.base, encode(pv))
+<a href=#423 id=423 data-nosnippet>423</a>    }
+<a href=#424 id=424 data-nosnippet>424</a>}
+<a href=#425 id=425 data-nosnippet>425</a>
+<a href=#426 id=426 data-nosnippet>426</a><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#427 id=427 data-nosnippet>427</a></span><span class="kw">impl </span>ArchiverClient {
+<a href=#428 id=428 data-nosnippet>428</a>    <span class="doccomment">/// Fetch and decode one PV's data. `Ok(None)` when the archiver has no
+<a href=#429 id=429 data-nosnippet>429</a>    /// data in the range (a `[ ]` response); `Err(Http{404})` when the PV is
+<a href=#430 id=430 data-nosnippet>430</a>    /// not archived. Blocking: call from a worker thread.
+<a href=#431 id=431 data-nosnippet>431</a>    </span><span class="kw">pub fn </span>get_data(<span class="kw-2">&amp;</span><span class="self">self</span>, q: <span class="kw-2">&amp;</span>Query) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;TimeSeries&gt;&gt; {
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">let </span>body = <span class="self">self</span>.get(<span class="kw-2">&amp;</span><span class="self">self</span>.data_url(q))<span class="question-mark">?</span>;
+<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span>bins = <span class="macro">matches!</span>(q.op, Operator::Optimized(<span class="kw">_</span>));
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="prelude-val">Ok</span>(decode::data(<span class="kw-2">&amp;</span>body, bins)<span class="question-mark">?</span>.into_iter().next())
+<a href=#435 id=435 data-nosnippet>435</a>    }
+<a href=#436 id=436 data-nosnippet>436</a>
+<a href=#437 id=437 data-nosnippet>437</a>    <span class="doccomment">/// The archived PV names matching `s`, sorted. Blocking.
+<a href=#438 id=438 data-nosnippet>438</a>    </span><span class="kw">pub fn </span>search(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>Search) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">let </span><span class="kw-2">mut </span>names = parse_names(<span class="kw-2">&amp;</span><span class="self">self</span>.get(<span class="kw-2">&amp;</span><span class="self">self</span>.search_url(s))<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#440 id=440 data-nosnippet>440</a>        names.sort();
+<a href=#441 id=441 data-nosnippet>441</a>        names.dedup();
+<a href=#442 id=442 data-nosnippet>442</a>        <span class="prelude-val">Ok</span>(names)
+<a href=#443 id=443 data-nosnippet>443</a>    }
+<a href=#444 id=444 data-nosnippet>444</a>
+<a href=#445 id=445 data-nosnippet>445</a>    <span class="doccomment">/// The PV's archive type info. Blocking.
+<a href=#446 id=446 data-nosnippet>446</a>    </span><span class="kw">pub fn </span>metadata(<span class="kw-2">&amp;</span><span class="self">self</span>, pv: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;PvInfo&gt; {
+<a href=#447 id=447 data-nosnippet>447</a>        parse_metadata(<span class="kw-2">&amp;</span><span class="self">self</span>.get(<span class="kw-2">&amp;</span><span class="self">self</span>.metadata_url(pv))<span class="question-mark">?</span>)
+<a href=#448 id=448 data-nosnippet>448</a>    }
+<a href=#449 id=449 data-nosnippet>449</a>}
+<a href=#450 id=450 data-nosnippet>450</a>
+<a href=#451 id=451 data-nosnippet>451</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#452 id=452 data-nosnippet>452</a>// Decoding (usable without HTTP, e.g. by a browser build)
+<a href=#453 id=453 data-nosnippet>453</a>// ---------------------------------------------------------------------------
+<a href=#454 id=454 data-nosnippet>454</a>
+<a href=#455 id=455 data-nosnippet>455</a></span><span class="doccomment">/// Decode a `getData.json` body: one [`TimeSeries`] per PV, empty for
+<a href=#456 id=456 data-nosnippet>456</a>/// `[ ]`. Tolerates bare `NaN`/`Infinity`/`-Infinity`, string or numeric
+<a href=#457 id=457 data-nosnippet>457</a>/// `PREC`/`LOPR`/`HOPR`, unknown keys, and `fields` objects. A severity-3
+<a href=#458 id=458 data-nosnippet>458</a>/// sample whose `fields` hold `cnxlostepsecs` becomes a [`Sample::gap`].
+<a href=#459 id=459 data-nosnippet>459</a>/// A 5-element array `val` on a scalar PV is an `optimized` bin
+<a href=#460 id=460 data-nosnippet>460</a>/// (`binned = true`); other arrays are waveforms (element 0 plotted).
+<a href=#461 id=461 data-nosnippet>461</a>///
+<a href=#462 id=462 data-nosnippet>462</a>/// Without knowing the request, a series whose every array value has five
+<a href=#463 id=463 data-nosnippet>463</a>/// elements with a whole, non-negative count is taken as bins;
+<a href=#464 id=464 data-nosnippet>464</a>/// [`ArchiverClient::get_data`] only does that for `optimized` requests.
+<a href=#465 id=465 data-nosnippet>465</a></span><span class="kw">pub fn </span>parse_data(body: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TimeSeries&gt;&gt; {
+<a href=#466 id=466 data-nosnippet>466</a>    decode::data(body, <span class="bool-val">true</span>)
+<a href=#467 id=467 data-nosnippet>467</a>}
+<a href=#468 id=468 data-nosnippet>468</a>
+<a href=#469 id=469 data-nosnippet>469</a><span class="doccomment">/// Decode a JSON array of PV names (`getMatchingPVs`, `getAllPVs`).
+<a href=#470 id=470 data-nosnippet>470</a></span><span class="kw">pub fn </span>parse_names(body: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#471 id=471 data-nosnippet>471</a>    decode::names(body)
+<a href=#472 id=472 data-nosnippet>472</a>}
+<a href=#473 id=473 data-nosnippet>473</a>
+<a href=#474 id=474 data-nosnippet>474</a><span class="doccomment">/// Decode a `getMetadata` body.
+<a href=#475 id=475 data-nosnippet>475</a></span><span class="kw">pub fn </span>parse_metadata(body: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;PvInfo&gt; {
+<a href=#476 id=476 data-nosnippet>476</a>    decode::metadata(body)
+<a href=#477 id=477 data-nosnippet>477</a>}
+<a href=#478 id=478 data-nosnippet>478</a>
+<a href=#479 id=479 data-nosnippet>479</a><span class="doccomment">/// Percent-encode a query parameter value (everything but RFC 3986
+<a href=#480 id=480 data-nosnippet>480</a>/// unreserved characters).
+<a href=#481 id=481 data-nosnippet>481</a></span><span class="kw">fn </span>encode(s: <span class="kw-2">&amp;</span>str) -&gt; String {
+<a href=#482 id=482 data-nosnippet>482</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = String::with_capacity(s.len() * <span class="number">3 </span>/ <span class="number">2</span>);
+<a href=#483 id=483 data-nosnippet>483</a>    <span class="kw">for </span>b <span class="kw">in </span>s.bytes() {
+<a href=#484 id=484 data-nosnippet>484</a>        <span class="kw">if </span>b.is_ascii_alphanumeric() || <span class="macro">matches!</span>(b, <span class="string">b'-' </span>| <span class="string">b'.' </span>| <span class="string">b'_' </span>| <span class="string">b'~'</span>) {
+<a href=#485 id=485 data-nosnippet>485</a>            out.push(b <span class="kw">as </span>char);
+<a href=#486 id=486 data-nosnippet>486</a>        } <span class="kw">else </span>{
+<a href=#487 id=487 data-nosnippet>487</a>            out.push_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"%{b:02X}"</span>));
+<a href=#488 id=488 data-nosnippet>488</a>        }
+<a href=#489 id=489 data-nosnippet>489</a>    }
+<a href=#490 id=490 data-nosnippet>490</a>    out
+<a href=#491 id=491 data-nosnippet>491</a>}
+<a href=#492 id=492 data-nosnippet>492</a>
+<a href=#493 id=493 data-nosnippet>493</a><span class="attr">#[cfg(test)]
+<a href=#494 id=494 data-nosnippet>494</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
