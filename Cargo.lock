@@ -156,6 +156,7 @@ dependencies = [
 name = "archiveview"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "archiveview-archiver",
  "archiveview-mockarchiver",
  "bobview-pv",
@@ -166,8 +167,12 @@ dependencies = [
  "log",
  "parking_lot",
  "png",
+ "raw-window-handle",
  "serde",
  "serde_json",
+ "smithay-clipboard",
+ "wayland-backend",
+ "wayland-client",
  "web-time",
 ]
 

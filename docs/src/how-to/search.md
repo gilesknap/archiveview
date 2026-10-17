@@ -65,6 +65,60 @@ not archived; it plots live only. A PV Access or simulated name
 commas, can only be added as typed, so that row comes first and `Enter`
 adds it straight away.
 
+## Add PVs from another window
+
+Select a PV name anywhere, then **middle-click** the plot or its legend: the
+PV is added, and a note at the bottom says so. This is the X11 and Wayland
+primary selection, the way EDM and MEDM pass PV names around:
+
+- In bobview, middle-click a widget to select its PV name.
+- In a terminal, an editor or a web page, select the name with the mouse
+  (double-click selects a whole name in most terminals).
+
+Several names separated by spaces, commas, semicolons or new lines add
+several PVs. Quotes and brackets around a name are dropped. A word can be a
+PV name if, after an optional `ca://` or `pva://`, it has only the
+characters EPICS record names use (letters, digits, `_ - + : [ ] < > { } $`,
+and `.` before a field, as in `BL01T:X.VAL`) and at least one letter.
+Numbers, times and dates (`12:30:00`, `2026-10-17T13:41:52Z`),
+`host:port` (`localhost:5064`, `ioc.example.org:5075`), `a::b`, Python log
+lines among other words (`INFO:root:Connected`), URLs, command-line flags
+(`-a`) and words ending in `.` or `:` are left out. Numbered names such as
+`SR:BPM:01` and `DLS:01` are names, and a `ca://` or `pva://` name is
+always taken as it is.
+
+- **A single word** is added if it can be a name, so names with no
+  structure at all (`TEMP1`, `BEAMCURRENT`) work: double-click one in a
+  terminal and middle-click.
+- **Several words** add only those with a scheme or some structure: a `:`,
+  `-`, `_`, braces, a digit or a `.FIELD`. So a line of prose, a shell
+  command or code selected with the names adds just the names
+  (`$ caget -a SR:X` adds `SR:X`).
+
+If nothing is left, the note says so.
+
+One paste adds at most 20 PVs. If the selection names more (most likely a
+screenful selected by accident), nothing is added and the note says how
+many it named; select fewer.
+
+Middle-click in the search box pastes the selection there instead, where
+you click, so you can edit it or search with it. Text you select in the
+search box becomes the primary selection, so you can middle-click it into a
+terminal (the box selecting all its text when you click into it doesn't
+count).
+
+`Ctrl+V` with the pointer over the plot (and the search box not focused)
+adds the PVs in the clipboard, on every platform. Where there is no primary
+selection at all (macOS, Windows, a Wayland desktop without the protocol),
+middle-click uses the clipboard instead. With nothing selected it adds
+nothing, rather than something copied long ago.
+
+The selection is read in the background. If the application that owns it
+doesn't answer within 2 seconds, the note says it could not be read.
+
+Over `ssh -X` the selection goes through your X server, so selecting a name
+in a local window and middle-clicking the remote archiveview works.
+
 ## Add PVs from the command line
 
 Name them after the options:

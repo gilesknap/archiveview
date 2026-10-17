@@ -12,8 +12,9 @@
 //!   pill, buttons);
 //! - `legend`: the chips under the plot;
 //! - `hover`: the crosshair readout, empty state and status line;
-//! - `axes`: which value axis a trace joins, and the axes' names.
-//! - `status`: whether the archiver can be reached.
+//! - `axes`: which value axis a trace joins, and the axes' names;
+//! - `status`: whether the archiver can be reached;
+//! - `paste`: adding PVs from the primary selection or the clipboard.
 
 mod axes;
 mod axisui;
@@ -21,6 +22,7 @@ mod bar;
 mod fetch;
 mod hover;
 mod legend;
+mod paste;
 mod render;
 mod series;
 mod status;
@@ -38,6 +40,7 @@ use crate::history::SearchHistory;
 use crate::view::{self, TraceView, View, YAxis};
 use axes::{Choice, Members, Stats};
 use fetch::Fetcher;
+pub use paste::{MAX_PASTE, MiddleClick, Pasted, pv_names};
 pub use series::now;
 use series::{History, Pt, Trace};
 pub use status::{ArchiverState, ArchiverStatus};
@@ -173,6 +176,8 @@ pub struct Plot {
     /// ([`Plot::set_archiver_switching`]).
     switch_archivers: bool,
     edit: bar::ArchiverEdit,
+    /// Middle-clicks and pastes, for the host's selection.
+    paste: paste::PasteState,
 }
 
 /// Where the axes (strip, name) and chips (whole, dot) were last drawn.
@@ -335,6 +340,7 @@ impl Plot {
             archiver_changed: false,
             switch_archivers: false,
             edit: bar::ArchiverEdit::default(),
+            paste: paste::PasteState::default(),
         }
     }
 
@@ -428,6 +434,74 @@ impl Plot {
         self.next_trace += 1;
         self.traces.push(trace);
         self.traces.last_mut()
+    }
+
+    /// Add the PVs named in pasted `text` (the primary selection after a
+    /// middle-click, or the clipboard): see [`pv_names`]. More than
+    /// [`MAX_PASTE`] adds none (a screenful selected by accident). Says what it did,
+    /// as [`Plot::take_pasted`] does after.
+    pub fn paste_pvs(&mut self, text: &str) -> Pasted {
+        let mut pasted = Pasted::default();
+        let names = pv_names(text);
+        if names.len() > MAX_PASTE {
+            pasted.too_many = names.len();
+            return self.pasted(pasted);
+        }
+        let plotted: Vec<String> = self.traces.iter().map(|t| t.pv.name().key()).collect();
+        let mut adding = Vec::new();
+        for name in names {
+            let key = pv::PvName::parse(&name).key();
+            if plotted.contains(&key) {
+                pasted.present.push(name);
+            } else if !adding.contains(&key) {
+                // Once, however it is spelt (`A:B`, `ca://A:B`).
+                adding.push(key);
+                pasted.added.push(name);
+            }
+        }
+        // As the search box adds: one call, one step to undo.
+        self.add_pvs(&pasted.added);
+        if pasted.added.is_empty() && pasted.present.is_empty() {
+            pasted.text = text.to_string();
+        }
+        self.pasted(pasted)
+    }
+
+    /// Keep what a paste did for [`Plot::take_pasted`], and draw again
+    /// (a host answering a middle-click does so between frames).
+    fn pasted(&mut self, pasted: Pasted) -> Pasted {
+        self.paste.pasted = Some(pasted.clone());
+        if let Some(r) = &self.repaint {
+            r.ctx.request_repaint_of(r.viewport);
+        }
+        pasted
+    }
+
+    /// Paste `text` into the search box at its cursor (where the
+    /// middle-click put it), as a Linux text field does.
+    pub fn paste_into_search(&mut self, text: &str) {
+        bar::paste(self, text);
+    }
+
+    /// Where the middle button was clicked since the host last asked: the
+    /// host answers with the primary selection's text ([`Plot::paste_pvs`],
+    /// [`Plot::paste_into_search`]). The widget reads no clipboard. A
+    /// click stays here until taken (a later one replaces it), so a host
+    /// that never asks leaves one waiting, which is harmless.
+    pub fn take_middle_click(&mut self) -> Option<MiddleClick> {
+        self.paste.middle.take()
+    }
+
+    /// What the last paste did, once: Ctrl+V over the plot (egui's
+    /// `Event::Paste`) or [`Plot::paste_pvs`]. For the host's toast.
+    pub fn take_pasted(&mut self) -> Option<Pasted> {
+        self.paste.pasted.take()
+    }
+
+    /// Text newly selected in the search box, once, for the host to make
+    /// the primary selection (egui does not).
+    pub fn take_search_selection(&mut self) -> Option<String> {
+        self.paste.selection.take()
     }
 
     /// Remove a trace by the name it was added with.
@@ -643,6 +717,19 @@ impl Plot {
             ui.allocate_exact_size(Vec2::new(width, plot_h), Sense::click_and_drag());
         ui.add_space(gap);
         legend::interact(self, ui, &mut chips);
+        // A middle-click on the plot or the legend (not on a popup over
+        // them) asks the host for the selection.
+        let below = Rect::from_min_size(rect.min, Vec2::new(width, plot_h + gap + chips.height));
+        let middle = ui.input(|i| {
+            let clicked = i.pointer.button_clicked(egui::PointerButton::Middle);
+            clicked.then(|| i.pointer.interact_pos()).flatten()
+        });
+        if let Some(p) = middle
+            && below.contains(p)
+            && ui.ctx().layer_id_at(p) == Some(ui.layer_id())
+        {
+            self.paste.middle = Some(MiddleClick::Plot);
+        }
         #[cfg(test)]
         {
             self.chips_shown = chips.shown();
@@ -1659,6 +1746,16 @@ impl Plot {
         }
         if pressed(Key::Home) {
             self.reset();
+        }
+        // Ctrl+V: egui hands over the clipboard's text.
+        let pasted = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Paste(text) => Some(text.clone()),
+                _ => None,
+            })
+        });
+        if let Some(text) = pasted {
+            self.paste_pvs(&text);
         }
     }
 }
@@ -3275,6 +3372,176 @@ mod tests {
         p.set_archiver(None);
         assert_eq!(p.traces[0].fetch.generation, 4, "old answers stay stale");
         assert!(p.traces[0].fetch.requested.is_none());
+    }
+
+    /// Press and release `button` at `at`, `moves` on the way.
+    fn click_by(h: &mut Harness, button: egui::PointerButton, at: Pos2, moves: &[Pos2]) {
+        let ev = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(vec![egui::Event::PointerMoved(at), ev(at, true)]);
+        let mut last = at;
+        for &p in moves {
+            h.frame(vec![egui::Event::PointerMoved(p)]);
+            last = p;
+        }
+        h.frame(vec![ev(last, false)]);
+    }
+
+    #[test]
+    fn middle_click_on_the_plot_or_legend_asks_for_the_selection() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.add_pvs(&names(&["sim://sine"]));
+        let mut h = Harness::new(p);
+        h.frame(vec![]);
+        let middle = egui::PointerButton::Middle;
+        click_by(&mut h, middle, MIDDLE, &[]);
+        assert_eq!(h.plot.take_middle_click(), Some(MiddleClick::Plot));
+        assert_eq!(h.plot.take_middle_click(), None, "taken once");
+        assert!(h.plot.window.live, "a click is no pan");
+        // On the legend, between the chips too.
+        let chip = h.plot.chips_shown[0].1;
+        click_by(&mut h, middle, chip.center(), &[]);
+        assert_eq!(h.plot.take_middle_click(), Some(MiddleClick::Plot));
+        click_by(&mut h, middle, Pos2::new(900.0, chip.center().y), &[]);
+        assert_eq!(h.plot.take_middle_click(), Some(MiddleClick::Plot));
+        // A middle drag pans as before and asks for nothing; a primary
+        // click asks for nothing either.
+        let moves = [Pos2::new(560.0, 300.0), Pos2::new(700.0, 300.0)];
+        click_by(&mut h, middle, MIDDLE, &moves);
+        assert_eq!(h.plot.take_middle_click(), None);
+        assert!(!h.plot.window.live, "dragged: back in time");
+        click_by(&mut h, egui::PointerButton::Primary, MIDDLE, &[]);
+        assert_eq!(h.plot.take_middle_click(), None);
+        // Nor does one on the top bar.
+        click_by(&mut h, middle, Pos2::new(990.0, 5.0), &[]);
+        assert_ne!(h.plot.take_middle_click(), Some(MiddleClick::Plot));
+    }
+
+    #[test]
+    fn pasted_text_adds_the_pvs_it_names() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.add_pvs(&names(&["A:B"]));
+        let pasted = p.paste_pvs("A:B, C:D\n12:30:00 pva://E:F ca://C:D");
+        assert_eq!(pasted.added, ["C:D", "pva://E:F"]);
+        assert_eq!(pasted.present, ["A:B"]);
+        assert_eq!(p.take_pasted(), Some(pasted));
+        assert_eq!(p.names(), ["A:B", "C:D", "pva://E:F"]);
+        let none = p.paste_pvs("42, 12:30:00");
+        assert!(none.added.is_empty() && none.text == "42, 12:30:00");
+        // A screenful adds nothing.
+        let screen: Vec<String> = (0..30).map(|i| format!("W{i}")).collect();
+        let many = p.paste_pvs(&screen.join(" "));
+        assert_eq!((many.too_many, many.added.len()), (30, 0));
+        assert_eq!(p.names().len(), 3);
+        // MAX_PASTE of them is fine.
+        let twenty = p.paste_pvs(&screen[..MAX_PASTE].join(" "));
+        assert_eq!(twenty.added.len(), MAX_PASTE);
+
+        // Ctrl+V over the plot: egui's paste event.
+        let mut h = Harness::new(p);
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.plot.take_pasted();
+        h.frame(vec![egui::Event::Paste("G:H".into())]);
+        assert_eq!(h.plot.names().last().map(String::as_str), Some("G:H"));
+        assert_eq!(h.plot.take_pasted().unwrap().message(), "Added G:H");
+        // Not while the search box has the keyboard: it is pasted there.
+        h.key(egui::Key::Slash);
+        h.frame(vec![egui::Event::Paste("I:J".into())]);
+        assert_eq!(h.plot.names().len(), 4 + MAX_PASTE);
+        assert_eq!(h.plot.search.text(), "I:J");
+    }
+
+    #[test]
+    fn middle_click_pastes_into_the_search_box_and_selecting_reports() {
+        let pvs = PvManager::new();
+        let mut h = Harness::new(Plot::new(&pvs, None));
+        h.frame(vec![]);
+        // The box is on the left of the top bar.
+        let in_box = Pos2::new(80.0, 12.0);
+        click_by(&mut h, egui::PointerButton::Middle, in_box, &[]);
+        assert_eq!(h.plot.take_middle_click(), Some(MiddleClick::Search));
+        h.plot.paste_into_search(" SR-DI-DCCT-01:SIGNAL\n");
+        h.frame(vec![]);
+        assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNAL");
+        // At the cursor, which is after what was pasted.
+        h.plot.paste_into_search("X");
+        h.frame(vec![]);
+        assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNALX");
+        assert!(h.ctx.memory(|m| m.has_focus(h.plot.id.with("search"))));
+
+        // Selecting all of it (as a drag or a double-click would) reports
+        // it once, for the primary selection.
+        h.plot.take_search_selection();
+        let select_all = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        h.frame(vec![select_all]);
+        h.frame(vec![]);
+        assert_eq!(
+            h.plot.take_search_selection().as_deref(),
+            Some("SR-DI-DCCT-01:SIGNALX")
+        );
+        h.frame(vec![]);
+        assert_eq!(h.plot.take_search_selection(), None);
+
+        // Back in the box from elsewhere, a middle-click pastes where it
+        // lands (here past the end), not over the whole text as a primary
+        // click into the box selects it.
+        click_by(&mut h, egui::PointerButton::Primary, MIDDLE, &[]);
+        assert!(!h.ctx.memory(|m| m.has_focus(h.plot.id.with("search"))));
+        click_by(
+            &mut h,
+            egui::PointerButton::Middle,
+            Pos2::new(300.0, 12.0),
+            &[],
+        );
+        assert_eq!(h.plot.take_middle_click(), Some(MiddleClick::Search));
+        assert_eq!(h.plot.take_search_selection(), None);
+        h.plot.paste_into_search("Y");
+        h.frame(vec![]);
+        assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNALXY");
+        // A primary click into the box selects all of it, but that is
+        // not the user's selection: the primary selection keeps theirs.
+        click_by(&mut h, egui::PointerButton::Primary, MIDDLE, &[]);
+        h.plot.take_search_selection();
+        click_by(
+            &mut h,
+            egui::PointerButton::Primary,
+            Pos2::new(80.0, 12.0),
+            &[],
+        );
+        h.frame(vec![]);
+        assert!(h.ctx.memory(|m| m.has_focus(h.plot.id.with("search"))));
+        assert_eq!(h.plot.take_search_selection(), None);
+        // Selecting the same text on purpose then is reported.
+        let select_all = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        h.frame(vec![select_all]);
+        h.frame(vec![]);
+        assert_eq!(
+            h.plot.take_search_selection().as_deref(),
+            Some("SR-DI-DCCT-01:SIGNALXY")
+        );
+        // A middle-click on the ✕ pastes nothing.
+        let cross = h.plot.paste.clear_rect.unwrap().center();
+        click_by(&mut h, egui::PointerButton::Middle, cross, &[]);
+        assert_eq!(h.plot.take_middle_click(), None);
+        assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNALXY");
     }
 
     #[test]

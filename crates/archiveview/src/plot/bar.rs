@@ -6,6 +6,7 @@ use archiver::{ArchiverClient, Search};
 use egui::text::{CCursor, CCursorRange};
 use egui::{Align, Color32, Key, Layout, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
+use super::paste::MiddleClick;
 use super::status::ArchiverState;
 use super::timeaxis::{format_local, format_span, parse_local, parse_span};
 use super::window::{PRESETS, Window};
@@ -146,6 +147,7 @@ pub fn top_bar(
                      shift+drag: zoom to box · double-click: reset\n\
                      over an axis: drag or shift+wheel zooms it alone\n\
                      chip's dot or drag a chip onto an axis: move its trace\n\
+                     middle-click, ctrl+V: add the selected or copied PVs\n\
                      / search · ←→ pan · +/- zoom · L live · A autoscale",
                 )
                 .small()
@@ -331,6 +333,33 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         s.open = true;
         s.select_all = false;
     }
+    // A middle-click pastes at the click, as on Linux, not over the
+    // whole text.
+    let middle = ui.input(|i| {
+        let m = egui::PointerButton::Middle;
+        i.pointer.button_down(m) || i.pointer.button_released(m)
+    });
+    if middle && resp.contains_pointer() {
+        s.select_all = false;
+    }
+    // Any press or key in the box makes its selection the user's again.
+    let touched = ui.input(|i| {
+        i.pointer.any_pressed()
+            || i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::Key { pressed: true, .. }
+                        | egui::Event::Text(_)
+                        | egui::Event::Paste(_)
+                )
+            })
+    });
+    if !focused || touched {
+        plot.paste.auto = None;
+    }
+    if !focused {
+        plot.paste.selected.clear();
+    }
     if s.select_all {
         // Until the click that focused the box is let go, unless it drags
         // out a selection of its own.
@@ -339,7 +368,30 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         } else {
             let all = CCursorRange::two(CCursor::new(0), CCursor::new(s.text.chars().count()));
             set_cursor(ui.ctx(), edit_id, all);
+            // Not a selection of the user's: the primary selection keeps
+            // theirs, to middle-click into the box.
+            plot.paste.auto = Some(s.text.clone());
             s.select_all = ui.input(|i| i.pointer.any_down());
+        }
+    }
+    // A middle-click pastes the primary selection here (the host reads
+    // it; egui has already put the cursor there), unless it is on the ✕
+    // or the regex toggle (below). Text selected here becomes the primary
+    // selection, once the pointer lets go.
+    let middle_at = resp
+        .clicked_by(egui::PointerButton::Middle)
+        .then(|| resp.interact_pointer_pos())
+        .flatten();
+    if focused && !ui.input(|i| i.pointer.any_down()) {
+        let selected = egui::TextEdit::load_state(ui.ctx(), edit_id)
+            .and_then(|st| st.cursor.char_range())
+            .map_or("", |r| r.slice_str(&s.text));
+        let auto = plot.paste.auto.as_deref() == Some(selected);
+        if selected != plot.paste.selected && !auto {
+            plot.paste.selected = selected.to_string();
+            if !selected.is_empty() {
+                plot.paste.selection = Some(selected.to_string());
+            }
         }
     }
 
@@ -348,13 +400,24 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         Pos2::new(rect.right() - regex_w / 2.0 - 5.0, rect.center().y),
         Vec2::new(regex_w, h - 8.0),
     );
+    let x = if show_regex {
+        toggle.left() - clear_w / 2.0
+    } else {
+        rect.right() - 5.0 - clear_w / 2.0
+    };
+    let button = Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0));
+    let on_button =
+        |p: Pos2| (show_clear && button.contains(p)) || (show_regex && toggle.contains(p));
+    if let Some(p) = middle_at
+        && !on_button(p)
+    {
+        plot.paste.middle = Some(MiddleClick::Search);
+    }
+    #[cfg(test)]
+    {
+        plot.paste.clear_rect = Some(button);
+    }
     if show_clear {
-        let x = if show_regex {
-            toggle.left() - clear_w / 2.0
-        } else {
-            rect.right() - 5.0 - clear_w / 2.0
-        };
-        let button = Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0));
         let r = ui
             .interact(button, plot.id.with("clear"), Sense::click())
             .on_hover_text("Clear");
@@ -711,6 +774,57 @@ impl Row {
             && names
                 .iter()
                 .all(|n| plotted.contains(&pv::PvName::parse(n.trim()).key()))
+    }
+}
+
+#[cfg(test)]
+impl SearchState {
+    /// What the box holds.
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+/// Put pasted `text` into the search box at its cursor (replacing any
+/// selection; at the end if it has no cursor), on one line, and give the
+/// box the keyboard.
+pub(super) fn paste(plot: &mut Plot, text: &str) {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let edit_id = plot.id.with("search");
+    let ctx = plot.repaint.as_ref().map(|r| r.ctx.clone());
+    let range = ctx
+        .as_ref()
+        .and_then(|c| egui::TextEdit::load_state(c, edit_id))
+        .and_then(|st| st.cursor.char_range());
+    let s = &mut plot.search;
+    let chars = s.text.chars().count();
+    let (from, to) = range.map_or((chars, chars), |r| {
+        let r = r.as_sorted_char_range();
+        (
+            usize::from(r.start).min(chars),
+            usize::from(r.end).min(chars),
+        )
+    });
+    let byte = |c: usize| {
+        s.text
+            .char_indices()
+            .nth(c)
+            .map_or(s.text.len(), |(b, _)| b)
+    };
+    let (a, b) = (byte(from), byte(to));
+    s.text.replace_range(a..b, &text);
+    if let Some(ctx) = &ctx {
+        let end = CCursor::new(from + text.chars().count());
+        set_cursor(ctx, edit_id, CCursorRange::one(end));
+    }
+    s.edited_at = now();
+    s.selected = None;
+    s.open = true;
+    s.select_all = false;
+    // The keyboard, without selecting all as a click into the box does.
+    s.refocus = true;
+    if let Some(r) = &plot.repaint {
+        r.ctx.request_repaint_of(r.viewport);
     }
 }
 
