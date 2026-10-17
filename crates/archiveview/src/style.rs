@@ -183,4 +183,68 @@ mod tests {
             "lighter on dark"
         );
     }
+
+    /// Every character outside ASCII in the code (not its comments): the
+    /// symbols the interface shows, with where each is used.
+    fn ui_glyphs() -> Vec<(char, String)> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let mut glyphs: Vec<(char, String)> = Vec::new();
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                // The code before a comment (a URL's "//" is in a string,
+                // and has no symbols after it worth missing).
+                let code = line.split("//").next().unwrap_or("");
+                for c in code.chars().filter(|c| !c.is_ascii()) {
+                    if !glyphs.iter().any(|(g, _)| *g == c) {
+                        let at = f.file_name().unwrap().to_string_lossy();
+                        glyphs.push((c, format!("{at}:{}", n + 1)));
+                    }
+                }
+            }
+        }
+        glyphs
+    }
+
+    /// A glyph missing from the fonts is drawn as a box: every symbol the
+    /// interface uses must be in the fonts [`install_fonts`] installs (the
+    /// proportional ones: monospace shows only ".*").
+    /// (bobview, which embeds the plot, installs the same fallbacks; egui's
+    /// own fonts alone lack arrows such as → and ⏎.)
+    #[test]
+    fn every_symbol_shown_is_in_the_fonts() {
+        let glyphs = ui_glyphs();
+        assert!(
+            glyphs.iter().any(|(c, _)| *c == '…'),
+            "the scan finds symbols"
+        );
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        // Fonts are loaded on the first frame.
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        for font in [egui::FontId::proportional(13.0), bold(&ctx, 13.0)] {
+            let missing: Vec<String> = ctx.fonts_mut(|f| {
+                (glyphs.iter())
+                    .filter(|(c, _)| !f.has_glyph(&font, *c))
+                    .map(|(c, at)| format!("{c} (U+{:04X}, {at})", *c as u32))
+                    .collect()
+            });
+            assert!(missing.is_empty(), "not in {font:?}: {missing:?}");
+        }
+    }
 }

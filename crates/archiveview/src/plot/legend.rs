@@ -1,6 +1,6 @@
 //! The legend: a wrapped row of chips under the plot, one per trace: a
-//! colour dot, the name, the latest value. Click to hide or show, ✕ to
-//! remove, hover to pick the trace out.
+//! colour dot, the name, the latest value. Click to hide or show, its
+//! cross to remove, hover to pick the trace out.
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
@@ -35,7 +35,10 @@ struct Chip {
     severity: Option<Color32>,
     /// Quiet words after the value: "live only", "no data".
     mark: Option<String>,
-    note: String,
+    /// Its tooltip: the PV's name, then its live and archive status.
+    title: String,
+    status: Vec<String>,
+    array: bool,
     /// The value as shown, for tests.
     #[cfg(test)]
     text: String,
@@ -59,6 +62,25 @@ impl Chip {
             Pos2::new(r.left() + PAD + DOT / 2.0, r.center().y),
             Vec2::new(DOT + 10.0, HEIGHT),
         )
+    }
+
+    /// What hovering it shows: the PV's name and status, then what can be
+    /// done to it.
+    fn tooltip(&self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(&self.title).strong());
+        for line in &self.status {
+            ui.label(line);
+        }
+        ui.add_space(4.0);
+        let mut rows = vec![("Click", "hide or show"), ("Click its ×", "remove")];
+        if !self.array {
+            rows.extend([
+                ("Click its dot", "choose its value axis"),
+                ("Drag onto an axis", "move it to that axis"),
+                ("Drag onto the plot", "give it an axis of its own"),
+            ]);
+        }
+        super::gestures(ui, egui::Id::new(("chip-gestures", self.trace)), &rows);
     }
 
     fn close_rect(&self, origin: Vec2) -> Rect {
@@ -117,19 +139,19 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
         } else {
             ("—".to_string(), false)
         };
-        let mut note = vec![t.name.clone()];
+        let mut status = Vec::new();
         if state.connected {
-            note.push("Live: connected".into());
+            status.push("Live: connected".into());
         } else if let Some(e) = &state.error {
-            note.push(format!("Live: {e}"));
+            status.push(format!("Live: {e}"));
         } else {
-            note.push("Live: not connected".into());
+            status.push("Live: not connected".into());
         }
         if array {
-            note.push("An array: not plotted".into());
+            status.push("An array: not plotted".into());
         }
         if plot.archiver.is_some() {
-            note.push(if t.archive_name().is_none() {
+            status.push(if t.archive_name().is_none() {
                 "Archive: none for this kind of PV".to_string()
             } else if t.fetch.not_archived {
                 "Archive: not archived (live only)".to_string()
@@ -153,10 +175,6 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
             } else {
                 "Archive: fetching…".to_string()
             });
-        }
-        note.push("Click to hide or show; ✕ to remove".into());
-        if !array {
-            note.push("Its dot, or drag it onto an axis: choose its value axis".into());
         }
         let mark = marks(
             plot.archiver.is_some(),
@@ -204,7 +222,9 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
                 None
             },
             mark,
-            note: note.join("\n"),
+            title: t.name.clone(),
+            status,
+            array,
             #[cfg(test)]
             text,
         });
@@ -235,7 +255,7 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
     let mut remove = None;
     for c in &chips.chips {
         // An array is not plotted: no value axis to choose.
-        let array = plot.traces.iter().any(|t| t.id == c.trace && t.is_array());
+        let array = c.array;
         let r = ui
             .interact(
                 c.rect.translate(chips.origin),
@@ -246,7 +266,7 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
                     Sense::click_and_drag()
                 },
             )
-            .on_hover_text(&c.note);
+            .on_hover_ui(|ui| c.tooltip(ui));
         #[cfg(test)]
         plot.seen
             .1
