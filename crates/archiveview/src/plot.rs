@@ -461,7 +461,13 @@ impl Plot {
                 end: view::format_time(to),
             }
         };
-        let mut axes = self.axes.iter().map(ValueAxis::view);
+        // Only axes with traces, or kept for a PV yet to settle (pruned
+        // once that PV is gone): no stale fixed range comes back for
+        // whichever PV would take it.
+        let kept: Vec<&ValueAxis> = (self.axes.iter())
+            .filter(|a| self.has_traces(a) || a.reserved.is_some())
+            .collect();
+        let mut axes = kept.iter().map(|a| a.view());
         View {
             version: view::VERSION,
             pvs: self
@@ -471,9 +477,7 @@ impl Plot {
                     name: t.name.clone(),
                     color: t.color.clone(),
                     visible: t.visible,
-                    axis: t
-                        .axis
-                        .and_then(|id| self.axes.iter().position(|a| a.id == id)),
+                    axis: t.axis.and_then(|id| kept.iter().position(|a| a.id == id)),
                 })
                 .collect(),
             range,
@@ -663,7 +667,7 @@ impl Plot {
         // trace keeps its band, the others lose theirs.
         let binned: Vec<bool> = data.iter().map(|pts| pts.iter().any(Pt::is_bin)).collect();
         let bands = (self.traces.iter().zip(&binned))
-            .filter(|(t, b)| t.visible && **b)
+            .filter(|(t, b)| t.visible && t.axis.is_some() && **b)
             .count();
         let lines: Vec<render::Line> = self
             .paint_order()
@@ -825,9 +829,11 @@ impl Plot {
         (known, unknown)
     }
 
-    /// Whether trace `t` still waits for its first archived history.
+    /// Whether trace `t` still waits for its first archived history (not
+    /// from an archiver known to be unreachable).
     fn awaits_history(&self, t: &Trace) -> bool {
         self.archiver.is_some()
+            && self.monitor.status.state != ArchiverState::Unreachable
             && t.archive_name().is_some()
             && !t.fetch.not_archived
             && t.history.is_none()
@@ -866,9 +872,22 @@ impl Plot {
             let pending = self.awaits_history(t);
             let archived = t.history.as_ref().is_some_and(|h| !h.samples.is_empty());
             let live = !pending && t.data_since.is_some_and(|s| now - s >= LIVE_WAIT);
-            if stats.is_none() || !(late || archived || live) {
+            // No units from the archive: its live units may yet come, and
+            // should decide (within the wait).
+            let units_due = units(t).is_empty() && t.archive_name().is_some() && !t.pv.connected();
+            if stats.is_none() || !(late || ((archived || live) && !units_due)) {
                 // It may yet get data, or more of it: those after it wait.
                 blocked |= !late && (pending || stats.is_some());
+                if late && stats.is_none() {
+                    // Nothing came in time: an axis kept for it (from an
+                    // old view) is not kept any longer.
+                    let id = self.traces[i].id;
+                    for a in &mut self.axes {
+                        if a.reserved == Some(id) {
+                            a.reserved = None;
+                        }
+                    }
+                }
                 continue;
             }
             if blocked {
@@ -894,13 +913,13 @@ impl Plot {
         if let Some(a) = self
             .axes
             .iter()
-            .find(|a| !a.used && a.reserved.is_none_or(|r| r == trace))
+            .find(|a| !a.used && a.reserved == Some(trace))
         {
             return a.id;
         }
         let mut a = ValueAxis::new(self.next_axis);
         self.next_axis += 1;
-        a.log = self.default_log || stats.wants_log();
+        a.log = (self.default_log && stats.positive) || stats.wants_log();
         let id = a.id;
         self.axes.push(a);
         id
@@ -942,13 +961,18 @@ impl Plot {
         self.prune_axes();
     }
 
-    /// Drop the axes whose last trace has left, and keep the others in
-    /// the legend's order (of each one's first trace), so the first chip's
-    /// axis is always the first.
+    /// Drop the axes with no trace: those whose last trace has left, and
+    /// one from a view kept for a trace that is gone, is an array, or
+    /// got no data. Keep the others in the legend's order (of each one's
+    /// first trace), so the first chip's axis is always the first.
     fn prune_axes(&mut self) {
         let traces = &self.traces;
-        self.axes
-            .retain(|a| !a.used || traces.iter().any(|t| t.axis == Some(a.id)));
+        self.axes.retain(|a| {
+            traces.iter().any(|t| t.axis == Some(a.id))
+                || (!a.used
+                    && a.reserved
+                        .is_some_and(|r| traces.iter().any(|t| t.id == r && !t.is_array())))
+        });
         self.axes.sort_by_key(|a| {
             traces
                 .iter()
@@ -1498,7 +1522,7 @@ impl Plot {
         }
     }
 
-    /// The value axis drawn `k`th this frame (not a provisional one).
+    /// The value axis drawn `k`th this frame.
     fn drawn_axis_mut(&mut self, k: usize) -> Option<&mut ValueAxis> {
         let id = self.drawn.get(k).copied()?;
         self.axes.iter_mut().find(|a| a.id == id)
@@ -1517,18 +1541,28 @@ impl Plot {
         }
     }
 
-    /// Every value axis autoscales.
+    /// Whether value axis `a` has traces on it.
+    fn has_traces(&self, a: &ValueAxis) -> bool {
+        self.traces.iter().any(|t| t.axis == Some(a.id))
+    }
+
+    /// Every value axis with traces autoscales.
     fn autoscaling(&self) -> bool {
-        self.axes.iter().all(|a| a.autoscale)
+        self.axes
+            .iter()
+            .filter(|a| self.has_traces(a))
+            .all(|a| a.autoscale)
     }
 
-    /// Every value axis is on a log scale (and there is one).
+    /// Every value axis with traces is on a log scale (and there is one).
     fn all_log(&self) -> bool {
-        !self.axes.is_empty() && self.axes.iter().all(|a| a.log)
+        let mut on = self.axes.iter().filter(|a| self.has_traces(a)).peekable();
+        on.peek().is_some() && on.all(|a| a.log)
     }
 
-    /// Every value axis on a log scale, or none.
+    /// Every value axis on a log scale, or none; new axes too.
     fn set_log(&mut self, log: bool) {
+        self.default_log = log;
         for a in &mut self.axes {
             a.log = log;
             a.fit_log_range();
@@ -1769,6 +1803,8 @@ mod tests {
         let mut p = Plot::new(&pvs, None);
         p.add_pvs(&names(&["sim://sine", "sim://ramp", "sim://noise"]));
         let mut h = Harness::new(p);
+        // On their axes (after a second of live data), so drawn.
+        h.until(|p| p.traces.iter().all(|t| t.axis.is_some()));
         assert_eq!(h.plot.paint_order(), [0, 1, 2]);
         let (id, rect, _) = h.plot.chips_shown[0].clone();
         assert_eq!(id, h.plot.traces[0].id);
@@ -2460,6 +2496,22 @@ mod tests {
         (p, data)
     }
 
+    /// An archived history of `values` in `egu`.
+    fn hist_of(egu: &str, values: &[f64]) -> Option<History> {
+        Some(History {
+            meta: archiver::Meta {
+                egu: Some(egu.to_string()),
+                ..Default::default()
+            },
+            samples: values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| archiver::Sample::raw(i as f64, *v))
+                .collect(),
+            ..Default::default()
+        })
+    }
+
     /// Each trace's axis, as an index into the plot's axes.
     fn axis_indices(p: &Plot) -> Vec<Option<usize>> {
         p.traces
@@ -2665,9 +2717,85 @@ mod tests {
     }
 
     #[test]
+    fn an_old_views_axis_goes_with_its_pv() {
+        // The reviewer's probe: SIG is removed before it settles.
+        let (mut p, data) = plot_of(&[("SIG", "mA", &[300.0, 290.0]), ("LT", "h", &[10.0, 12.0])]);
+        let mut v = p.view();
+        v.y = YAxis {
+            autoscale: false,
+            min: Some(1.0),
+            max: Some(300.0),
+            log: false,
+            name: None,
+        };
+        let hist: Vec<Option<History>> = p.traces.iter().map(|t| t.history.clone()).collect();
+        p.set_view(&v);
+        for (t, h) in p.traces.iter_mut().zip(hist) {
+            t.history = h;
+        }
+        // Saved before anything settles, the view keeps its `y`.
+        assert_eq!(p.view().y, v.y);
+        p.remove_pv("SIG");
+        p.settle_axes(&data[1..], 0.0);
+        assert_eq!(p.axes.len(), 1, "no axis left for SIG");
+        assert!(p.autoscaling());
+        let saved = p.view();
+        assert!(saved.y.autoscale && saved.axes.is_empty(), "{saved:?}");
+        // Reloaded, a new PV gets an axis of its own, autoscaled.
+        p.set_view(&saved);
+        p.traces[0].history = hist_of("h", &[10.0, 12.0]);
+        p.add_pvs(&names(&["V1"]));
+        p.traces[1].history = hist_of("V", &[0.001, 0.002]);
+        let volts = vec![Pt::raw(0.0, 0.001), Pt::raw(1.0, 0.002)];
+        p.settle_axes(&[Vec::new(), volts], 0.0);
+        let id = p.traces[1].axis.unwrap();
+        assert!(p.axes.iter().find(|a| a.id == id).unwrap().autoscale);
+
+        // A reserved PV that never gets data frees its axis after the wait.
+        let (mut p, data) = plot_of(&[("DEAD", "mA", &[]), ("LT", "h", &[10.0])]);
+        let hist: Vec<Option<History>> = p.traces.iter().map(|t| t.history.clone()).collect();
+        p.set_view(&v);
+        for (t, h) in p.traces.iter_mut().zip(hist) {
+            t.history = h;
+        }
+        p.settle_axes(&data, 0.0);
+        p.settle_axes(&data, SETTLE_WAIT);
+        assert_eq!(p.axes.len(), 1);
+        assert!(p.autoscaling() && p.view().axes.is_empty());
+    }
+
+    #[test]
+    fn turning_log_off_turns_it_off_for_new_axes() {
+        let (mut p, data) = plot_of(&[("A", "mA", &[300.0]), ("B", "h", &[10.0])]);
+        let mut v = p.view();
+        v.y.log = true;
+        let hist: Vec<Option<History>> = p.traces.iter().map(|t| t.history.clone()).collect();
+        p.set_view(&v);
+        for (t, h) in p.traces.iter_mut().zip(hist) {
+            t.history = h;
+        }
+        p.set_log(false);
+        p.settle_axes(&data, 0.0);
+        assert!(p.axes.iter().all(|a| !a.log));
+    }
+
+    #[test]
+    fn an_unreachable_archiver_owes_no_history() {
+        let (mut p, _) = plot_of(&[("A", "mA", &[300.0])]);
+        p.archiver = Some(ArchiverClient::new("http://127.0.0.1:9").unwrap());
+        p.traces[0].history = None;
+        assert!(p.awaits_history(&p.traces[0]));
+        p.monitor.status.state = ArchiverState::Unreachable;
+        assert!(!p.awaits_history(&p.traces[0]), "live data settles it");
+    }
+
+    #[test]
     fn a_zero_fits_no_scale() {
         let (mut p, data) = plot_of(&[("A", "", &[300.0]), ("B", "", &[0.0])]);
+        // No units archived: they wait (up to the limit) for live units.
         p.settle_axes(&data, 0.0);
+        assert_eq!(axis_indices(&p), [None, None]);
+        p.settle_axes(&data, SETTLE_WAIT);
         assert_eq!(axis_indices(&p), [Some(0), Some(1)]);
     }
 

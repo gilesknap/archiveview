@@ -289,9 +289,10 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         plot.traces.retain(|t| t.id != id);
         highlight = None;
     }
-    // Only a drawn trace is picked out: visible, and not an array.
-    plot.highlight = highlight
-        .filter(|id| (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array()));
+    // Only a drawn trace is picked out: visible, not an array, on an axis.
+    plot.highlight = highlight.filter(|id| {
+        (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array() && t.axis.is_some())
+    });
 }
 
 /// The quiet words after a chip's value, saying why it has no line or no
@@ -403,7 +404,9 @@ pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark:
         );
         let color = plot.color(t, dark);
         let dot = Pos2::new(rect.left() + PAD + DOT / 2.0, rect.center().y);
-        if t.fetch.in_flight {
+        // Fetching, or with data but not yet on an axis (so not drawn).
+        let waiting = t.visible && !t.is_array() && t.axis.is_none() && t.data_since.is_some();
+        if t.fetch.in_flight || waiting {
             // A small spinner while fetching.
             let a0 = (time * 6.0) as f32;
             let pts: Vec<Pos2> = (0..=12)

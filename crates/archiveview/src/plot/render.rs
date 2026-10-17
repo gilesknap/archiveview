@@ -242,6 +242,21 @@ pub fn frame(
             )
         };
     }
+    // Each name fits up the data's height, its dots above it (elided
+    // with "…": the tooltip has it whole), and only the name itself
+    // takes the pointer for renaming.
+    for a in list.iter_mut().filter(|a| !a.title.is_empty()) {
+        let dots = if a.dots.is_empty() {
+            0.0
+        } else {
+            8.0 + a.dots.len() as f32 * 9.0
+        };
+        let room = (data.height() - 2.0 * dots).max(24.0);
+        a.title = elide(painter, &a.title, title_font, room);
+        let half = text_size(painter, &a.title, title_font).x / 2.0 + 2.0;
+        let mid = data.center().y;
+        a.title_rect = Rect::from_x_y_ranges(a.title_rect.x_range(), mid - half..=mid + half);
+    }
     let xs = Scale {
         lo: from,
         hi: to,
@@ -606,6 +621,19 @@ pub fn text_size(painter: &egui::Painter, text: &str, font: &FontId) -> Vec2 {
     painter
         .layout_no_wrap(text.to_string(), font.clone(), Color32::BLACK)
         .size()
+}
+
+/// `text`, cut short with "…" to fit `room` wide in `font`.
+fn elide(painter: &egui::Painter, text: &str, font: &FontId, room: f32) -> String {
+    if text_size(painter, text, font).x <= room {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    (1..chars.len())
+        .rev()
+        .map(|n| format!("{}…", chars[..n].iter().collect::<String>().trim_end()))
+        .find(|t| text_size(painter, t, font).x <= room)
+        .unwrap_or_else(|| "…".to_string())
 }
 
 /// Text turned to read upwards, centred on `center`.

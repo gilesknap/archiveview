@@ -160,7 +160,7 @@ Decimation:
 - Lines are anti-aliased with 1.5 pt stroke width, and 2.5 pt for the trace whose chip is hovered, which is also drawn last (on top of a trace with the same values) and is the only one with its band.
 
 Value axes (`plot/axes.rs` decides, `plot/axisui.rs` handles the gestures):
-- Every trace carries an axis id (`Trace::axis`), `None` until it **settles**, once. It is ready when its data is on screen and its archived history has come; with live data only (no archive, not archived, or an error), after 1 s of it, so a first sample (often a 0) does not decide. Traces settle **in legend order**: a ready trace waits while an earlier one may still get data (its archive answer is due, or it is in its 1 s), until that one settles, turns out to have no data, or 5 s pass since it was added. So the grouping does not depend on which archive answer comes first. A trace is not drawn until it settles (no provisional axes squeezing the plot while a big view loads); its chip shows its spinner meanwhile, and snapshots wait for it (`is_loading`). After that only the user moves it; zooming, refetches and reloads never do.
+- Every trace carries an axis id (`Trace::axis`), `None` until it **settles**, once. It is ready when its data is on screen and its archived history has come; with live data only (no archive, not archived, or an error), after 1 s of it, so a first sample (often a 0) does not decide. With no units in the archive, it also waits (within the 5 s) for its live connection's units, so it does not join an axis of other units by range alone. An archiver the status monitor finds unreachable owes no history: live traces settle on their own. Traces settle **in legend order**: a ready trace waits while an earlier one may still get data (its archive answer is due, or it is in its 1 s), until that one settles, turns out to have no data, or 5 s pass since it was added. So the grouping does not depend on which archive answer comes first. A trace is not drawn until it settles (no provisional axes squeezing the plot while a big view loads); its chip shows its spinner meanwhile, and snapshots wait for it (`is_loading`). After that only the user moves it; zooming, refetches and reloads never do.
 - Settling scores the trace against each axis with traces (`axes::score`), from the 5th..95th percentile of the values on screen (so a glitch or a spike does not decide), the units, and for enums their state names. Each trace keeps the stats it settled with (`Trace::stats`), so axes whose traces are hidden still score and count.
   - Differing units never join, even past the limit (missing units on either side: range only).
   - Enums join only enums with the same state names (from the live PV): unrelated enums get an axis each. Axes of states do not count toward the limit.
@@ -237,7 +237,7 @@ Legend chips (a wrapped row hugging the bottom of the plot):
 - Hovering a chip highlights its trace (thicker line, drawn on top, its band at full strength) and dims the others to 25% alpha, without their bands. An array's chip picks out nothing (it has no line).
 - Clicking the colour dot opens a menu of the value axes plus "New axis"; dragging the chip onto an axis moves its trace there. An array's chip has neither (it has no axis).
 - A disconnected trace's value shows a grey "—" and the chip's tooltip says why.
-- While a trace is fetching, a small spinner replaces the dot.
+- While a trace is fetching, or has data but no value axis yet (so is not drawn), a small spinner replaces the dot.
 
 ### Direct manipulation
 
@@ -303,7 +303,7 @@ default had, not none.
 }
 ```
 
-`y` is the first value axis and `axes` the others; a trace's `axis` counts `y` as 0. Both were added without a version bump: a file from before has no `axes` and no trace `axis`, so its traces settle as they are added; `y`'s settings are kept for its first visible PV (whichever settles first), and its `log: true` applies to every axis the others create. An older program ignores the new fields.
+`y` is the first value axis and `axes` the others; a trace's `axis` counts `y` as 0. Both were added without a version bump: a file from before has no `axes` and no trace `axis`, so its traces settle as they are added; `y`'s settings are kept for its first visible PV, even when another PV settles first (and dropped if that PV is removed, is an array, or gets no data within 5 s), and its `log: true` applies to every axis the others create (until ≡ ▸ Log scale is turned off). A view saves only axes with traces. An older program ignores the new fields.
 
 `archiver` (optional, added without a version bump) is the retrieval base
 in use when the view was saved; opening the view switches to it.
