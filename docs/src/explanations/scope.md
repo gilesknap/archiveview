@@ -20,7 +20,7 @@ property sheets, trace tables, axis configuration dialogs, archive data
 source lists and long context menus. archiveview has none of these. In v1 it
 also leaves out:
 
-- more than one value axis (all traces share one, linear or log);
+- choosing value axes by hand (traces get one per unit, up to three);
 - exporting data (CSV, spreadsheet);
 - statistics, formulas and waveform views;
 - `.plt` files;

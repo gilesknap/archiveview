@@ -27,6 +27,9 @@ pub struct Job {
     pub raw_from: f64,
     /// Ask `getMetadata` first, to learn whether to fetch raw.
     pub probe: bool,
+    /// Only the tail of the history (a live refresh): its samples are
+    /// added to the history, not put in its place.
+    pub append: bool,
 }
 
 /// A finished data request.
@@ -37,6 +40,8 @@ pub struct Done {
     pub from: f64,
     pub to: f64,
     pub op: Operator,
+    /// As [`Job::append`].
+    pub append: bool,
     pub info: Option<PvInfo>,
     pub result: Result<Option<TimeSeries>, archiver::Error>,
 }
@@ -74,6 +79,12 @@ impl Fetcher {
         self.busy.load(Ordering::Relaxed) > 0
     }
 
+    /// How many requests are in flight.
+    #[cfg(test)]
+    pub fn in_flight(&self) -> usize {
+        self.busy.load(Ordering::Relaxed)
+    }
+
     /// Requests in flight, or results not yet taken in.
     pub fn pending(&self) -> bool {
         self.busy() || !self.inbox.lock().is_empty() || self.found.lock().is_some()
@@ -97,8 +108,14 @@ impl Fetcher {
     ) {
         let client = client.clone();
         let inbox = self.inbox.clone();
-        let (trace, generation, from, to, op) =
-            (job.trace, job.generation, job.from, job.to, job.op);
+        let (trace, generation, from, to, op, append) = (
+            job.trace,
+            job.generation,
+            job.from,
+            job.to,
+            job.op,
+            job.append,
+        );
         let panicked = {
             let inbox = inbox.clone();
             move || {
@@ -108,6 +125,7 @@ impl Fetcher {
                     from,
                     to,
                     op,
+                    append,
                     info: None,
                     result: Err(archiver::Error::Transport(
                         "the request failed unexpectedly".into(),
@@ -126,6 +144,7 @@ impl Fetcher {
                             from: job.from,
                             to: job.to,
                             op: job.op,
+                            append: job.append,
                             info: None,
                             result: Err(check_404(&client, &job.pv, e)),
                         });
@@ -160,6 +179,7 @@ impl Fetcher {
                 from,
                 to: job.to,
                 op,
+                append: job.append,
                 info,
                 result,
             });

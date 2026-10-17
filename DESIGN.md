@@ -78,7 +78,7 @@ menu and config persistence around that widget.
 ```
  user input ──► Plot (time range, y range, traces)
                  │  range changed? ──debounce 300 ms──► Fetcher
-                 │                                       │ per trace: one job, newer cancels older
+                 │                                       │ per trace: one job at a time
                  │                                       ▼
                  │            pvs.runtime().spawn_blocking(ArchiverClient::get_data)
                  │                                       │
@@ -102,7 +102,7 @@ the trace is known to be:
 
 Refetch rules:
 - Changing the range (pan, zoom, preset, live scrolling past the padded window) triggers a refetch after a **300 ms** debounce.
-- Each trace has at most one job in flight. A newer request makes older results stale, using a generation counter, and their results are dropped. `set_archiver` keeps counting (it does not reset the counter), so answers from the previous archiver are stale too.
+- Each trace has at most one job in flight. While it runs no other starts, however the window moves; when it finishes, the next frame asks again for wherever the window is then. A new archiver (`set_archiver`) makes older results stale, using a generation counter, and their results are dropped. `set_archiver` keeps counting (it does not reset the counter), so answers from the previous archiver are stale too.
 - Searches can finish out of order; the inbox keeps only the newest answer.
 - A request that panics still counts down the busy count (a drop guard) and reports an error, so snapshots and live refreshes never wait on it (with the release profile's `panic = "abort"` a panic ends the process anyway).
 - Until the new data arrives, the previous history stays on screen, so there is no flicker.
@@ -112,7 +112,7 @@ Errors:
 - Any other error shows on the chip as a tooltip and as one line in the status hint. It is retried after 10 s, doubling with each failure in a row up to 5 minutes (or after 10 s for a different window).
 
 Live-following:
-- While following now, the plot refetches the tail (`from` = last archived t) at most every 30 s, so the history fills in behind the live data.
+- While following now, the plot refreshes the history at most every 30 s, so it fills in behind the live data. Raw history fetches only the tail (`from` = its last sample's time) and appends it, dropping what has scrolled out of the padded window. Binned history is fetched whole again: it is at most `MAX_BINS` points, and bins of a shorter tail would not line up with the others.
 
 ### Live merge
 
@@ -139,8 +139,11 @@ Decimation:
 - Zero-length segments are deduplicated, because they would produce NaN triangles (bobview `plot::line`).
 - Lines are anti-aliased with 1.5 pt stroke width, and 2.5 pt for the hovered trace.
 
-Value axis:
+Value axes:
+- One per distinct unit among the visible traces, in legend order, up to three; traces with yet more units share the third. The first is left of the data; the others stack outward on the right, their labels and title (the unit) in the trace's colour when one trace has the axis. With one unit there is one axis, as before.
+- The first axis takes the fixed range, the log scale and value zooming (box zoom, axis drag, shift-scroll). The others always autoscale to their own traces (log too when the scale is log).
 - Autoscaling covers the visible min/max including envelopes, padded with `axis::nice_range`.
+- Turning the log scale on with a fixed range at or below zero goes back to autoscaling.
 - Range changes animate over about 150 ms, using `ctx.animate_value_with_time` on lo and hi.
 
 ### Time model
@@ -193,7 +196,7 @@ Plot area (fills the rest):
   - Each value is the one the line shows at the hairline: for raw samples (drawn as steps) the last sample at or before it, "—" in a gap; for bins the nearest bin mean. Each trace gets a small dot where its line is.
   - For binned data the row also shows "min … max".
 - The **empty state** shows a centred, muted "Type a PV name to start" with a hint line ("/ to search · drag to pan · scroll to zoom"), plus an arrow glyph pointing at the search box.
-- **No data** in range (`[ ]`): when the chip has no samples at all, it shows "no data in range".
+- **No data** in range (`[ ]`): when the chip has no value at all (no live value and an empty history), it shows a quiet "no data" after the "—", and the crosshair card has a "—" row for it.
 
 Legend chips (a wrapped row hugging the bottom of the plot):
 
@@ -352,20 +355,10 @@ Errors and encoding:
 - **CI** runs fmt, clippy (`-D warnings`) and tests. It then takes snapshots by starting `archiveview-mockarchiver --port 17668 &`, then `archiveview --archiver http://127.0.0.1:17668 --snapshot snapshots/x.png --size 1280x800 --wait 5 MOCK:SINE MOCK:NOISE MOCK:NAN`, plus an empty-state snapshot and a dark-theme snapshot. The snapshots are uploaded as an artifact.
 - **Review snapshots against the UI bar above**, not just "it rendered". Check that the plot fills the window, the chrome is minimal, there are envelopes for binned data, the time labels are readable, the chips look right, and the empty state is there.
 
-## Work split
+## Where things live
 
-Three agents work in parallel on disjoint files. The shared interface is the
-`archiver` crate's public API (`crates/archiver/src/lib.rs`) and
-`mockarchiver::MockArchiver`, as defined in the skeleton. Change a shared
-signature only by adding to it.
-
-- **A: archiver client and mock appliance.** Owns `crates/archiver/**` and `crates/mockarchiver/**`. Fills every `todo!("agent A")` and writes the tests above. May add private modules and dependencies to those two crates only.
-- **B: the egui app.** Owns `crates/archiveview/**` (including `fonts/`). Fills every `todo!("agent B")` and implements `Plot`, `ArchiveApp`, `config`, `snapshot` and `main.rs` per this document. Splits `plot.rs` into private submodules. Copies (and credits) from bobview: `axis.rs`, `icons.rs`, `style::install_fonts`, the trend `Samples`, `Thinned`, `time_ticks` and `parse_span`, the `plot::decimate`/`line` helpers, `snapshot.rs`, and the CLI helpers and logger. B can develop against the mock archiver as soon as A lands it. Until then, B can construct `archiver::TimeSeries` values directly.
-- **C: repo infrastructure.** Owns these files:
-  - `.github/**`: `ci.yml` without wasm, `docs.yml`, and `pages/{index.html,make_switcher.py,.nojekyll}`;
-  - `docs/**`: mdBook pages per the plan, with `api/` rustdoc;
-  - `scripts/**`: `build-docs.sh`, `package.sh`, `third-party-licenses.py` and `archiveview-ssh`;
-  - `install.sh` and `README.md`.
-
-  C may edit this `DESIGN.md` only to fix references. The binaries are `archiveview` and `archiveview-mockarchiver`, and the crate docs are `archiveview`, `archiver` and `mockarchiver`.
-- **Shared and frozen:** the root `Cargo.toml`, `LICENSE` and `.gitignore`. Ask before changing any of them.
+- `crates/archiver`: the Archiver Appliance client (`ArchiverClient`, queries, JSON decoding, time).
+- `crates/mockarchiver`: the mock appliance (`MockArchiver`, the synthetic `MOCK:*` and testioc PVs) and its binary.
+- `crates/archiveview/src/plot.rs` and `plot/`: the embeddable `Plot` widget (series, fetch, window, timeaxis, render, bar, legend, hover).
+- `crates/archiveview/src/app.rs`, `main.rs`, `config.rs`, `view.rs`, `snapshot.rs`: the standalone app, its CLI, settings, saved views and snapshot mode.
+- `.github/`, `docs/`, `scripts/`, `install.sh`: CI, the mdBook documentation, packaging and installation.

@@ -67,7 +67,9 @@ live sample, so at the right edge the live values always win, and since both
 are drawn as steps the join is seamless. A disconnect records a gap.
 
 While the plot follows now, the history behind the live values is topped up
-every 30 seconds or so.
+every 30 seconds or so: raw history by fetching only what is new since its
+last sample, binned history by fetching the (bounded) window again. Each
+trace has at most one request to the archiver at a time.
 
 ### Drawing
 
@@ -75,8 +77,9 @@ Each frame, the visible part of every trace is thinned to at most four
 points per pixel column (first, min, max, last), which keeps every peak
 while drawing a bounded number of segments. Gaps (NaN values, and the
 archiver's disconnection markers) break the line. Autoscale covers the
-visible values including the bands, and the value axis animates to its new
-range.
+visible values including the bands, and the value axes animate to their new
+ranges. Traces with different units get a value axis each (up to three), so
+a current in mA and a voltage of a few volts are both readable.
 
 ## The widget and the app
 

@@ -56,6 +56,10 @@ pub struct ArchiveApp {
     title: String,
     /// The theme came from the command line: the menu leaves it.
     forced_theme: bool,
+    /// `views/default.json` is there but could not be read (corrupt, or
+    /// from a newer version): exiting leaves it alone rather than writing
+    /// over it, until the user saves the default view themselves.
+    keep_default: bool,
 }
 
 impl ArchiveApp {
@@ -106,6 +110,8 @@ impl ArchiveApp {
         if let Some(secs) = opts.range {
             plot.set_range(&Range::Relative { secs });
         }
+        let keep_default =
+            config::view_exists(DEFAULT_VIEW) && config::load_view(DEFAULT_VIEW).is_err();
         Self {
             plot,
             settings,
@@ -116,6 +122,7 @@ impl ArchiveApp {
             notice,
             title: String::new(),
             forced_theme: opts.theme.is_some(),
+            keep_default,
         }
     }
 
@@ -177,11 +184,15 @@ impl ArchiveApp {
         self.plot.is_loading()
     }
 
-    /// Save the default view when the settings say to.
+    /// Save the default view when the settings say to, unless the one
+    /// there could not be read.
     pub fn exit(&mut self) {
-        if self.settings.save_default_on_exit
-            && let Err(e) = config::save_view(DEFAULT_VIEW, &self.plot.view())
-        {
+        if !self.settings.save_default_on_exit {
+            return;
+        }
+        if self.keep_default {
+            log::warn!("not saving the default view over one that could not be read");
+        } else if let Err(e) = config::save_view(DEFAULT_VIEW, &self.plot.view()) {
             log::error!("{e}");
         }
     }
@@ -191,6 +202,9 @@ impl ArchiveApp {
             Action::Save(name) => {
                 let name = name.trim().to_string();
                 config::save_view(&name, &self.plot.view()).map(|()| {
+                    if name == DEFAULT_VIEW {
+                        self.keep_default = false;
+                    }
                     self.view_name = Some(name.clone());
                     self.save_as.clear();
                     format!("Saved view “{name}”")
@@ -202,6 +216,9 @@ impl ArchiveApp {
                 format!("Opened view “{name}”")
             }),
             Action::Delete(name) => config::delete_view(&name).map(|()| {
+                if name == DEFAULT_VIEW {
+                    self.keep_default = false;
+                }
                 if self.view_name.as_deref() == Some(name.as_str()) {
                     self.view_name = None;
                 }

@@ -73,7 +73,9 @@ pub fn top_bar(
                 }
                 ui.separator();
             }
-            ui.checkbox(&mut plot.y.log, "Log scale");
+            if ui.checkbox(&mut plot.y.log, "Log scale").changed() {
+                plot.fit_log_range();
+            }
             if let Some(menu) = menu {
                 ui.separator();
                 menu(ui);
