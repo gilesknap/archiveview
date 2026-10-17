@@ -60,6 +60,8 @@ pub struct ArchiveApp {
     /// from a newer version): exiting leaves it alone rather than writing
     /// over it, until the user saves the default view themselves.
     keep_default: bool,
+    /// The recent searches changed but could not be saved.
+    history_unsaved: bool,
 }
 
 impl ArchiveApp {
@@ -124,6 +126,7 @@ impl ArchiveApp {
             title: String::new(),
             forced_theme: opts.theme.is_some(),
             keep_default,
+            history_unsaved: false,
         }
     }
 
@@ -168,8 +171,10 @@ impl ArchiveApp {
         if let Some(action) = action {
             self.apply(&ctx, action, now);
         }
+        // Saved once per change; a failed save is tried again on exit,
+        // not every frame.
         if self.plot.search_history_changed() {
-            config::save_history(self.plot.search_history());
+            self.history_unsaved = !config::save_history(self.plot.search_history());
         }
         self.toast(&ctx, now);
 
@@ -189,8 +194,12 @@ impl ArchiveApp {
     }
 
     /// Save the default view when the settings say to, unless the one
-    /// there could not be read.
+    /// there could not be read; and the recent searches, if saving them
+    /// last failed.
     pub fn exit(&mut self) {
+        if self.history_unsaved {
+            self.history_unsaved = !config::save_history(self.plot.search_history());
+        }
         if !self.settings.save_default_on_exit {
             return;
         }

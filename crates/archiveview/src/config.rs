@@ -110,11 +110,10 @@ pub fn load_history() -> SearchHistory {
     config_dir().map_or_else(SearchHistory::default, |d| load_history_from(&d))
 }
 
-/// Write `history.json`, logging a warning on failure.
-pub fn save_history(history: &SearchHistory) {
-    if let Some(d) = config_dir() {
-        save_history_to(&d, history);
-    }
+/// Write `history.json`, logging a warning on failure. Returns whether it
+/// was written.
+pub fn save_history(history: &SearchHistory) -> bool {
+    config_dir().is_some_and(|d| save_history_to(&d, history))
 }
 
 fn load_history_from(dir: &Path) -> SearchHistory {
@@ -122,23 +121,21 @@ fn load_history_from(dir: &Path) -> SearchHistory {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return SearchHistory::default();
     };
-    match serde_json::from_str::<SearchHistory>(&text) {
-        // Cleaned up (duplicates, the cap) in case it was edited by hand.
-        Ok(h) => SearchHistory::new(h.searches().to_vec()),
-        Err(e) => {
-            log::warn!("{}: {e}: no recent searches", path.display());
-            SearchHistory::default()
-        }
-    }
+    // Duplicates and the cap are seen to as it is read.
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        log::warn!("{}: {e}: no recent searches", path.display());
+        SearchHistory::default()
+    })
 }
 
-fn save_history_to(dir: &Path, history: &SearchHistory) {
+fn save_history_to(dir: &Path, history: &SearchHistory) -> bool {
     let written = serde_json::to_string_pretty(history)
         .map_err(std::io::Error::other)
         .and_then(|text| write_atomic(&dir.join("history.json"), &(text + "\n")));
-    if let Err(e) = written {
+    if let Err(e) = &written {
         log::warn!("cannot save the search history in {}: {e}", dir.display());
     }
+    written.is_ok()
 }
 
 /// A name usable as a view file name: non-empty, no leading dot, no `/` or `\`.
@@ -294,7 +291,7 @@ mod tests {
         let mut h = SearchHistory::default();
         h.record("BL16I", false);
         h.record("SR-DI.*:SIGNAL", true);
-        save_history_to(&dir, &h);
+        assert!(save_history_to(&dir, &h));
         assert_eq!(load_history_from(&dir), h);
         let text = std::fs::read_to_string(dir.join("history.json")).unwrap();
         assert!(text.contains("\"regex\": true"), "{text}");

@@ -63,6 +63,7 @@ What the widget does, and doesn't, assume:
 
 To save a plot in the host's own layout files, store `plot.view()` (it is
 `serde`-serialisable) and restore it with `plot.set_view(&view)`.
+`plot.is_loading()` is true while archive requests are in flight.
 
 The search box remembers recent searches in memory only. To keep them
 across runs, as the standalone app does in `history.json`, give the plot
@@ -70,6 +71,5 @@ the saved list with `plot.set_search_history(history)` and save
 `plot.search_history()` (a `serde`-serialisable `SearchHistory`) whenever
 `plot.search_history_changed()` returns true. A host with several plots
 can share one list by passing it between them the same way.
-`plot.is_loading()` is true while archive requests are in flight.
 
 See the [Rust API](../reference/api.md) for the full interface.

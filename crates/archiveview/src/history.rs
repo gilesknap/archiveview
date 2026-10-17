@@ -24,12 +24,39 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+impl RecentSearch {
+    /// Whether it is the same search as `other`. Plain text is searched
+    /// ignoring case, so `bl16i` and `BL16I` are one search; a glob (`*`
+    /// or `?`) or a regex is matched with case, so its case counts.
+    fn same(&self, other: &RecentSearch) -> bool {
+        self.regex == other.regex
+            && (self.text == other.text
+                || (!self.regex
+                    && !self.text.contains(['*', '?'])
+                    && self.text.to_lowercase() == other.text.to_lowercase()))
+    }
+}
+
 /// The recent searches, most recent first, without duplicates, at most
-/// [`MAX_SEARCHES`]. Also the shape of `history.json`.
+/// [`MAX_SEARCHES`]. Also the shape of `history.json`; however it is
+/// built or read, it is cleaned up the same way ([`SearchHistory::new`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "HistoryFile")]
 pub struct SearchHistory {
+    searches: Vec<RecentSearch>,
+}
+
+/// `history.json` as read, before it is cleaned up.
+#[derive(Deserialize)]
+struct HistoryFile {
     #[serde(default)]
     searches: Vec<RecentSearch>,
+}
+
+impl From<HistoryFile> for SearchHistory {
+    fn from(file: HistoryFile) -> Self {
+        Self::new(file.searches)
+    }
 }
 
 impl SearchHistory {
@@ -53,7 +80,8 @@ impl SearchHistory {
     }
 
     /// Remember `text` (trimmed) as the most recent search, moving it to
-    /// the top if it is already there. Returns whether the list changed.
+    /// the top if it is already there (in the newest spelling, for plain
+    /// text in another case). Returns whether the list changed.
     pub fn record(&mut self, text: &str, regex: bool) -> bool {
         let text = text.trim();
         if text.is_empty() {
@@ -66,7 +94,7 @@ impl SearchHistory {
         if self.searches.first() == Some(&entry) {
             return false;
         }
-        self.searches.retain(|s| *s != entry);
+        self.searches.retain(|s| !s.same(&entry));
         self.searches.insert(0, entry);
         self.searches.truncate(MAX_SEARCHES);
         true
@@ -136,6 +164,13 @@ mod tests {
         }));
         assert_eq!(texts(&h), ["BL16I", "SR-DI"]);
         assert!(!h.searches()[0].regex);
+        // Plain text ignores case, keeping the newest spelling; a glob's
+        // case counts.
+        assert!(h.record("bl16i", false));
+        assert_eq!(texts(&h), ["bl16i", "SR-DI"]);
+        h.record("BL*", false);
+        h.record("bl*", false);
+        assert_eq!(texts(&h), ["bl*", "BL*", "bl16i", "SR-DI"]);
         h.clear();
         assert!(h.is_empty());
     }
@@ -160,6 +195,17 @@ mod tests {
                 .collect(),
         );
         assert_eq!(texts(&loaded), ["b", "a", "c"]);
+        // Deserialised by a host: cleaned up too.
+        let read: SearchHistory = serde_json::from_str(
+            r#"{"searches":[{"text":"a"},{"text":"A"},{"text":" "},{"text":"b","regex":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(texts(&read), ["a", "b"]);
+        assert_eq!(serde_json::from_str::<SearchHistory>("{}").unwrap(), none());
+    }
+
+    fn none() -> SearchHistory {
+        SearchHistory::default()
     }
 
     #[test]

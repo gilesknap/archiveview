@@ -26,7 +26,7 @@ const COMPACT_WIDTH: f32 = 600.0;
 #[derive(Default)]
 pub struct SearchState {
     pub(super) text: String,
-    regex: bool,
+    pub(super) regex: bool,
     /// The text as last searched for, and when it was last edited.
     pub(super) searched: String,
     edited_at: f64,
@@ -269,8 +269,11 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
     if std::mem::take(&mut s.focus) || refocus {
         resp.request_focus();
     }
-    if resp.gained_focus() {
+    // A click brings back a list closed with Esc.
+    if resp.gained_focus() || resp.clicked() {
         s.open = true;
+    }
+    if resp.gained_focus() {
         // Coming back to the box selects its text, so typing replaces it
         // (→ or End to edit it instead); not when the list took the focus
         // for a moment.
@@ -386,8 +389,11 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         pick = picked;
         resp.request_focus();
     }
+    // The list shows when open and it has something to show (the empty
+    // box with no recent searches has nothing).
+    let shown = s.open && (!rows.is_empty() || !text.is_empty());
     if focused && ui.input(|i| i.key_pressed(Key::Escape)) {
-        if s.open {
+        if shown {
             s.open = false;
         } else {
             clear(s);
@@ -397,7 +403,7 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
 
     // The popup: recent searches, then the archiver's matches.
     let mut forget = None;
-    if s.open && (!rows.is_empty() || !text.is_empty()) {
+    if shown && s.open {
         let pos = rect.left_bottom() + Vec2::new(0.0, 4.0);
         let area = egui::Area::new(plot.id.with("search-popup"))
             .order(egui::Order::Foreground)
@@ -492,6 +498,11 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         Some(Row::Recent(r)) => {
             s.text = r.text.clone();
             s.regex = r.regex;
+            // Ask again, as the regex toggle does: the last answer may be
+            // for the same text in the other mode.
+            s.searched.clear();
+            s.results.clear();
+            s.error = None;
             s.edited_at = now - SEARCH_DELAY;
             s.selected = None;
             s.open = true;

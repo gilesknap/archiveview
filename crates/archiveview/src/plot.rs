@@ -1479,6 +1479,48 @@ mod tests {
     }
 
     #[test]
+    fn a_recent_search_is_searched_again_in_its_own_mode() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        let mut hist = SearchHistory::default();
+        hist.record("MOCK:S", true);
+        p.set_search_history(hist);
+        let mut h = Harness::new(p);
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.key(egui::Key::Slash);
+        // As a substring: several matches.
+        h.frame(vec![egui::Event::Text("MOCK:S".into())]);
+        h.until(|p| p.search.searched == "MOCK:S" && !p.is_loading());
+        assert!(h.plot.search.results.len() >= 2);
+        // Emptied, then the recent regex search picked: asked again as a
+        // regex, which must match the whole name, so nothing.
+        for _ in 0..6 {
+            h.key(egui::Key::Backspace);
+        }
+        assert_eq!(super::bar::rows_text(&h.plot), ["MOCK:S"]);
+        h.key(egui::Key::ArrowDown);
+        h.key(egui::Key::Enter);
+        assert!(h.plot.search.regex);
+        assert!(h.plot.search.results.is_empty(), "not the substring's");
+        h.until(|p| p.search.searched == "MOCK:S" && !p.is_loading());
+        assert!(h.plot.search.results.is_empty());
+    }
+
+    #[test]
+    fn esc_in_an_empty_box_with_no_list_leaves_it() {
+        let pvs = PvManager::new();
+        let mut h = Harness::new(Plot::new(&pvs, None));
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.key(egui::Key::Slash);
+        assert!(search_focused(&h));
+        // No recent searches: nothing is shown, so one Esc is enough.
+        h.key(egui::Key::Escape);
+        assert!(!search_focused(&h));
+    }
+
+    #[test]
     fn coming_back_to_the_search_box_selects_its_text() {
         let pvs = PvManager::new();
         let mut h = Harness::new(Plot::new(&pvs, None));
@@ -1486,13 +1528,22 @@ mod tests {
         h.key(egui::Key::Slash);
         h.frame(vec![egui::Event::Text("A:B".into())]);
         assert_eq!(search_selection(&h), Some((3, 3)));
+        // Esc closes the list; a click in the box brings it back.
+        let bx = Pos2::new(60.0, 14.0);
+        h.key(egui::Key::Escape);
+        assert!(search_focused(&h) && !h.plot.search.open);
+        h.frame(vec![egui::Event::PointerMoved(bx)]);
+        h.button(bx, true);
+        h.button(bx, false);
+        assert!(search_focused(&h) && h.plot.search.open);
+        assert_eq!(h.plot.search.text, "A:B");
         // A click on the plot closes the list and leaves the text.
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
         h.button(MIDDLE, true);
         h.button(MIDDLE, false);
         assert!(!search_focused(&h) && !h.plot.search.open);
         assert_eq!(h.plot.search.text, "A:B");
         // Clicking the box again selects it all, so typing replaces it.
-        let bx = Pos2::new(60.0, 14.0);
         h.frame(vec![egui::Event::PointerMoved(bx)]);
         h.button(bx, true);
         h.button(bx, false);

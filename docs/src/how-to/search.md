@@ -13,7 +13,7 @@ a name. After a short pause the box lists the archiver's matching PVs:
 - Adding a PV keeps the text and the list, so you can add several from one
   search: `↓`, `Enter`, `↓`, `Enter`, ... PVs already on the plot are
   dimmed with a ✓, and picking one again does nothing.
-- `Esc` closes the list and keeps the text (`↓` brings the list back); a
+- `Esc` closes the list and keeps the text (`↓` or a click brings the list back); a
   second `Esc`, or the ✕ in the box, clears it. A click elsewhere closes
   the list and keeps the text.
 - Coming back to the box (a click, or `/`) selects its text, so typing
@@ -41,7 +41,8 @@ The list shows the first 50 matches; type more of the name to narrow it.
 archiveview remembers a search once you add a PV from it (typos and
 half-typed names are not kept), with its `.*` setting. It keeps the last
 50, in `history.json` in the [config directory](../reference/config.md), so
-they survive a restart.
+they survive a restart. Plain text that differs only in case (`bl16i`,
+`BL16I`) is one search, kept as you last typed it.
 
 - **Click the empty box, or press `/`:** the list shows your recent
   searches under **Recent**. Pick one with `↓` and `Enter`, or a click, to
