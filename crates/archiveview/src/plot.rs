@@ -445,8 +445,7 @@ impl Plot {
         let names = pv_names(text);
         if names.len() > MAX_PASTE {
             pasted.too_many = names.len();
-            self.paste.pasted = Some(pasted.clone());
-            return pasted;
+            return self.pasted(pasted);
         }
         let plotted: Vec<String> = self.traces.iter().map(|t| t.pv.name().key()).collect();
         let mut adding = Vec::new();
@@ -465,7 +464,16 @@ impl Plot {
         if pasted.added.is_empty() && pasted.present.is_empty() {
             pasted.text = text.to_string();
         }
+        self.pasted(pasted)
+    }
+
+    /// Keep what a paste did for [`Plot::take_pasted`], and draw again
+    /// (a host answering a middle-click does so between frames).
+    fn pasted(&mut self, pasted: Pasted) -> Pasted {
         self.paste.pasted = Some(pasted.clone());
+        if let Some(r) = &self.repaint {
+            r.ctx.request_repaint_of(r.viewport);
+        }
         pasted
     }
 
@@ -477,7 +485,9 @@ impl Plot {
 
     /// Where the middle button was clicked since the host last asked: the
     /// host answers with the primary selection's text ([`Plot::paste_pvs`],
-    /// [`Plot::paste_into_search`]). The widget reads no clipboard.
+    /// [`Plot::paste_into_search`]). The widget reads no clipboard. A
+    /// click stays here until taken (a later one replaces it), so a host
+    /// that never asks leaves one waiting, which is harmless.
     pub fn take_middle_click(&mut self) -> Option<MiddleClick> {
         self.paste.middle.take()
     }
@@ -3415,6 +3425,25 @@ mod tests {
         h.frame(vec![]);
         assert!(h.ctx.memory(|m| m.has_focus(h.plot.id.with("search"))));
         assert_eq!(h.plot.take_search_selection(), None);
+        // Selecting the same text on purpose then is reported.
+        let select_all = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        h.frame(vec![select_all]);
+        h.frame(vec![]);
+        assert_eq!(
+            h.plot.take_search_selection().as_deref(),
+            Some("SR-DI-DCCT-01:SIGNALXY")
+        );
+        // A middle-click on the ✕ pastes nothing.
+        let cross = h.plot.paste.clear_rect.unwrap().center();
+        click_by(&mut h, egui::PointerButton::Middle, cross, &[]);
+        assert_eq!(h.plot.take_middle_click(), None);
+        assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNALXY");
     }
 
     #[test]

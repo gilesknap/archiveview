@@ -329,6 +329,24 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
     if middle && resp.contains_pointer() {
         s.select_all = false;
     }
+    // Any press or key in the box makes its selection the user's again.
+    let touched = ui.input(|i| {
+        i.pointer.any_pressed()
+            || i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::Key { pressed: true, .. }
+                        | egui::Event::Text(_)
+                        | egui::Event::Paste(_)
+                )
+            })
+    });
+    if !focused || touched {
+        plot.paste.auto = None;
+    }
+    if !focused {
+        plot.paste.selected.clear();
+    }
     if s.select_all {
         // Until the click that focused the box is let go, unless it drags
         // out a selection of its own.
@@ -339,21 +357,24 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
             set_cursor(ui.ctx(), edit_id, all);
             // Not a selection of the user's: the primary selection keeps
             // theirs, to middle-click into the box.
-            plot.paste.selected = s.text.clone();
+            plot.paste.auto = Some(s.text.clone());
             s.select_all = ui.input(|i| i.pointer.any_down());
         }
     }
     // A middle-click pastes the primary selection here (the host reads
-    // it; egui has already put the cursor there). Text selected here
-    // becomes the primary selection, once the pointer lets go.
-    if resp.clicked_by(egui::PointerButton::Middle) {
-        plot.paste.middle = Some(MiddleClick::Search);
-    }
+    // it; egui has already put the cursor there), unless it is on the ✕
+    // or the regex toggle (below). Text selected here becomes the primary
+    // selection, once the pointer lets go.
+    let middle_at = resp
+        .clicked_by(egui::PointerButton::Middle)
+        .then(|| resp.interact_pointer_pos())
+        .flatten();
     if focused && !ui.input(|i| i.pointer.any_down()) {
         let selected = egui::TextEdit::load_state(ui.ctx(), edit_id)
             .and_then(|st| st.cursor.char_range())
             .map_or("", |r| r.slice_str(&s.text));
-        if selected != plot.paste.selected {
+        let auto = plot.paste.auto.as_deref() == Some(selected);
+        if selected != plot.paste.selected && !auto {
             plot.paste.selected = selected.to_string();
             if !selected.is_empty() {
                 plot.paste.selection = Some(selected.to_string());
@@ -366,13 +387,24 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         Pos2::new(rect.right() - regex_w / 2.0 - 5.0, rect.center().y),
         Vec2::new(regex_w, h - 8.0),
     );
+    let x = if show_regex {
+        toggle.left() - clear_w / 2.0
+    } else {
+        rect.right() - 5.0 - clear_w / 2.0
+    };
+    let button = Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0));
+    let on_button =
+        |p: Pos2| (show_clear && button.contains(p)) || (show_regex && toggle.contains(p));
+    if let Some(p) = middle_at
+        && !on_button(p)
+    {
+        plot.paste.middle = Some(MiddleClick::Search);
+    }
+    #[cfg(test)]
+    {
+        plot.paste.clear_rect = Some(button);
+    }
     if show_clear {
-        let x = if show_regex {
-            toggle.left() - clear_w / 2.0
-        } else {
-            rect.right() - 5.0 - clear_w / 2.0
-        };
-        let button = Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0));
         let r = ui
             .interact(button, plot.id.with("clear"), Sense::click())
             .on_hover_text("Clear");
@@ -778,6 +810,9 @@ pub(super) fn paste(plot: &mut Plot, text: &str) {
     s.select_all = false;
     // The keyboard, without selecting all as a click into the box does.
     s.refocus = true;
+    if let Some(r) = &plot.repaint {
+        r.ctx.request_repaint_of(r.viewport);
+    }
 }
 
 /// The recent searches shown above the matches while typing.
