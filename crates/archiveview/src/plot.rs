@@ -1192,6 +1192,22 @@ mod tests {
     }
 
     #[test]
+    fn history_comes_even_when_get_metadata_is_a_404() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        mock.serve_metadata(false);
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        let t = &h.plot.traces[0];
+        assert!(!t.fetch.not_archived);
+        assert!(t.fetch.error.is_none());
+        assert!(t.history.as_ref().is_some_and(|h| !h.samples.is_empty()));
+    }
+
+    #[test]
     fn a_wrong_archiver_url_is_an_error_not_live_only() {
         let mock = mockarchiver::MockArchiver::start_local().unwrap();
         let pvs = PvManager::new();
