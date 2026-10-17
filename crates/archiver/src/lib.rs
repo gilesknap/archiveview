@@ -391,13 +391,16 @@ impl ArchiverClient {
     /// From the URL the user gave, e.g. `http://host:17668` or
     /// `http://host:17668/retrieval/`: strips trailing slashes and appends
     /// `/retrieval` unless it already ends so. Only `http` and `https` are
-    /// accepted; a bare `host:port` gets `http://`.
+    /// accepted, plus Phoebus's `pbraw://` (the same service over plain
+    /// HTTP); a bare `host:port` gets `http://`.
     pub fn new(url: &str) -> Result<Self> {
         let mut url = url.trim().trim_end_matches('/').to_string();
         if url.is_empty() {
             return Err(Error::BadUrl("empty".into()));
         }
-        if !url.contains("://") {
+        if let Some(rest) = url.strip_prefix("pbraw://") {
+            url = format!("http://{rest}");
+        } else if !url.contains("://") {
             url = format!("http://{url}");
         }
         if !(url.starts_with("http://") || url.starts_with("https://")) {

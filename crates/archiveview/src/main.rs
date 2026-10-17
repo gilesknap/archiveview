@@ -39,7 +39,8 @@ struct Cli {
     #[arg(value_name = "PV")]
     pvs: Vec<String>,
     /// The Archiver Appliance retrieval URL, e.g. http://archiver:17668
-    /// (/retrieval is added unless given)
+    /// or Phoebus's pbraw://archiver:17668/retrieval (/retrieval is added
+    /// unless given)
     #[arg(short, long, value_name = "URL")]
     archiver: Option<String>,
     /// Open the saved view NAME

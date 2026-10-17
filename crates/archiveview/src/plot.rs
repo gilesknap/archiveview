@@ -1411,6 +1411,22 @@ mod tests {
     }
 
     #[test]
+    fn history_comes_even_when_get_metadata_is_a_404() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        mock.serve_metadata(false);
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&["MOCK:SINE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading());
+        let t = &h.plot.traces[0];
+        assert!(!t.fetch.not_archived);
+        assert!(t.fetch.error.is_none());
+        assert!(t.history.as_ref().is_some_and(|h| !h.samples.is_empty()));
+    }
+
+    #[test]
     fn a_wrong_archiver_url_is_an_error_not_live_only() {
         let mock = mockarchiver::MockArchiver::start_local().unwrap();
         let pvs = PvManager::new();
@@ -1428,8 +1444,10 @@ mod tests {
 
     #[test]
     fn a_name_with_regex_characters_is_not_archived_not_a_bad_url() {
-        // getMetadata says 404; a naive glob search for the name would be
-        // a server error (an unbalanced `{`), but the exact search is not.
+        // getData says 404 (or 400 where the name looks like an operator
+        // call); a naive glob search for the name would be a server error
+        // (an unbalanced `{`), but the exact search is not, so neither is
+        // taken for a wrong archiver URL.
         let mock = mockarchiver::MockArchiver::start_local().unwrap();
         let pvs = PvManager::new();
         let client = ArchiverClient::new(&mock.url()).unwrap();
@@ -1440,10 +1458,11 @@ mod tests {
         ]));
         let mut h = Harness::new(p);
         h.until(|p| !p.is_loading());
-        for t in &h.plot.traces {
-            assert!(t.fetch.not_archived, "{}", t.name);
-            assert_eq!(t.fetch.error, None, "{}", t.name);
-        }
+        let t = &h.plot.traces;
+        assert!(t[0].fetch.not_archived, "{:?}", t[0].fetch.error);
+        assert_eq!(t[0].fetch.error, None);
+        let error = t[1].fetch.error.as_deref().unwrap_or("");
+        assert!(!error.contains("not an archiver"), "{error}");
     }
 
     /// A live plot of MOCK:SINE over two minutes: few enough samples that

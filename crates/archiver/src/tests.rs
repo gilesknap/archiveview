@@ -18,6 +18,11 @@ fn url_normalisation() {
     );
     assert_eq!(base("h:17668").unwrap(), "http://h:17668/retrieval");
     assert_eq!(base("https://h/arch").unwrap(), "https://h/arch/retrieval");
+    // Phoebus's archive data source URL
+    assert_eq!(
+        base("pbraw://h:17668/retrieval").unwrap(),
+        "http://h:17668/retrieval"
+    );
     assert!(matches!(base(""), Err(Error::BadUrl(_))));
     assert!(matches!(base("ftp://h"), Err(Error::BadUrl(_))));
 }

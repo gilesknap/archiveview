@@ -148,20 +148,10 @@ impl Fetcher {
             let info = if job.probe {
                 match client.metadata(&job.pv) {
                     Ok(info) => Some(info),
-                    Err(e) if e.is_not_archived() => {
-                        inbox.lock().push(Done {
-                            trace: job.trace,
-                            generation: job.generation,
-                            from: job.from,
-                            to: job.to,
-                            op: job.op,
-                            append: job.append,
-                            info: None,
-                            result: Err(check_404(&client, &job.pv, e)),
-                        });
-                        return;
-                    }
-                    // Not every server has getMetadata: the data says.
+                    // Not every server answers getMetadata, and a 404 from
+                    // it doesn't prove the PV isn't archived (a proxy may
+                    // not pass it on, or a cluster member may not know the
+                    // PV): the data request decides.
                     Err(e) => {
                         log::debug!("{}: no metadata: {e}", job.pv);
                         None
