@@ -183,5 +183,69 @@
 <a href=#183 id=183 data-nosnippet>183</a>            <span class="string">"lighter on dark"
 <a href=#184 id=184 data-nosnippet>184</a>        </span>);
 <a href=#185 id=185 data-nosnippet>185</a>    }
-<a href=#186 id=186 data-nosnippet>186</a>}
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a>    <span class="doccomment">/// Every character outside ASCII in the code (not its comments): the
+<a href=#188 id=188 data-nosnippet>188</a>    /// symbols the interface shows, with where each is used.
+<a href=#189 id=189 data-nosnippet>189</a>    </span><span class="kw">fn </span>ui_glyphs() -&gt; Vec&lt;(char, String)&gt; {
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="kw">fn </span>walk(dir: <span class="kw-2">&amp;</span>std::path::Path, out: <span class="kw-2">&amp;mut </span>Vec&lt;std::path::PathBuf&gt;) {
+<a href=#191 id=191 data-nosnippet>191</a>            <span class="kw">for </span>e <span class="kw">in </span>std::fs::read_dir(dir).unwrap().flatten() {
+<a href=#192 id=192 data-nosnippet>192</a>                <span class="kw">let </span>p = e.path();
+<a href=#193 id=193 data-nosnippet>193</a>                <span class="kw">if </span>p.is_dir() {
+<a href=#194 id=194 data-nosnippet>194</a>                    walk(<span class="kw-2">&amp;</span>p, out);
+<a href=#195 id=195 data-nosnippet>195</a>                } <span class="kw">else if </span>p.extension().is_some_and(|x| x == <span class="string">"rs"</span>) {
+<a href=#196 id=196 data-nosnippet>196</a>                    out.push(p);
+<a href=#197 id=197 data-nosnippet>197</a>                }
+<a href=#198 id=198 data-nosnippet>198</a>            }
+<a href=#199 id=199 data-nosnippet>199</a>        }
+<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">let </span><span class="kw-2">mut </span>files = Vec::new();
+<a href=#201 id=201 data-nosnippet>201</a>        walk(
+<a href=#202 id=202 data-nosnippet>202</a>            <span class="kw-2">&amp;</span>std::path::Path::new(<span class="macro">env!</span>(<span class="string">"CARGO_MANIFEST_DIR"</span>)).join(<span class="string">"src"</span>),
+<a href=#203 id=203 data-nosnippet>203</a>            <span class="kw-2">&amp;mut </span>files,
+<a href=#204 id=204 data-nosnippet>204</a>        );
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="kw">let </span><span class="kw-2">mut </span>glyphs: Vec&lt;(char, String)&gt; = Vec::new();
+<a href=#206 id=206 data-nosnippet>206</a>        <span class="kw">for </span>f <span class="kw">in </span>files {
+<a href=#207 id=207 data-nosnippet>207</a>            <span class="kw">let </span>text = std::fs::read_to_string(<span class="kw-2">&amp;</span>f).unwrap();
+<a href=#208 id=208 data-nosnippet>208</a>            <span class="kw">for </span>(n, line) <span class="kw">in </span>text.lines().enumerate() {
+<a href=#209 id=209 data-nosnippet>209</a>                <span class="comment">// The code before a comment (a URL's "//" is in a string,
+<a href=#210 id=210 data-nosnippet>210</a>                // and has no symbols after it worth missing).
+<a href=#211 id=211 data-nosnippet>211</a>                </span><span class="kw">let </span>code = line.split(<span class="string">"//"</span>).next().unwrap_or(<span class="string">""</span>);
+<a href=#212 id=212 data-nosnippet>212</a>                <span class="kw">for </span>c <span class="kw">in </span>code.chars().filter(|c| !c.is_ascii()) {
+<a href=#213 id=213 data-nosnippet>213</a>                    <span class="kw">if </span>!glyphs.iter().any(|(g, <span class="kw">_</span>)| <span class="kw-2">*</span>g == c) {
+<a href=#214 id=214 data-nosnippet>214</a>                        <span class="kw">let </span>at = f.file_name().unwrap().to_string_lossy();
+<a href=#215 id=215 data-nosnippet>215</a>                        glyphs.push((c, <span class="macro">format!</span>(<span class="string">"{at}:{}"</span>, n + <span class="number">1</span>)));
+<a href=#216 id=216 data-nosnippet>216</a>                    }
+<a href=#217 id=217 data-nosnippet>217</a>                }
+<a href=#218 id=218 data-nosnippet>218</a>            }
+<a href=#219 id=219 data-nosnippet>219</a>        }
+<a href=#220 id=220 data-nosnippet>220</a>        glyphs
+<a href=#221 id=221 data-nosnippet>221</a>    }
+<a href=#222 id=222 data-nosnippet>222</a>
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="doccomment">/// A glyph missing from the fonts is drawn as a box: every symbol the
+<a href=#224 id=224 data-nosnippet>224</a>    /// interface uses must be in the fonts [`install_fonts`] installs (the
+<a href=#225 id=225 data-nosnippet>225</a>    /// proportional ones: monospace shows only ".*").
+<a href=#226 id=226 data-nosnippet>226</a>    /// (bobview, which embeds the plot, installs the same fallbacks; egui's
+<a href=#227 id=227 data-nosnippet>227</a>    /// own fonts alone lack arrows such as → and ⏎.)
+<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="attr">#[test]
+<a href=#229 id=229 data-nosnippet>229</a>    </span><span class="kw">fn </span>every_symbol_shown_is_in_the_fonts() {
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="kw">let </span>glyphs = ui_glyphs();
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="macro">assert!</span>(
+<a href=#232 id=232 data-nosnippet>232</a>            glyphs.iter().any(|(c, <span class="kw">_</span>)| <span class="kw-2">*</span>c == <span class="string">'…'</span>),
+<a href=#233 id=233 data-nosnippet>233</a>            <span class="string">"the scan finds symbols"
+<a href=#234 id=234 data-nosnippet>234</a>        </span>);
+<a href=#235 id=235 data-nosnippet>235</a>        <span class="kw">let </span>ctx = egui::Context::default();
+<a href=#236 id=236 data-nosnippet>236</a>        install_fonts(<span class="kw-2">&amp;</span>ctx);
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="comment">// Fonts are loaded on the first frame.
+<a href=#238 id=238 data-nosnippet>238</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>out = ctx.run_ui(egui::RawInput::default(), |<span class="kw">_</span>| {});
+<a href=#239 id=239 data-nosnippet>239</a>        out.textures_delta.clear();
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">for </span>font <span class="kw">in </span>[egui::FontId::proportional(<span class="number">13.0</span>), bold(<span class="kw-2">&amp;</span>ctx, <span class="number">13.0</span>)] {
+<a href=#241 id=241 data-nosnippet>241</a>            <span class="kw">let </span>missing: Vec&lt;String&gt; = ctx.fonts_mut(|f| {
+<a href=#242 id=242 data-nosnippet>242</a>                (glyphs.iter())
+<a href=#243 id=243 data-nosnippet>243</a>                    .filter(|(c, <span class="kw">_</span>)| !f.has_glyph(<span class="kw-2">&amp;</span>font, <span class="kw-2">*</span>c))
+<a href=#244 id=244 data-nosnippet>244</a>                    .map(|(c, at)| <span class="macro">format!</span>(<span class="string">"{c} (U+{:04X}, {at})"</span>, <span class="kw-2">*</span>c <span class="kw">as </span>u32))
+<a href=#245 id=245 data-nosnippet>245</a>                    .collect()
+<a href=#246 id=246 data-nosnippet>246</a>            });
+<a href=#247 id=247 data-nosnippet>247</a>            <span class="macro">assert!</span>(missing.is_empty(), <span class="string">"not in {font:?}: {missing:?}"</span>);
+<a href=#248 id=248 data-nosnippet>248</a>        }
+<a href=#249 id=249 data-nosnippet>249</a>    }
+<a href=#250 id=250 data-nosnippet>250</a>}
 </code></pre></div></section></main></body></html>
