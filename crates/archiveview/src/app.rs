@@ -109,6 +109,8 @@ pub struct ArchiveApp {
     /// from a newer version): exiting leaves it alone rather than writing
     /// over it, until the user saves the default view themselves.
     keep_default: bool,
+    /// The recent searches changed but could not be saved.
+    history_unsaved: bool,
     /// `--range`, which "Start empty" keeps too.
     range: Option<f64>,
     /// With `--no-archiver`: the archiver the default view was saved
@@ -179,6 +181,7 @@ impl ArchiveApp {
         let mut plot = Plot::new(&pvs, archiver);
         plot.set_archiver_switching(true);
         plot.set_recent_archivers(&settings.recent_archivers);
+        plot.set_search_history(config::load_history());
         let kept_archiver = if opts.no_archiver {
             match &opened {
                 Some((name, v)) if name == DEFAULT_VIEW => v.archiver.clone(),
@@ -221,6 +224,7 @@ impl ArchiveApp {
             title: String::new(),
             forced_theme: opts.theme.is_some(),
             keep_default,
+            history_unsaved: false,
             range: opts.range,
             kept_archiver,
             known_archiver,
@@ -285,6 +289,11 @@ impl ArchiveApp {
             self.apply(&ctx, action, now);
         }
         self.remember_switch();
+        // Saved once per change; a failed save is tried again on exit,
+        // not every frame.
+        if self.plot.search_history_changed() {
+            self.history_unsaved = !config::save_history(self.plot.search_history());
+        }
         self.toast(&ctx, now);
 
         let title = match self.plot.title() {
@@ -303,8 +312,12 @@ impl ArchiveApp {
     }
 
     /// Save the default view when the settings say to, unless the one
-    /// there could not be read.
+    /// there could not be read; and the recent searches, if saving them
+    /// last failed.
     pub fn exit(&mut self) {
+        if self.history_unsaved {
+            self.history_unsaved = !config::save_history(self.plot.search_history());
+        }
         if !self.settings.save_default_on_exit {
             return;
         }

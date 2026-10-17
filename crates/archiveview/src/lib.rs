@@ -9,7 +9,8 @@
 //! one works with no archiver at all (live only).
 //!
 //! `app::ArchiveApp` is the standalone application around one `Plot`:
-//! window chrome, saved views and settings in `~/.config/archiveview`.
+//! window chrome, saved views, settings and search history in
+//! `~/.config/archiveview`.
 //! `main.rs` adds only the command line. Both, and snapshot mode, are
 //! behind the default `app` feature: a host embedding `Plot` turns it off
 //! (`default-features = false`) and depends on egui only, not eframe.
@@ -18,6 +19,7 @@
 pub mod app;
 mod axis;
 pub mod config;
+pub mod history;
 mod icons;
 pub mod plot;
 #[cfg(all(feature = "app", not(target_arch = "wasm32")))]
@@ -26,5 +28,6 @@ pub mod style;
 pub mod view;
 
 pub use archiver::ArchiverClient;
+pub use history::SearchHistory;
 pub use plot::Plot;
 pub use view::View;

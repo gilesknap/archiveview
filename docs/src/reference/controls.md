@@ -4,7 +4,7 @@
 
 | control | what it does |
 | --- | --- |
-| search box | find archived PVs as you type; Enter adds. See [Find and add PVs](../how-to/search.md) |
+| search box | find archived PVs as you type; Enter adds, keeping the search to add more. Empty, it lists your recent searches. See [Find and add PVs](../how-to/search.md) |
 | `.*` (in the search box, shown while it has the focus) | search with a regular expression instead of a glob |
 | ✕ (in the search box) | clear it |
 | **1h 8h 1d 7d** | show that span ending now, following live |
@@ -13,7 +13,7 @@
 | **● host** | the archiver: green when it answers, amber when it fails, a spinner while checking, hollow grey for "No archiver". Hover for its URL, version and last error; click to switch archivers. See [Connect](../how-to/connect.md#see-and-change-the-archiver) |
 | **⤢** | autoscale every value axis |
 | **⌂** | reset: back to the last preset, autoscale on |
-| **≡** | Log scale (every value axis); then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
+| **≡** | Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
 
 In a narrow window the presets become a drop-down, the archiver pill shows
 only its dot, and ⤢ and ⌂ move into the ≡ menu.
@@ -59,11 +59,12 @@ These work whenever no text box has the focus.
 | key | effect |
 | --- | --- |
 | `/` | focus the search box |
-| `Esc` | close the search list or popover; clear the search box |
+| `Esc` | close the search list or popover; again, clear the search box |
 | `←` `→` | pan by a tenth of the span |
 | `+` (or `=`) `-` | zoom time in and out about the middle |
 | `L` | follow now, or stop following |
 | `A` | autoscale |
 | `Home` | reset |
 
-In the search list, `↑` `↓` move and `Enter` adds.
+In the search list, `↑` `↓` move and `Enter` adds (or, on a recent search,
+searches for it again).
