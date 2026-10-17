@@ -81,8 +81,11 @@ PV name if, after an optional `ca://` or `pva://`, it has only the
 characters EPICS record names use (letters, digits, `_ - + : [ ] < > { } $`,
 and `.` before a field, as in `BL01T:X.VAL`) and at least one letter.
 Numbers, times and dates (`12:30:00`, `2026-10-17T13:41:52Z`),
-`host:port`, `a::b`, log prefixes (`INFO:root:…`), URLs, command-line
-flags (`-a`) and words ending in `.` or `:` are left out.
+`host:port` (`localhost:5064`, `ioc.example.org:5075`), `a::b`, Python log
+lines among other words (`INFO:root:Connected`), URLs, command-line flags
+(`-a`) and words ending in `.` or `:` are left out. Numbered names such as
+`SR:BPM:01` and `DLS:01` are names, and a `ca://` or `pva://` name is
+always taken as it is.
 
 - **A single word** is added if it can be a name, so names with no
   structure at all (`TEMP1`, `BEAMCURRENT`) work: double-click one in a

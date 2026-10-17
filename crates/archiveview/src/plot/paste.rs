@@ -96,9 +96,12 @@ pub(super) struct PasteState {
 /// `pva://`, it has only characters EPICS record names use (letters,
 /// digits, `_ - + : [ ] < > { } $`, and `.` before a field), at least one
 /// letter, and does not start with `-` or `+` (a command-line flag) or
-/// start or end with `.` or `:`. Shapes that are something else are
-/// left out: times and dates (`12:30:00`, `2026-10-17T13:41:52Z`),
-/// `host:port`, `a::b` paths and log prefixes (`INFO:root:…`).
+/// start or end with `.` or `:`. Unless it has a scheme, shapes that are
+/// something else are left out: times and dates (`12:30:00`,
+/// `2026-10-17T13:41:52Z`), `host:port` (two parts, a host name with a
+/// `.`, `localhost` or lower case, then digits: not `SR:BPM:01` or
+/// `DLS:01`), `a::b` paths, and in running text Python log lines
+/// (`INFO:root:Connected`; `WARN:LIMIT` is a name).
 ///
 /// A selection of one word is a name if it can be one, so names with no
 /// structure at all (`TEMP1`, `BEAMCURRENT`) work. In several words only
@@ -168,14 +171,13 @@ fn looks_like_pv(word: &str, alone: bool) -> bool {
     if !(chars_ok && ends_ok && body.chars().any(|c| c.is_ascii_alphabetic())) {
         return false;
     }
-    if something_else(body) {
-        return false;
-    }
-    alone || prefixed || structured(body)
+    // A scheme says it is a PV, whatever it looks like.
+    prefixed || (!something_else(body, alone) && (alone || structured(body)))
 }
 
-/// A time, date, `host:port`, `a::b` path or log line, not a PV.
-fn something_else(body: &str) -> bool {
+/// A time, date, `host:port`, `a::b` path or log line, not a PV;
+/// `alone` when it is the whole selection.
+fn something_else(body: &str, alone: bool) -> bool {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     let parts: Vec<&str> = body.split(':').collect();
     let b = body.as_bytes();
@@ -187,8 +189,18 @@ fn something_else(body: &str) -> bool {
         && digits(&body[8..10]);
     // 12:30, 13:41:52Z: digits before every colon.
     let time = parts.len() > 1 && parts[..parts.len() - 1].iter().all(|p| digits(p));
-    let port = parts.len() > 1 && digits(parts[parts.len() - 1]);
-    let log = parts.len() > 1 && LOG_LEVELS.contains(&parts[0]);
+    // localhost:5064, ioc.example.org:5075, gateway:5064; not the
+    // numbered names everywhere (SR:BPM:01, DLS:01).
+    let port = parts.len() == 2 && digits(parts[1]) && {
+        let host = parts[0];
+        host.contains('.') || host == "localhost" || !host.chars().any(|c| c.is_ascii_uppercase())
+    };
+    // Python's LEVEL:logger:message, in running text only: WARN:LIMIT
+    // alone is a PV.
+    let log = !alone
+        && parts.len() >= 3
+        && LOG_LEVELS.contains(&parts[0])
+        && parts[1].chars().any(|c| c.is_ascii_lowercase());
     date || time || port || log || body.contains("::")
 }
 
@@ -276,11 +288,33 @@ mod tests {
             "13:41:52Z",
             "localhost:5064",
             "std::vec::Vec",
-            "INFO:root:Connected",
         ] {
             assert!(pv_names(text).is_empty(), "{text:?}: {:?}", pv_names(text));
         }
         assert_eq!(pv_names("$ caget -a SR:X"), ["SR:X"]);
+        assert!(pv_names("INFO:root:Connected and more").is_empty());
+    }
+
+    #[test]
+    fn numbered_and_log_level_names_are_names() {
+        for (text, want) in [
+            ("SR:BPM:01", &["SR:BPM:01"][..]),
+            ("LI:TEMP:1", &["LI:TEMP:1"]),
+            ("TEST:AI:1 TEST:AI:2", &["TEST:AI:1", "TEST:AI:2"]),
+            ("pva://SR:BPM:01", &["pva://SR:BPM:01"]),
+            ("DLS:01", &["DLS:01"]),
+            ("S1:2", &["S1:2"]),
+            ("WARN:LIMIT", &["WARN:LIMIT"]),
+            ("INFO:STATUS", &["INFO:STATUS"]),
+            ("ERROR:COUNT and SR:X", &["ERROR:COUNT", "SR:X"]),
+            // A scheme skips the junk checks.
+            ("ca://localhost:5064", &["ca://localhost:5064"]),
+        ] {
+            assert_eq!(pv_names(text), want, "{text:?}");
+        }
+        for text in ["localhost:5064", "ioc.example.org:5075", "gateway:5064"] {
+            assert!(pv_names(text).is_empty(), "{text:?}");
+        }
     }
 
     #[test]

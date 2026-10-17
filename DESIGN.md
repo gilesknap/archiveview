@@ -293,8 +293,11 @@ then middle-click the plot.
   and semicolons, drop quotes and brackets around a word. A word can be a
   name if (after an optional `ca://`/`pva://`) it is only record-name
   characters (plus `{}` and `$`), has a letter, doesn't start with `-`/`+`
-  (flags) or start or end with `.`/`:`, and isn't a time, date,
-  `host:port`, `a::b` path or log prefix. A one-word selection is taken if
+  (flags) or start or end with `.`/`:`, and, without a scheme, isn't a
+  time, date, `host:port` (exactly two parts, the host with a `.`,
+  `localhost` or lower case, so `SR:BPM:01` and `DLS:01` stay names),
+  `a::b` path, or (among other words) a Python log line
+  `LEVEL:logger:msg` with a lower-case logger. A one-word selection is taken if
   it can be a name (some sites' names have no structure: `TEMP1`); in
   several words only those with a scheme or structure (`:`, `-`, `_`,
   braces, a digit, `.FIELD`) are, so prose, shell lines and code add
