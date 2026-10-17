@@ -837,6 +837,8 @@ mod tests {
         set: Arc<parking_lot::Mutex<Vec<String>>>,
         /// Take this long to answer, as a hung selection owner does.
         slow: Duration,
+        /// Answer only while the test does not hold this.
+        gate: Arc<parking_lot::Mutex<()>>,
     }
 
     impl crate::selection::Selection for FakeSelection {
@@ -844,10 +846,12 @@ mod tests {
             self.has
         }
         fn primary(&mut self) -> Option<String> {
+            drop(self.gate.lock());
             std::thread::sleep(self.slow);
             self.primary.clone()
         }
         fn clipboard(&mut self) -> Option<String> {
+            drop(self.gate.lock());
             self.clipboard.clone()
         }
         fn set_primary(&mut self, text: &str) {
@@ -886,7 +890,10 @@ mod tests {
             out.textures_delta.clear();
         };
         // A middle-click, then frames until the selection's answer is in.
+        // The answer waits for the gate, so the read is seen in flight.
+        let gate = Arc::new(parking_lot::Mutex::new(()));
         let click = |app: &mut ArchiveApp, pos| {
+            let hold = gate.lock();
             let ev = |pressed| egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Middle,
@@ -896,6 +903,7 @@ mod tests {
             frame(app, vec![egui::Event::PointerMoved(pos), ev(true)]);
             frame(app, vec![ev(false)]);
             assert!(app.reading.is_some(), "asked for the selection");
+            drop(hold);
             let start = std::time::Instant::now();
             while app.reading.is_some() {
                 assert!(start.elapsed().as_secs() < 5, "no answer");
@@ -913,6 +921,7 @@ mod tests {
                     clipboard: clip.map(Into::into),
                     set: set.clone(),
                     slow: Duration::ZERO,
+                    gate: gate.clone(),
                 };
                 app.set_selection(&ctx, Some(Box::new(move || Box::new(fake))));
             };
@@ -976,6 +985,7 @@ mod tests {
             clipboard: None,
             set: late.clone(),
             slow: Duration::from_millis(1500),
+            gate: Default::default(),
         };
         app.set_selection(&ctx, Some(Box::new(move || Box::new(fake))));
         let ev = |pressed| egui::Event::PointerButton {
