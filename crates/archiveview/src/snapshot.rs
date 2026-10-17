@@ -53,6 +53,8 @@ pub fn run(app: AppOptions, opts: &Options, out: &Path) -> Result<(), String> {
     let ctx = egui::Context::default();
     let app_opts = AppOptions {
         theme: Some(if opts.dark { Theme::Dark } else { Theme::Light }),
+        // Not the zoom saved in settings.json: 100% unless --ui-scale.
+        ui_scale: app.ui_scale.or(Some(1.0)),
         ..app
     };
     let mut app = ArchiveApp::new(&ctx, app_opts);

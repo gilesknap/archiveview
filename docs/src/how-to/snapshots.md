@@ -20,7 +20,8 @@ archiveview --snapshot out.png --theme dark ...
 ```
 
 `--size` is in pixels and defaults to `1280x800`. Snapshots use the light
-theme unless `--theme dark` is given.
+theme unless `--theme dark` is given, and 100% interface zoom (not the one
+saved from the ≡ menu) unless `--ui-scale` is given, e.g. `--ui-scale 1.5`.
 
 ## Wait for data
 

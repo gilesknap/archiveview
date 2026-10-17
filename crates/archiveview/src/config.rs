@@ -61,6 +61,12 @@ pub struct Settings {
     /// next start reopens where this one left off (on unless turned off).
     #[serde(default = "yes")]
     pub save_default_on_exit: bool,
+    /// The interface zoom (`−  100%  +` in the `≡` menu, ctrl+=/−/0),
+    /// relative to the desktop's scale: 1 is 100%. One for the app until
+    /// windows and layouts exist, when it moves to each window's layout.
+    /// `--ui-scale` and `ARCHIVEVIEW_UI_SCALE` win over it.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub ui_zoom: f32,
     /// Fields this version doesn't know (from a newer one, or added by
     /// hand), written back as they were.
     #[serde(flatten)]
@@ -76,6 +82,14 @@ fn yes() -> bool {
     true
 }
 
+fn one() -> f32 {
+    1.0
+}
+
+fn is_one(f: &f32) -> bool {
+    *f == 1.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -83,6 +97,7 @@ impl Default for Settings {
             recent_archivers: Vec::new(),
             theme: Theme::default(),
             save_default_on_exit: true,
+            ui_zoom: 1.0,
             extra: serde_json::Map::new(),
             unreadable: false,
         }
@@ -102,6 +117,22 @@ impl Settings {
         if let Some(d) = config_dir() {
             self.save_to(&d);
         }
+    }
+
+    /// Make one change to `settings.json` as it is now, not as this run
+    /// loaded it, so what another archiveview saved since (an archiver,
+    /// say) is kept; and to `self`.
+    pub fn change(&mut self, f: impl Fn(&mut Self)) {
+        f(self);
+        if let Some(d) = config_dir() {
+            Self::change_in(&d, f);
+        }
+    }
+
+    fn change_in(dir: &Path, f: impl Fn(&mut Self)) {
+        let mut now = Self::load_from(dir);
+        f(&mut now);
+        now.save_to(dir);
     }
 
     /// Make `url` (a retrieval base) the archiver to use from now on, and
@@ -311,15 +342,22 @@ mod tests {
             recent_archivers: vec!["http://archiver:17668".into()],
             theme: Theme::Dark,
             save_default_on_exit: false,
+            ui_zoom: 1.25,
             ..Settings::default()
         };
         s.save_to(&dir);
         assert_eq!(Settings::load_from(&dir), s);
         let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(text.contains("\"theme\": \"dark\""), "{text}");
+        assert!(text.contains("\"ui_zoom\": 1.25"), "{text}");
+        // 100% is left out.
+        Settings::default().save_to(&dir);
+        let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(!text.contains("ui_zoom"), "{text}");
         // Partial files load; bad ones give the defaults.
         std::fs::write(dir.join("settings.json"), r#"{"theme":"light"}"#).unwrap();
         assert_eq!(Settings::load_from(&dir).theme, Theme::Light);
+        assert_eq!(Settings::load_from(&dir).ui_zoom, 1.0);
         assert!(
             Settings::load_from(&dir).save_default_on_exit,
             "on by default"
@@ -358,6 +396,22 @@ mod tests {
             back.archiver_url.as_deref(),
             Some("http://other:17668/retrieval")
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_change_keeps_what_another_instance_saved() {
+        let dir = temp("change");
+        let mut mine = Settings::load_from(&dir);
+        let mut other = Settings::load_from(&dir);
+        other.remember_archiver("http://other/retrieval");
+        other.save_to(&dir);
+        Settings::change_in(&dir, |s| s.ui_zoom = 1.5);
+        mine.ui_zoom = 1.5;
+        let back = Settings::load_from(&dir);
+        assert_eq!(back.ui_zoom, 1.5);
+        assert_eq!(back.archiver_url.as_deref(), Some("http://other/retrieval"));
+        assert_ne!(back, mine, "not this run's copy");
         std::fs::remove_dir_all(&dir).ok();
     }
 

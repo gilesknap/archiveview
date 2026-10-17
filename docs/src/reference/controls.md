@@ -14,7 +14,7 @@
 | **↶** **↷** | undo and redo the last change to what the plot shows; the tooltip names it ("Undo zoom"). Greyed out with nothing to undo or redo. See [Undo and redo](../how-to/navigate.md#undo-and-redo) |
 | **⤢** | autoscale every value axis |
 | **⌂** | reset: back to the last preset, autoscale on |
-| **≡** | Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
+| **≡** | Zoom **− 100% +** (the whole interface; click the percentage for 100%); Log scale (every value axis), Clear search history; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures |
 
 In a narrow window the presets become a drop-down, the archiver pill shows
 only its dot, and ↶ ↷, ⤢ and ⌂ move into the ≡ menu.
@@ -72,6 +72,14 @@ These work whenever no text box has the focus.
 | `Home` | reset |
 | `Ctrl+Z` (`⌘Z` on a Mac) | undo |
 | `Ctrl+Shift+Z` or `Ctrl+Y` | redo |
+
+These work even while a text box has the focus:
+
+| key | effect |
+| --- | --- |
+| `Ctrl+=` or `Ctrl++` | zoom the interface in (to 300%) |
+| `Ctrl+−` | zoom the interface out (to 50%) |
+| `Ctrl+0` | interface zoom back to 100% |
 
 In the search list, `↑` `↓` move and `Enter` adds (or, on a recent search,
 searches for it again).

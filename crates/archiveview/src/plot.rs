@@ -41,6 +41,7 @@ use crate::axis;
 use crate::history::SearchHistory;
 use crate::view::{self, TraceView, View, YAxis};
 use axes::{Choice, Members, Stats};
+pub use bar::MenuPart;
 use fetch::Fetcher;
 pub use paste::{MAX_PASTE, MiddleClick, Pasted, pv_names};
 pub use series::now;
@@ -722,12 +723,17 @@ impl Plot {
     }
 
     /// As [`Plot::ui`], with `menu` adding the host's items (views,
-    /// settings) to the top bar's `≡` menu.
-    pub fn ui_with_menu(&mut self, ui: &mut egui::Ui, menu: &mut dyn FnMut(&mut egui::Ui)) {
+    /// settings) to the top bar's `≡` menu, in the [`MenuPart`] it is
+    /// called for.
+    pub fn ui_with_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        menu: &mut dyn FnMut(&mut egui::Ui, MenuPart),
+    ) {
         self.show(ui, Some(menu));
     }
 
-    fn show(&mut self, ui: &mut egui::Ui, menu: Option<&mut dyn FnMut(&mut egui::Ui)>) {
+    fn show(&mut self, ui: &mut egui::Ui, menu: Option<bar::HostMenu>) {
         let ctx = ui.ctx().clone();
         self.repaint = Some(fetch::Repaint {
             ctx: ctx.clone(),

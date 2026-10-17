@@ -17,7 +17,7 @@ archiveview-mockarchiver [--port PORT] [--bind ADDR]
 | `--view NAME` | open the saved view `NAME` from `~/.config/archiveview/views/`. Giving PVs as well is a usage error. |
 | `-r`, `--range SPAN` | the time span to show, ending now: `1h`, `8h`, `7d`, `90m`, `2 days`, `1 hour 30 min`, `3w`, `6mo`, `1y`; units `s`, `m` (minutes), `h`, `d`, `w`, `mo` (30 days), `y` (365 days). Default `1h`. |
 | `--theme system\|light\|dark` | the colour theme. Default: `theme` in `settings.json`, else `system` (follow the OS). |
-| `--ui-scale F` | scale the whole interface by `F`, e.g. `1.25`. Default: `ARCHIVEVIEW_UI_SCALE`, else `1`. |
+| `--ui-scale F` | start with the whole interface zoomed by `F`, e.g. `1.25` for 125%. Default: `ARCHIVEVIEW_UI_SCALE`, else the zoom last set in the ≡ menu (`ui_zoom` in `settings.json`), else `1`. Snapshots start at `1` without it. See [Zoom the interface](../how-to/navigate.md#zoom-the-interface). |
 | `--version`, `--help` | |
 
 ### Snapshot mode

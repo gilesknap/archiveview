@@ -62,8 +62,8 @@ struct Cli {
     /// live only
     #[arg(long, conflicts_with = "archiver")]
     no_archiver: bool,
-    /// Scale the whole interface, e.g. 1.25 (default: ARCHIVEVIEW_UI_SCALE,
-    /// else 1)
+    /// Start with the whole interface zoomed, e.g. 1.25 (default:
+    /// ARCHIVEVIEW_UI_SCALE, else the zoom last set, else 1)
     #[arg(long, value_name = "F", value_parser = parse_scale_factor)]
     ui_scale: Option<f32>,
     /// Render to a PNG without a window and exit

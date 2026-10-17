@@ -98,12 +98,20 @@ const CHIPS: &[(f64, &str)] = &[
     (365.0 * 86_400.0, "1y"),
 ];
 
-pub fn top_bar(
-    plot: &mut Plot,
-    ui: &mut egui::Ui,
-    menu: Option<&mut dyn FnMut(&mut egui::Ui)>,
-    now: f64,
-) {
+/// Where in the `≡` menu a host's items go ([`Plot::ui_with_menu`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuPart {
+    /// First, above the plot's items (the app's interface zoom). The host
+    /// adds its own separator after them.
+    Top,
+    /// After the plot's items (views, the theme).
+    Main,
+}
+
+/// A host's items for the `≡` menu ([`Plot::ui_with_menu`]).
+pub type HostMenu<'a> = &'a mut dyn FnMut(&mut egui::Ui, MenuPart);
+
+pub fn top_bar(plot: &mut Plot, ui: &mut egui::Ui, mut menu: Option<HostMenu>, now: f64) {
     let compact = ui.available_width() < COMPACT_WIDTH;
     ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
     ui.spacing_mut().item_spacing.x = 6.0;
@@ -112,6 +120,9 @@ pub fn top_bar(
     ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
         let menu_button = icons::button(ui, Icon::Menu, false).on_hover_text("More");
         egui::Popup::menu(&menu_button).show(|ui| {
+            if let Some(menu) = menu.as_mut() {
+                menu(ui, MenuPart::Top);
+            }
             if compact {
                 if !plot.undo.hidden {
                     undo_menu_items(plot, ui);
@@ -142,7 +153,7 @@ pub fn top_bar(
             }
             if let Some(menu) = menu {
                 ui.separator();
-                menu(ui);
+                menu(ui, MenuPart::Main);
             }
             ui.separator();
             ui.label(
@@ -338,7 +349,17 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
     } else {
         "Add a PV…"
     };
-    if !focused && s.text.is_empty() {
+    // The hint's width, to leave the key cap out where it would overlap.
+    let hint_w = ui
+        .painter()
+        .layout_no_wrap(
+            hint.to_string(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            Color32::BLACK,
+        )
+        .size()
+        .x;
+    if !focused && s.text.is_empty() && inner.width() >= hint_w + 24.0 {
         // The shortcut, as a key cap.
         let cap = Rect::from_center_size(
             Pos2::new(inner.right() - 10.0, rect.center().y),
