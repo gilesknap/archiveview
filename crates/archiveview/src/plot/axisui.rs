@@ -1,13 +1,13 @@
 //! Working with the value axes directly: click an axis to pick out its
 //! traces, drag or scroll on it to zoom it (in `Plot::interact`),
 //! double-click its name to rename it, right-click it for its scale; and
-//! moving a trace between axes from its chip (the colour dot's menu, or
-//! dragging the chip onto an axis).
+//! moving a trace between axes and panes from its chip (the colour dot's
+//! menu, or dragging the chip onto an axis or into a pane).
 
 use egui::{Color32, FontId, Key, Pos2, Sense, Stroke, Vec2};
 
 use super::render::Frame;
-use super::{Plot, Trace};
+use super::{MoveTo, Plot, Trace};
 
 /// What can be done on an axis, as its tooltip says.
 const HINT: &str = "Drag or shift+scroll: zoom this axis · click: pick out its traces\n\
@@ -69,15 +69,20 @@ impl Plot {
             let last = k + 1 == self.panes.len();
             if !ui.input(|i| i.pointer.any_down()) && (inside || last) {
                 self.chip_drag = None;
-                match over {
-                    Some(n) => {
-                        if let Some(id) = self.panes[k].drawn.get(n).copied() {
-                            self.dropped = Some((trace, Some(id)));
-                        }
-                    }
-                    // On the plot but no axis: an axis of its own.
-                    None if inside => self.dropped = Some((trace, None)),
-                    None => {}
+                let here = self.panes[k].id;
+                let home = (self.traces.iter())
+                    .find(|t| t.id == trace)
+                    .map(|t| self.panes[self.home(t)].id);
+                let to = match over {
+                    Some(n) => self.panes[k].drawn.get(n).map(|id| MoveTo::Axis(*id)),
+                    // On its own pane but no axis: an axis of its own;
+                    // another pane: into it.
+                    None if inside && home == Some(here) => Some(MoveTo::NewAxis(here)),
+                    None if inside => Some(MoveTo::Pane(here)),
+                    None => None,
+                };
+                if let Some(to) = to {
+                    self.moves.push((trace, Some(to)));
                 }
             }
         }
@@ -223,28 +228,69 @@ impl Plot {
         }
     }
 
-    /// The menu under a chip's colour dot: the axes to put its trace on,
-    /// and a new one.
+    /// The menu under a chip's colour dot: the axes of its pane to put
+    /// its trace on, and a new one; a new pane, and the other panes.
+    /// Moved at the end of the frame.
     pub(super) fn axis_menu(&mut self, ui: &mut egui::Ui, trace: u64) {
         let Some(t) = self.traces.iter().find(|t| t.id == trace) else {
             return;
         };
         let on = t.axis;
         let alone = on.is_some() && self.traces.iter().filter(|x| x.axis == on).count() == 1;
+        let lone = t.pane.is_some() && self.traces.iter().filter(|x| x.pane == t.pane).count() == 1;
         let k = self.home(t);
+        let here = self.panes[k].id;
+        let mut to = None;
         ui.label(egui::RichText::new("Value axis").small().weak());
-        for (id, name) in self.panes[k].axis_names.clone() {
-            if ui.selectable_label(on == Some(id), name).clicked() {
-                self.move_trace(trace, Some(id));
-                ui.close();
+        for (id, name) in &self.panes[k].axis_names {
+            if ui.selectable_label(on == Some(*id), name).clicked() {
+                to = Some(MoveTo::Axis(*id));
             }
         }
         if ui
             .add_enabled(!alone, egui::Button::new("New axis"))
             .clicked()
         {
-            self.move_trace(trace, None);
+            to = Some(MoveTo::NewAxis(here));
+        }
+        ui.separator();
+        if ui
+            .add_enabled(!lone, egui::Button::new("New pane"))
+            .on_hover_text("A pane of its own, below the others")
+            .clicked()
+        {
+            to = Some(MoveTo::NewPane);
+        }
+        if self.panes.len() > 1 {
+            let panes: Vec<(u32, String)> = (0..self.panes.len())
+                .map(|n| (self.panes[n].id, self.pane_label(n)))
+                .collect();
+            ui.menu_button("Pane", |ui| {
+                for (id, label) in panes {
+                    if ui.selectable_label(id == here, label).clicked() {
+                        to = Some(MoveTo::Pane(id));
+                    }
+                }
+            });
+        }
+        if let Some(to) = to {
+            self.moves.push((trace, Some(to)));
             ui.close();
+        }
+    }
+
+    /// What pane `k` is called in menus: its place and its axes' names,
+    /// "2 · Pressure (mbar)".
+    fn pane_label(&self, k: usize) -> String {
+        let names: Vec<&str> = (self.panes[k].axis_names.iter())
+            .map(|(_, n)| n.as_str())
+            .collect();
+        let label = format!("{} · {}", k + 1, names.join(", "));
+        if label.chars().count() > 48 {
+            let cut: String = label.chars().take(47).collect();
+            format!("{}…", cut.trim_end())
+        } else {
+            label
         }
     }
 
@@ -262,7 +308,10 @@ impl Plot {
             egui::Order::Tooltip,
             self.id.with("chip-ghost"),
         ));
-        let text = format!("{}  →  an axis, or the plot for a new one", Trace::label(t));
+        let text = format!(
+            "{}  →  an axis, a pane, or its pane for a new axis",
+            Trace::label(t)
+        );
         let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), v.text_color());
         let size = galley.size() + Vec2::new(30.0, 8.0);
         let rect = egui::Rect::from_min_size(p + Vec2::new(12.0, 8.0), size);

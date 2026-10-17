@@ -2,14 +2,15 @@
 //!
 //! A trace settles on an axis once, when its first data arrives (see
 //! DESIGN.md "Value axes"): it joins the existing axis whose units and
-//! values suit it best, or gets a new one. Nothing here moves a trace
-//! again; only the user does, from its chip.
+//! values suit it best, in whichever pane, or gets a new one, in a new
+//! pane when the others are full. Nothing here moves a trace again; only
+//! the user does, from its chip.
 //!
 //! Pure functions over [`Stats`] and names, so the rules are table-tested.
 
-/// Past this many axes of values (axes of states aside) a new trace joins
-/// the closest axis it may, rather than get an axis of its own. Soft: with
-/// none it may join, it still gets one.
+/// A pane holds at most this many axes of values (axes of states aside):
+/// a trace that would need another opens a new pane. Soft: the user may
+/// put more in one by hand.
 pub const SOFT_LIMIT: usize = 4;
 
 /// What a trace's (or an axis's) values look like, for choosing an axis.
@@ -116,33 +117,57 @@ pub fn score(t: &Stats, a: &Stats) -> Option<f64> {
     Some(decades / allowed)
 }
 
-/// Where a trace settles.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Choice {
-    /// The existing axis with this id.
-    Join(u32),
-    /// An axis of its own.
-    New,
+/// The axes of a pane, for placing a trace: the id and stats of each
+/// axis with traces, and how many more have traces but no stats yet
+/// (never shown), which count toward the limit.
+#[derive(Clone, Debug, Default)]
+pub struct PaneAxes {
+    pub known: Vec<(u32, Stats)>,
+    pub unknown: usize,
 }
 
-/// The axis for a trace with stats `t`, among `axes` (id and stats of
-/// each axis with traces on it); `unknown` more axes have traces but no
-/// stats yet (never shown), and count toward the limit.
+impl PaneAxes {
+    /// Its axes of values (not of states).
+    pub fn values(&self) -> usize {
+        self.known.iter().filter(|(_, a)| !a.whole).count() + self.unknown
+    }
+}
+
+/// Where a trace settles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Place {
+    /// The existing axis with this id, in the pane at this index.
+    Join(usize, u32),
+    /// An axis of its own in the pane at this index.
+    New(usize),
+    /// An axis of its own in a new pane: those it may go in are full.
+    NewPane,
+}
+
+/// Where a trace with stats `t` settles, among `panes` (those it may go
+/// in, in order).
 ///
-/// The best match within its score, else a new axis. At the
-/// [`SOFT_LIMIT`] of axes of values, the closest axis it may join even
-/// when not a match; never one it may not (other units, states): then a
-/// new axis after all.
-pub fn choose(t: &Stats, axes: &[(u32, Stats)], unknown: usize) -> Choice {
-    let values = axes.iter().filter(|(_, a)| !a.whole).count() + unknown;
-    let best = axes
+/// The best match within its score in any of them (the first pane's on a
+/// tie), else a new axis in the first pane with room for it (under the
+/// [`SOFT_LIMIT`] of axes of values; states always have room), else a new
+/// pane. A trace never joins an axis it does not match: other units,
+/// states, or values too far apart.
+pub fn place(t: &Stats, panes: &[PaneAxes]) -> Place {
+    let best = (panes.iter().enumerate())
+        .flat_map(|(k, p)| {
+            (p.known.iter()).filter_map(move |(id, a)| score(t, a).map(|s| (k, *id, s)))
+        })
+        .filter(|(_, _, s)| *s <= 1.0)
+        .min_by(|a, b| a.2.total_cmp(&b.2));
+    if let Some((k, id, _)) = best {
+        return Place::Join(k, id);
+    }
+    match panes
         .iter()
-        .filter_map(|(id, a)| score(t, a).map(|s| (*id, s)))
-        .min_by(|a, b| a.1.total_cmp(&b.1));
-    match best {
-        Some((id, s)) if s <= 1.0 => Choice::Join(id),
-        Some((id, _)) if !t.whole && values >= SOFT_LIMIT => Choice::Join(id),
-        _ => Choice::New,
+        .position(|p| t.whole || p.values() < SOFT_LIMIT)
+    {
+        Some(k) => Place::New(k),
+        None => Place::NewPane,
     }
 }
 
@@ -404,59 +429,93 @@ mod tests {
         }
     }
 
+    /// One pane of `known` axes.
+    fn pane(known: &[(u32, Stats)], unknown: usize) -> PaneAxes {
+        PaneAxes {
+            known: known.to_vec(),
+            unknown,
+        }
+    }
+
     #[test]
     fn traces_choose_an_axis_and_respect_the_soft_limit() {
+        let one =
+            |t: &Stats, known: &[(u32, Stats)], unknown: usize| place(t, &[pane(known, unknown)]);
         let current = (0, stats("mA", 0.0, 300.0));
         let x = stats("mm", 0.0, 0.04);
-        assert_eq!(choose(&x, &[], 0), Choice::New);
-        assert_eq!(choose(&x, std::slice::from_ref(&current), 0), Choice::New);
+        assert_eq!(one(&x, &[], 0), Place::New(0));
+        assert_eq!(one(&x, std::slice::from_ref(&current), 0), Place::New(0));
         let axes = [current.clone(), (1, x.clone())];
-        assert_eq!(choose(&stats("mm", 0.0, 0.6), &axes, 0), Choice::Join(1));
+        assert_eq!(one(&stats("mm", 0.0, 0.6), &axes, 0), Place::Join(0, 1));
         // The better of two matches.
         let axes = [
             (0, stats("", 0.0, 1.0)),
             (1, stats("", 0.0, 5.0)),
             (2, stats("", 0.0, 50.0)),
         ];
-        assert_eq!(choose(&stats("", 0.0, 8.0), &axes, 0), Choice::Join(1));
-        // Four axes: same units join the closest even when far apart.
+        assert_eq!(one(&stats("", 0.0, 8.0), &axes, 0), Place::Join(0, 1));
+        // Four axes: a match still joins; anything else, even in the
+        // same units but far apart, needs a new pane.
         let full = [
             current.clone(),
             (1, stats("h", 5.0, 13.0)),
             (2, stats("nC", 0.0, 0.01)),
             (3, stats("mm", 0.0, 1.0)),
         ];
-        assert_eq!(choose(&stats("mm", 50.0, 90.0), &full, 0), Choice::Join(3));
-        // Other units never do: the limit is soft, a fifth axis.
-        assert_eq!(choose(&stats("V", 9.0, 11.0), &full, 0), Choice::New);
-        assert_eq!(choose(&stats("%", 0.0, 0.0), &full, 0), Choice::New);
+        assert_eq!(one(&stats("mm", 0.0, 0.5), &full, 0), Place::Join(0, 3));
+        assert_eq!(one(&stats("mm", 50.0, 90.0), &full, 0), Place::NewPane);
+        assert_eq!(one(&stats("V", 9.0, 11.0), &full, 0), Place::NewPane);
+        assert_eq!(one(&stats("%", 0.0, 0.0), &full, 0), Place::NewPane);
         // Axes not yet shown count; axes of states do not.
         let three = &full[..3];
-        assert_eq!(choose(&stats("mm", 50.0, 90.0), three, 0), Choice::New);
-        let with_state = [
-            three,
-            &[(4, states(&["Off", "On"])), (5, stats("x", 50.0, 90.0))],
-        ]
-        .concat();
+        assert_eq!(one(&stats("mm", 50.0, 90.0), three, 0), Place::New(0));
+        assert_eq!(one(&stats("mm", 50.0, 90.0), three, 1), Place::NewPane);
+        let with_state = [three, &[(4, states(&["Off", "On"]))]].concat();
         assert_eq!(
-            choose(&stats("x", 1000.0, 2000.0), &with_state, 0),
-            Choice::Join(5),
-            "four axes of values"
+            one(&stats("x", 1000.0, 2000.0), &with_state, 0),
+            Place::New(0),
+            "three of values and one of states"
+        );
+        // States never join values, or other states, and always have room.
+        let full_state = [&full[..], &[(4, states(&["Off", "On"]))]].concat();
+        assert_eq!(
+            one(&states(&["Shutdown", "User"]), &full_state, 0),
+            Place::New(0)
         );
         assert_eq!(
-            choose(&stats("x", 1000.0, 2000.0), &with_state[..4], 1),
-            Choice::New,
-            "three of values and one of states, plus one unknown, is four"
+            one(&states(&["Off", "On"]), &full_state, 0),
+            Place::Join(0, 4)
         );
-        // States never join values, or other states: always their own.
+    }
+
+    #[test]
+    fn traces_find_their_pane() {
+        let full = pane(
+            &[
+                (0, stats("mA", 0.0, 300.0)),
+                (1, stats("h", 5.0, 13.0)),
+                (2, stats("nC", 0.0, 0.01)),
+                (3, stats("%", 0.0, 20.0)),
+            ],
+            0,
+        );
+        let vac = pane(&[(4, stats("mbar", 1e-10, 1e-8))], 0);
+        // A match in any pane, the better one first.
+        let gauge = stats("mbar", 2e-10, 3e-9);
         assert_eq!(
-            choose(&states(&["Shutdown", "User"]), &with_state, 0),
-            Choice::New
+            place(&gauge, &[full.clone(), vac.clone()]),
+            Place::Join(1, 4)
         );
+        let current = stats("mA", 0.0, 250.0);
         assert_eq!(
-            choose(&states(&["Off", "On"]), &with_state, 0),
-            Choice::Join(4)
+            place(&current, &[full.clone(), vac.clone()]),
+            Place::Join(0, 0)
         );
+        // No match: the first pane with room, else a new one.
+        let volts = stats("V", 9.0, 11.0);
+        assert_eq!(place(&volts, &[full.clone(), vac.clone()]), Place::New(1));
+        assert_eq!(place(&volts, &[full.clone()]), Place::NewPane);
+        assert_eq!(place(&volts, &[]), Place::NewPane);
     }
 
     #[test]

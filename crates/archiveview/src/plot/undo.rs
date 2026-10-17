@@ -1,9 +1,10 @@
-//! Undo and redo of what the plot shows: the time range, the value axes,
-//! and the traces on them.
+//! Undo and redo of what the plot shows: the time range, the panes and
+//! their value axes, and the traces on them.
 //!
 //! Snapshot-based: each step keeps the state from before it (what
 //! [`Plot::view`] saves, plus what views don't: hidden flags, palette
-//! slots, axis ids and decisions, and the stats traces settled with). A
+//! slots, pane and axis ids and decisions, and the stats traces settled
+//! with). A
 //! change is noticed by comparing the state with the last one seen, at
 //! the start and end of each frame and when a host calls in, so every
 //! path that changes the plot is recorded, whoever calls it. Settling (a
@@ -105,6 +106,8 @@ enum Change {
     /// The time range or a value axis' range: one gesture or burst of
     /// these is one step.
     Navigate,
+    /// The panes' heights: one drag of a divider is one step.
+    Resize,
     /// Anything else: always a step of its own.
     Other,
 }
@@ -116,6 +119,8 @@ struct Open {
     at: f64,
     /// The pointer press it began in, if it began with a button down.
     press: Option<u64>,
+    /// What changes it takes in.
+    kind: Change,
 }
 
 /// The plot's undo and redo lists.
@@ -325,14 +330,18 @@ impl Plot {
         if let Some(change) = changed(&last, &current) {
             let at = now();
             let press = self.undo.press;
+            let held = |o: &Open| down && o.press == Some(press);
             let more = hint.is_none()
-                && change == Change::Navigate
                 && !self.undo.done.is_empty()
-                && self
-                    .undo
-                    .open
-                    .as_ref()
-                    .is_some_and(|o| at - o.at <= GAP || (down && o.press == Some(press)));
+                && (self.undo.open.as_ref()).is_some_and(|o| {
+                    o.kind == change
+                        && match change {
+                            Change::Navigate => at - o.at <= GAP || held(o),
+                            // A divider dragged: only while it is held.
+                            Change::Resize => held(o),
+                            Change::Other => false,
+                        }
+                });
             if more {
                 let label = {
                     let top = self.undo.done.back().expect("open");
@@ -349,11 +358,12 @@ impl Plot {
             } else {
                 // A step named by its code (a reset, a preset) takes in
                 // nothing more: only a gesture's does.
-                let gesture = change == Change::Navigate && hint.is_none();
+                let gesture = change != Change::Other && hint.is_none();
                 let label = hint.unwrap_or_else(|| self.describe(&last, &current));
                 self.undo.open = gesture.then(|| Open {
                     at,
                     press: down.then_some(press),
+                    kind: change,
                 });
                 self.undo.done.push_back(Step { state: last, label });
                 while self.undo.done.len() > MAX_STEPS {
@@ -586,10 +596,21 @@ impl Plot {
             .filter_map(|t| before.trace(t.id).map(|b| (b, t)))
             .collect();
         let moved: Vec<&(&TraceState, &TraceState)> = (pairs.iter())
-            .filter(|(b, a)| b.axis.is_some() && a.axis.is_some() && b.axis != a.axis)
+            .filter(|(b, a)| {
+                (b.axis.is_some() && a.axis.is_some() && b.axis != a.axis)
+                    // Not settled yet: put in a pane.
+                    || (a.axis.is_none() && a.pane.is_some() && b.pane != a.pane)
+            })
             .collect();
         match moved.as_slice() {
             [] => {}
+            [(b, t)] if b.pane != t.pane && t.pane.is_some_and(|p| before.pane(p).is_none()) => {
+                return format!("move {} to a new pane", t.label());
+            }
+            [(_, t)] if t.axis.is_none() => {
+                let n = (t.pane).and_then(|p| after.panes.iter().position(|x| x.id == p));
+                return format!("move {} to pane {}", t.label(), n.map_or(1, |n| n + 1));
+            }
             [(_, t)] => {
                 // The axis as it was named when the trace was dropped on
                 // it (as last drawn), else as it is named now (a new one).
@@ -628,6 +649,9 @@ impl Plot {
         }
         if before.default_log != after.default_log {
             return log(after.default_log).into();
+        }
+        if resized(before, after) {
+            return "resize panes".into();
         }
         if before.window == after.window {
             let fixed = |a: &ValueAxis| (!a.autoscale).then_some((a.lo, a.hi));
@@ -696,5 +720,15 @@ fn changed(before: &Snapshot, after: &Snapshot) -> Option<Change> {
         }
         navigate |= b.autoscale != a.autoscale || (!a.autoscale && (b.lo, b.hi) != (a.lo, a.hi));
     }
-    navigate.then_some(Change::Navigate)
+    if navigate {
+        Some(Change::Navigate)
+    } else {
+        resized(before, after).then_some(Change::Resize)
+    }
+}
+
+/// Whether a pane in both `before` and `after` changed its height.
+/// Panes coming and going with their traces are not resizing.
+fn resized(before: &Snapshot, after: &Snapshot) -> bool {
+    (after.panes.iter()).any(|a| before.pane(a.id).is_some_and(|b| b.weight != a.weight))
 }

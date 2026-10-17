@@ -1,10 +1,10 @@
-//! The legend: a wrapped row of chips under the plot, one per trace: a
-//! colour dot, the name, the latest value. Click to hide or show, ✕ to
-//! remove, hover to pick the trace out.
+//! The legends: a wrapped row of chips under each pane, one per trace in
+//! it: a colour dot, the name, the latest value. Click to hide or show, ✕
+//! to remove, hover to pick the trace out.
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
-use super::series::{FetchState, History, Pt};
+use super::series::{FetchState, History};
 use super::{Plot, format_value, precision, units};
 
 const HEIGHT: f32 = 26.0;
@@ -78,12 +78,14 @@ fn mark_font() -> FontId {
     FontId::proportional(11.0)
 }
 
-pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
+/// Lay out the chips of the traces in pane `k` (a trace not in a pane
+/// yet shows in the first), in rows `width` wide.
+pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32, k: usize) -> Chips {
     let painter = ui.painter();
     let font = font();
     let mut chips = Vec::new();
     let (mut x, mut y) = (0.0f32, 0.0f32);
-    for t in &plot.traces {
+    for t in plot.traces.iter().filter(|t| plot.home(t) == k) {
         let state = t.pv.state();
         let prec = precision(t, &state);
         let egu = units(t);
@@ -217,19 +219,20 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
     }
 }
 
-/// Place the chips (the next thing in `ui`) and handle their clicks.
-pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
-    if chips.chips.is_empty() {
+/// Place the chips at `origin` and handle their clicks. The first legend
+/// of the frame (`first`) starts afresh what is picked out.
+pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips, origin: Pos2, first: bool) {
+    chips.origin = origin.to_vec2();
+    #[cfg(test)]
+    if first {
+        plot.seen.1.clear();
+    }
+    if first {
         plot.highlight = None;
+    }
+    if chips.chips.is_empty() {
         return;
     }
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), chips.height),
-        Sense::hover(),
-    );
-    chips.origin = rect.min.to_vec2();
-    #[cfg(test)]
-    plot.seen.1.clear();
     let mut highlight = None;
     let mut toggle = None;
     let mut remove = None;
@@ -286,13 +289,17 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         t.visible = !t.visible;
     }
     if let Some(id) = remove {
-        plot.remove_trace(id);
+        // At the end of the frame, with the panes drawn.
+        plot.moves.push((id, None));
         highlight = None;
     }
     // Only a drawn trace is picked out: visible, not an array, on an axis.
-    plot.highlight = highlight.filter(|id| {
+    let highlight = highlight.filter(|id| {
         (plot.traces.iter()).any(|t| t.id == *id && t.visible && !t.is_array() && t.axis.is_some())
     });
+    if highlight.is_some() {
+        plot.highlight = highlight;
+    }
 }
 
 /// The quiet words after a chip's value, saying why it has no line or no
@@ -378,7 +385,7 @@ pub(super) fn fit(painter: &egui::Painter, text: &str, font: &FontId, width: f32
     ellipsize(text, lo)
 }
 
-pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark: bool) {
+pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, dark: bool) {
     let painter = ui.painter();
     let v = ui.visuals();
     let font = font();

@@ -43,7 +43,7 @@ use pv::PvManager;
 use crate::axis;
 use crate::history::SearchHistory;
 use crate::view::{self, TraceView, View, YAxis};
-use axes::{Choice, Members, Stats};
+use axes::{Members, PaneAxes, Place, Stats};
 use fetch::Fetcher;
 use pane::Pane;
 pub use paste::{MAX_PASTE, MiddleClick, Pasted, pv_names};
@@ -86,6 +86,15 @@ const MIN_SIZE: Vec2 = Vec2::new(360.0, 200.0);
 /// The gap between panes (points), which holds the divider.
 const PANE_GAP: f32 = 8.0;
 
+/// Dragging a divider leaves no pane shorter than this (points).
+const MIN_PANE: f32 = 40.0;
+
+/// No pane's weight (its share of the height) is less than this.
+const MIN_WEIGHT: f32 = 0.05;
+
+/// How long the overflow toast shows (seconds).
+const TOAST_SECS: f64 = 8.0;
+
 /// Tells plots apart, for their egui ids, when the host gives no salt
 /// ([`Plot::with_id_salt`]).
 static NEXT_PLOT: AtomicU64 = AtomicU64::new(0);
@@ -125,9 +134,13 @@ pub struct Plot {
     renaming: Option<axisui::Renaming>,
     /// A legend chip being dragged (its trace), to drop on an axis.
     chip_drag: Option<u64>,
-    /// A chip dropped this frame (its trace) and where to: moved at the
-    /// end of the frame, after the panes are drawn.
-    dropped: Option<(u64, Option<u32>)>,
+    /// Traces to move (a chip dropped, a menu's choice) or, with `None`,
+    /// remove (its ✕) this frame: done at the end of the frame, so the
+    /// panes stay as laid out until they are drawn.
+    moves: Vec<(u64, Option<MoveTo>)>,
+    /// The last trace that settled in a new pane for want of room, for
+    /// the toast offering to keep it where it was.
+    overflow: Option<Overflow>,
     /// Where the axes (strip, name) and chips (whole, dot) were last
     /// drawn, for tests to point at.
     #[cfg(test)]
@@ -185,9 +198,36 @@ pub struct Plot {
     view_name: Option<String>,
 }
 
-/// Where the axes (strip, name) and chips (whole, dot) were last drawn.
+/// Where the axes (strip, name), chips (whole, dot) and panes were last
+/// drawn.
 #[cfg(test)]
-type Seen = (Vec<(Rect, Rect)>, Vec<(Rect, Rect)>);
+type Seen = (Vec<(Rect, Rect)>, Vec<(Rect, Rect)>, Vec<Rect>);
+
+/// Where a trace is moved by hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MoveTo {
+    /// The value axis with this id (in whichever pane).
+    Axis(u32),
+    /// An axis of its own in the pane with this id.
+    NewAxis(u32),
+    /// The pane with this id: the axis there that suits it, else one of
+    /// its own.
+    Pane(u32),
+    /// A pane of its own, below the others.
+    NewPane,
+}
+
+/// A trace that settled in a new pane, the pane it would have gone in
+/// being full.
+#[derive(Clone, Debug)]
+struct Overflow {
+    trace: u64,
+    /// The pane it would have gone in (its id), and its axes of values.
+    from: u32,
+    axes: usize,
+    /// When (egui time) the toast goes, once shown.
+    until: Option<f64>,
+}
 
 /// A value axis and the traces on it (those whose `axis` is its id).
 #[derive(Clone, Debug)]
@@ -316,7 +356,8 @@ impl Plot {
             default_log: false,
             renaming: None,
             chip_drag: None,
-            dropped: None,
+            moves: Vec::new(),
+            overflow: None,
             #[cfg(test)]
             seen: Default::default(),
             fetcher: Fetcher::default(),
@@ -556,7 +597,8 @@ impl Plot {
         }
     }
 
-    /// The current view (traces, range, value axes, archiver), to save.
+    /// The current view (traces, range, panes, value axes, archiver), to
+    /// save.
     pub fn view(&self) -> View {
         let range = if self.window.live {
             view::Range::Relative {
@@ -572,9 +614,20 @@ impl Plot {
         // Only axes with traces, or kept for a PV yet to settle (pruned
         // once that PV is gone): no stale fixed range comes back for
         // whichever PV would take it.
-        let kept: Vec<&ValueAxis> = (self.all_axes())
-            .filter(|a| self.has_traces(a) || a.reserved.is_some())
-            .collect();
+        let mut kept: Vec<&ValueAxis> = Vec::new();
+        let mut panes = Vec::new();
+        for p in &self.panes {
+            let before = kept.len();
+            kept.extend((p.axes.iter()).filter(|a| self.has_traces(a) || a.reserved.is_some()));
+            panes.push(view::PaneView {
+                axes: kept.len() - before,
+                height: p.weight,
+            });
+        }
+        // One pane: as before there were panes.
+        if panes.len() < 2 {
+            panes.clear();
+        }
         let mut axes = kept.iter().map(|a| a.view());
         View {
             version: view::VERSION,
@@ -591,13 +644,14 @@ impl Plot {
             range,
             y: axes.next().unwrap_or_default(),
             axes: axes.collect(),
+            panes,
             archiver: self.archiver.as_ref().map(|a| a.base().to_string()),
         }
     }
 
-    /// Show `view`, replacing the traces, range and value axes. Traces
-    /// the view puts on an axis stay there; others join one when their
-    /// data arrives. With archiver switching on
+    /// Show `view`, replacing the traces, range, panes and value axes.
+    /// Traces the view puts on an axis stay there (in its pane); others
+    /// join one when their data arrives. With archiver switching on
     /// ([`Plot::set_archiver_switching`]), a view that names an archiver
     /// switches to it; otherwise, or for a view without one, the archiver
     /// stays as it is.
@@ -617,7 +671,7 @@ impl Plot {
         for t in std::mem::take(&mut self.traces) {
             self.park(t);
         }
-        let axes: Vec<ValueAxis> = view
+        let mut axes = view
             .value_axes()
             .map(|y| {
                 let mut a = ValueAxis::from_view(self.next_axis, y);
@@ -625,22 +679,48 @@ impl Plot {
                 a.fit_log_range();
                 a
             })
+            .collect::<Vec<ValueAxis>>()
+            .into_iter();
+        // Each pane takes its count of the axes in order, the last any
+        // left over; no panes (one, or an older file): one with them all.
+        let one = [view::PaneView::default()];
+        let shares = if view.panes.is_empty() {
+            &one[..]
+        } else {
+            &view.panes[..]
+        };
+        self.panes = (shares.iter().enumerate())
+            .map(|(k, share)| {
+                let mine: Vec<ValueAxis> = if k + 1 == shares.len() {
+                    axes.by_ref().collect()
+                } else {
+                    axes.by_ref().take(share.axes).collect()
+                };
+                let weight = if share.height.is_finite() && share.height > 0.0 {
+                    share.height.max(MIN_WEIGHT)
+                } else {
+                    1.0
+                };
+                let pane = Pane::with_axes(self.next_pane, weight, mine);
+                self.next_pane += 1;
+                pane
+            })
             .collect();
-        let pane = Pane::with_axes(self.next_pane, 1.0, axes);
-        self.next_pane += 1;
-        self.panes = vec![pane];
+        let ids: Vec<u32> = self.all_axes().map(|a| a.id).collect();
         self.renaming = None;
+        self.overflow = None;
         // A file from before there were several axes: its one axis is for
         // its first visible PV, and its log scale for every axis.
         let old = view.axes.is_empty() && view.pvs.iter().all(|t| t.axis.is_none());
         self.default_log = old && view.y.log;
         for tv in &view.pvs {
-            let pane = &mut self.panes[0];
-            let axis = tv.axis.and_then(|i| pane.axes.get_mut(i)).map(|a| {
+            let axis = tv.axis.and_then(|i| ids.get(i).copied());
+            let pane = axis
+                .and_then(|id| self.axis_pane(id))
+                .map(|k| self.panes[k].id);
+            if let Some(a) = axis.and_then(|id| self.axis_mut(id)) {
                 a.used = true;
-                a.id
-            });
-            let pane = axis.map(|_| pane.id);
+            }
             if let Some(t) = self.add(&tv.name) {
                 t.color = tv.color.clone();
                 t.visible = tv.visible;
@@ -768,33 +848,6 @@ impl Plot {
         bar::top_bar(self, ui, menu, now);
         ui.add_space(6.0);
 
-        // The legend's height first, so the plot fills the rest; never
-        // smaller than MIN_SIZE (an auto-sized window offers little).
-        let width = ui.available_width().max(MIN_SIZE.x);
-        let mut chips = legend::layout(self, ui, width);
-        let gap = if chips.height > 0.0 { 6.0 } else { 0.0 };
-        let plot_h = (ui.available_height() - chips.height - gap).max(MIN_SIZE.y);
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, plot_h), Sense::hover());
-        ui.add_space(gap);
-        legend::interact(self, ui, &mut chips);
-        // A middle-click on the plot or the legend (not on a popup over
-        // them) asks the host for the selection.
-        let below = Rect::from_min_size(rect.min, Vec2::new(width, plot_h + gap + chips.height));
-        let middle = ui.input(|i| {
-            let clicked = i.pointer.button_clicked(egui::PointerButton::Middle);
-            clicked.then(|| i.pointer.interact_pos()).flatten()
-        });
-        if let Some(p) = middle
-            && below.contains(p)
-            && ui.ctx().layer_id_at(p) == Some(ui.layer_id())
-        {
-            self.paste.middle = Some(MiddleClick::Plot);
-        }
-        #[cfg(test)]
-        {
-            self.chips_shown = chips.shown();
-        }
-
         // Kinetic panning after a drag.
         if self.glide != 0.0 && self.drag.is_none() {
             self.window.pan(self.glide * dt, now);
@@ -806,6 +859,9 @@ impl Plot {
             }
         }
 
+        // The data, and the axes and panes it settles on, before anything
+        // is laid out: a trace overflowing into a new pane makes room
+        // for it this frame.
         let (from, to) = self.shown_range(now, dt);
         let dark = ui.visuals().dark_mode;
         let data: Vec<Vec<Pt>> = self
@@ -820,17 +876,53 @@ impl Plot {
             })
             .collect();
         self.settle_axes(&data, now);
-        // The panes as they are now (the legend's ✕ and menus, and
-        // settling, are done with them), each taking the pointer in its
-        // own rect.
+
+        // The legends' heights first, so the panes fill the rest; never
+        // smaller than MIN_SIZE (an auto-sized window offers little).
+        // Until the frame ends, the panes stay as they are: moves and
+        // removals wait for it.
+        let width = ui.available_width().max(MIN_SIZE.x);
+        let mut chips: Vec<legend::Chips> = (0..self.panes.len())
+            .map(|k| legend::layout(self, ui, width, k))
+            .collect();
         let font = egui::FontId::proportional(11.5);
         let title_font = egui::FontId::proportional(13.5);
-        let rects = self.pane_rects(rect, render::time_strip(ui.painter(), &font));
+        let strip = render::time_strip(ui.painter(), &font);
+        let legends: Vec<f32> = chips.iter().map(|c| c.height).collect();
+        let around: f32 = legends.iter().map(|h| legend_room(*h)).sum();
+        let gaps = PANE_GAP * (self.panes.len() - 1) as f32;
+        let plot_h = (ui.available_height() - around).max(MIN_SIZE.y + gaps);
+        let (area, _) = ui.allocate_exact_size(Vec2::new(width, plot_h + around), Sense::hover());
+        let layout = self.pane_rects(area, strip, &legends);
+        let rects: Vec<Rect> = layout.iter().map(|l| l.0).collect();
+        for (k, (c, l)) in chips.iter_mut().zip(&layout).enumerate() {
+            legend::interact(self, ui, c, l.1, k == 0);
+        }
+        // A middle-click on the plot or the legend (not on a popup over
+        // them) asks the host for the selection.
+        let middle = ui.input(|i| {
+            let clicked = i.pointer.button_clicked(egui::PointerButton::Middle);
+            clicked.then(|| i.pointer.interact_pos()).flatten()
+        });
+        if let Some(p) = middle
+            && area.contains(p)
+            && ui.ctx().layer_id_at(p) == Some(ui.layer_id())
+        {
+            self.paste.middle = Some(MiddleClick::Plot);
+        }
+        #[cfg(test)]
+        {
+            self.chips_shown = chips.iter().flat_map(legend::Chips::shown).collect();
+        }
+
+        // Each pane takes the pointer in its own rect, and the dividers
+        // between them in theirs.
         let resps: Vec<egui::Response> = (self.panes.iter().zip(&rects))
             .map(|(pane, r)| {
                 ui.interact(*r, self.id.with(("pane", pane.id)), Sense::click_and_drag())
             })
             .collect();
+        self.dividers(ui, &layout, strip);
         let specs: Vec<Vec<render::AxisSpec>> = (0..self.panes.len())
             .map(|k| self.value_axes(k, &data, from, to, dt, dark))
             .collect();
@@ -858,6 +950,7 @@ impl Plot {
                     (0..f.axis_count()).filter_map(|k| f.axis_rect(k).zip(f.title_rect(k)))
                 })
                 .collect();
+            self.seen.2 = rects.clone();
         }
         let ppp = ui.ctx().pixels_per_point();
         self.schedule_fetches(now, frames[0].data.width() * ppp);
@@ -912,12 +1005,22 @@ impl Plot {
             }
         }
         hover::status(self, ui, &frames[0]);
-        legend::paint(self, ui, &chips, &data, dark);
+        for c in &chips {
+            legend::paint(self, ui, c, dark);
+        }
         self.rename_box(ui, &frames);
         self.chip_ghost(ui, dark);
-        // A chip dropped this frame: moved once the panes are drawn.
-        if let Some((trace, to)) = self.dropped.take() {
-            self.move_trace(trace, to);
+        self.overflow_toast(ui, area, &rects);
+        // What was asked for this frame (a chip dropped or removed, a
+        // menu's move), now the panes are drawn.
+        for (trace, to) in std::mem::take(&mut self.moves) {
+            match to {
+                Some(to) => self.move_trace(trace, to),
+                None => {
+                    self.remove_trace(trace);
+                    self.highlight = None;
+                }
+            }
         }
         self.commit(down);
 
@@ -940,26 +1043,130 @@ impl Plot {
         }
     }
 
-    /// Where each pane goes in `rect`, top to bottom, by their weights:
-    /// the bottom one also holds the time labels (`strip` high), so the
-    /// panes' data areas share the height as their weights say.
-    fn pane_rects(&self, rect: Rect, strip: f32) -> Vec<Rect> {
+    /// Where each pane goes in `area`, top to bottom, with its legend
+    /// (`legends`: their heights) under it: its rect, and where its
+    /// legend starts. The panes share the height by their weights; the
+    /// bottom one also holds the time labels (`strip` high), so their
+    /// data areas still do.
+    fn pane_rects(&self, area: Rect, strip: f32, legends: &[f32]) -> Vec<(Rect, Pos2)> {
         let n = self.panes.len();
-        let room = (rect.height() - strip - PANE_GAP * (n - 1) as f32).max(0.0);
-        let total: f32 = self.panes.iter().map(|p| p.weight.max(0.01)).sum();
-        let mut y = rect.top();
-        (self.panes.iter().enumerate())
-            .map(|(k, p)| {
-                let h = if k + 1 == n {
-                    rect.bottom() - y
-                } else {
-                    room * p.weight.max(0.01) / total
-                };
-                let r = Rect::from_x_y_ranges(rect.x_range(), y..=y + h);
-                y += h + PANE_GAP;
-                r
+        let around: f32 = legends.iter().map(|h| legend_room(*h)).sum();
+        let room = (area.height() - around - strip - PANE_GAP * (n - 1) as f32).max(0.0);
+        let total: f32 = self.panes.iter().map(|p| p.weight.max(MIN_WEIGHT)).sum();
+        let mut y = area.top();
+        (self.panes.iter().zip(legends).enumerate())
+            .map(|(k, (p, legend))| {
+                let mut h = room * p.weight.max(MIN_WEIGHT) / total;
+                if k + 1 == n {
+                    h = (area.bottom() - legend_room(*legend) - y).max(0.0);
+                }
+                let r = Rect::from_x_y_ranges(area.x_range(), y..=y + h);
+                y += h + legend_room(*legend);
+                let at = Pos2::new(area.left(), y - legend);
+                y += PANE_GAP;
+                (r, at)
             })
             .collect()
+    }
+
+    /// The dividers between the panes (`layout` from
+    /// [`Plot::pane_rects`]): dragging one moves height from one pane to
+    /// the next, and double-clicking makes them all equal.
+    fn dividers(&mut self, ui: &egui::Ui, layout: &[(Rect, Pos2)], strip: f32) {
+        let heights: Vec<f32> = (layout.iter().enumerate())
+            .map(|(k, l)| l.0.height() - if k + 1 == layout.len() { strip } else { 0.0 })
+            .collect();
+        let total: f32 = self.panes.iter().map(|p| p.weight.max(MIN_WEIGHT)).sum();
+        let room: f32 = heights.iter().sum();
+        for k in 0..layout.len().saturating_sub(1) {
+            let below = layout[k + 1].0.top();
+            let r = Rect::from_x_y_ranges(layout[k].0.x_range(), below - PANE_GAP..=below);
+            let resp = ui
+                .interact(r, self.id.with(("divider", k)), Sense::click_and_drag())
+                .on_hover_cursor(egui::CursorIcon::ResizeVertical)
+                .on_hover_text("Drag to resize the panes · double-click: make them equal");
+            if resp.double_clicked() {
+                self.name_step("make the panes equal");
+                for p in &mut self.panes {
+                    p.weight = 1.0;
+                }
+            } else if resp.dragged() && room > 0.0 {
+                // Points to weight; neither pane shorter than MIN_PANE.
+                let per = total / room;
+                let (a, b) = (self.panes[k].weight, self.panes[k + 1].weight);
+                let min = MIN_PANE * per;
+                if a + b > 2.0 * min {
+                    let dw = (resp.drag_delta().y * per).clamp(min - a, b - min);
+                    self.panes[k].weight = a + dw;
+                    self.panes[k + 1].weight = b - dw;
+                }
+            }
+            let v = ui.visuals();
+            let hot = resp.hovered() || resp.dragged();
+            let color = if hot {
+                v.strong_text_color().gamma_multiply(0.6)
+            } else {
+                v.weak_text_color().gamma_multiply(0.35)
+            };
+            let grip = Rect::from_center_size(r.center(), Vec2::new(36.0, 3.0));
+            ui.painter().rect_filled(grip, 1.5, color);
+        }
+    }
+
+    /// The toast after a trace overflowed into a new pane, over the
+    /// bottom of the plot (`area`, the panes in `rects`) for a few
+    /// seconds: "X → new pane (4 axes here)", and Keep here, which puts
+    /// it back in the pane it would have gone in, on an axis of its own.
+    /// Clicking the text dismisses it.
+    fn overflow_toast(&mut self, ui: &egui::Ui, area: Rect, rects: &[Rect]) {
+        let Some(o) = &mut self.overflow else {
+            return;
+        };
+        let time = ui.input(|i| i.time);
+        let until = *o.until.get_or_insert(time + TOAST_SECS);
+        let o = o.clone();
+        // Gone, moved since, or with nowhere to go back to.
+        let trace = (self.traces.iter())
+            .find(|t| t.id == o.trace)
+            .filter(|t| t.pane != Some(o.from) && self.pane_index(o.from).is_some());
+        let Some(trace) = trace.filter(|_| time <= until) else {
+            self.overflow = None;
+            return;
+        };
+        let text = format!("{} → new pane ({} axes here)", trace.label(), o.axes);
+        let bottom = rects.last().map_or(area.bottom(), |r| r.bottom());
+        let pos = Pos2::new(area.center().x, bottom - 34.0);
+        let (mut keep, mut dismiss) = (false, false);
+        egui::Area::new(self.id.with("overflow"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .corner_radius(16.0)
+                    .inner_margin(egui::Margin::symmetric(14, 6))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let label = egui::Label::new(text).sense(Sense::click());
+                            dismiss = ui.add(label).on_hover_text("Click to dismiss").clicked();
+                            keep = ui
+                                .button("Keep here")
+                                .on_hover_text(
+                                    "Back in the pane it would have gone in, on an axis of its own",
+                                )
+                                .clicked();
+                        });
+                    });
+            });
+        if keep {
+            self.moves.push((o.trace, Some(MoveTo::NewAxis(o.from))));
+            self.overflow = None;
+        } else if dismiss {
+            self.overflow = None;
+        } else {
+            let left = std::time::Duration::from_secs_f64((until - time).max(0.05));
+            ui.ctx().request_repaint_after(left);
+        }
     }
 
     /// The lines to draw in pane `k`, from `data` (this frame's points):
@@ -1050,6 +1257,51 @@ impl Plot {
             s.states = t.pv.state().labels;
         }
         Some(s)
+    }
+
+    /// Where trace `i`, with `stats`, settles: an axis that suits it, in
+    /// its own pane (one put in a pane by hand or by a view) or in any;
+    /// else an axis of its own in the first pane with room (or the one
+    /// a view kept for it); else in a new pane, said by a toast. Its id.
+    fn place(&mut self, i: usize, stats: &Stats) -> u32 {
+        let t = &self.traces[i];
+        let id = t.id;
+        let panes: Vec<usize> = match t.pane.and_then(|p| self.pane_index(p)) {
+            Some(k) => vec![k],
+            None => (0..self.panes.len()).collect(),
+        };
+        let axes: Vec<PaneAxes> = panes.iter().map(|&k| self.pane_axes(k)).collect();
+        let kept = (self.all_axes())
+            .find(|a| !a.used && a.reserved == Some(id))
+            .map(|a| a.id);
+        match (axes::place(stats, &axes), kept) {
+            (Place::Join(_, axis), _) => axis,
+            (_, Some(axis)) => axis,
+            (Place::New(k), None) => self.new_axis(panes[k], stats, id),
+            (Place::NewPane, None) => {
+                self.overflow = Some(Overflow {
+                    trace: id,
+                    from: self.panes[panes[0]].id,
+                    axes: axes[0].values(),
+                    until: None,
+                });
+                let k = self.open_pane();
+                self.new_axis(k, stats, id)
+            }
+        }
+    }
+
+    /// A new pane at the bottom: its index.
+    fn open_pane(&mut self) -> usize {
+        self.panes.push(Pane::new(self.next_pane));
+        self.next_pane += 1;
+        self.panes.len() - 1
+    }
+
+    /// Pane `k`'s axes, for placing a trace.
+    fn pane_axes(&self, k: usize) -> PaneAxes {
+        let (known, unknown) = self.axis_stats(k);
+        PaneAxes { known, unknown }
     }
 
     /// The stats of each axis with traces in pane `k`, by id, from its
@@ -1170,12 +1422,7 @@ impl Plot {
                 continue;
             }
             let stats = stats.expect("ready");
-            let k = self.home(&self.traces[i]);
-            let (known, unknown) = self.axis_stats(k);
-            let id = match axes::choose(&stats, &known, unknown) {
-                Choice::Join(id) => id,
-                Choice::New => self.new_axis(k, &stats, self.traces[i].id),
-            };
+            let id = self.place(i, &stats);
             self.traces[i].stats = Some(stats);
             self.put_on(i, id);
         }
@@ -1214,32 +1461,77 @@ impl Plot {
         }
     }
 
-    /// Move the trace with id `trace` to axis `to`, or to a new axis of
-    /// its own (in its pane) with `None`, by hand. Alone on its axis
-    /// already, it stays there (keeping the axis' range, scale and name).
-    fn move_trace(&mut self, trace: u64, to: Option<u32>) {
+    /// Move the trace with id `trace` by hand, to axis or pane `to`.
+    ///
+    /// Alone on its axis already, a new axis in its own pane leaves it
+    /// there (keeping the axis' range, scale and name), as a new pane
+    /// does when it is alone in its pane. In another pane it joins the
+    /// axis there that suits it, else gets one of its own (on a log scale
+    /// when its values want it); one not settled yet settles there.
+    fn move_trace(&mut self, trace: u64, to: MoveTo) {
         let Some(i) = self.traces.iter().position(|t| t.id == trace) else {
             return;
         };
-        let on = self.traces[i].axis;
-        let id = match to {
-            Some(id) if self.axis_pane(id).is_some() => id,
-            Some(_) => return,
-            None if on.is_some() && self.traces.iter().filter(|t| t.axis == on).count() == 1 => {
+        let t = &self.traces[i];
+        let on = t.axis;
+        let alone = on.is_some() && self.traces.iter().filter(|x| x.axis == on).count() == 1;
+        let lone = t.pane.is_some() && self.traces.iter().filter(|x| x.pane == t.pane).count() == 1;
+        let home = self.panes[self.home(t)].id;
+        let stats = t.stats.clone();
+        let k = match to {
+            MoveTo::Axis(id) if self.axis_pane(id).is_some() => {
+                self.put_on(i, id);
+                self.prune_axes();
                 return;
             }
-            None => {
-                // Fresh, not one waiting for a view's trace.
-                let a = ValueAxis::new(self.next_axis);
-                self.next_axis += 1;
-                let id = a.id;
-                let k = self.home(&self.traces[i]);
-                self.panes[k].axes.push(a);
-                id
-            }
+            MoveTo::Axis(_) => return,
+            MoveTo::NewAxis(p) if p == home && alone => return,
+            MoveTo::NewAxis(p) => match self.pane_index(p) {
+                Some(k) => {
+                    // A new axis in its own pane is as plain as ever; in
+                    // another (keeping it where it overflowed from), as
+                    // settling would make it.
+                    let stats = stats.as_ref().filter(|_| p != home);
+                    let id = self.fresh_axis(k, stats);
+                    self.put_on(i, id);
+                    self.prune_axes();
+                    return;
+                }
+                None => return,
+            },
+            MoveTo::Pane(p) if Some(p) == self.traces[i].pane => return,
+            MoveTo::Pane(p) => match self.pane_index(p) {
+                Some(k) => k,
+                None => return,
+            },
+            MoveTo::NewPane if lone => return,
+            MoveTo::NewPane => self.open_pane(),
+        };
+        let Some(stats) = stats else {
+            // Not settled: it settles there when its data comes.
+            self.traces[i].axis = None;
+            self.traces[i].pane = Some(self.panes[k].id);
+            self.prune_axes();
+            return;
+        };
+        let id = match axes::place(&stats, &[self.pane_axes(k)]) {
+            Place::Join(_, id) => id,
+            _ => self.fresh_axis(k, Some(&stats)),
         };
         self.put_on(i, id);
         self.prune_axes();
+    }
+
+    /// A new axis in pane `k`, not one waiting for a view's trace: on a
+    /// log scale when `stats` (those of the trace for it) want it. Its
+    /// id.
+    fn fresh_axis(&mut self, k: usize, stats: Option<&Stats>) -> u32 {
+        let mut a = ValueAxis::new(self.next_axis);
+        self.next_axis += 1;
+        a.log = stats.is_some_and(|s| (self.default_log && s.positive) || s.wants_log());
+        let id = a.id;
+        self.panes[k].axes.push(a);
+        id
     }
 
     /// Drop the axes with no trace: those whose last trace has left, and
@@ -2026,6 +2318,12 @@ fn shown_values<'a>(
     shown
 }
 
+/// The height a legend `h` high takes under its pane, with the gap
+/// above it.
+fn legend_room(h: f32) -> f32 {
+    if h > 0.0 { h + 6.0 } else { 0.0 }
+}
+
 /// What picking window `w` is called, as an undo step: "show the last
 /// 90m", or "show 09:00 → 12:00" (with the dates when they differ).
 fn range_label(w: &Window) -> String {
@@ -2170,6 +2468,20 @@ fn format_value(v: f64, prec: Option<usize>, units: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Plot {
+        /// Move a trace to axis `to`, or to a new axis in its pane.
+        fn move_by_hand(&mut self, trace: u64, to: Option<u32>) {
+            let to = match to {
+                Some(id) => MoveTo::Axis(id),
+                None => {
+                    let t = self.traces.iter().find(|t| t.id == trace).unwrap();
+                    MoveTo::NewAxis(self.panes[self.home(t)].id)
+                }
+            };
+            self.move_trace(trace, to);
+        }
+    }
 
     fn names(n: &[&str]) -> Vec<String> {
         n.iter().map(|s| s.to_string()).collect()
@@ -3242,10 +3554,22 @@ mod tests {
     fn axis_indices(p: &Plot) -> Vec<Option<usize>> {
         p.traces
             .iter()
-            .map(|t| {
-                t.axis
-                    .and_then(|id| p.panes[0].axes.iter().position(|a| a.id == id))
-            })
+            .map(|t| t.axis.and_then(|id| p.all_axes().position(|a| a.id == id)))
+            .collect()
+    }
+
+    /// Each trace's pane, as an index.
+    fn pane_indices(p: &Plot) -> Vec<Option<usize>> {
+        (p.traces.iter())
+            .map(|t| t.pane.and_then(|id| p.pane_index(id)))
+            .collect()
+    }
+
+    /// Every axis' name, pane by pane.
+    fn all_names(p: &Plot) -> Vec<String> {
+        (0..p.panes.len())
+            .flat_map(|k| p.name_axes(k))
+            .map(|(_, n)| n)
             .collect()
     }
 
@@ -3285,13 +3609,13 @@ mod tests {
         );
         // Moved by hand to its own axis, then back: the empty axis goes.
         let y = p.traces[3].id;
-        p.move_trace(y, None);
+        p.move_by_hand(y, None);
         assert_eq!(p.panes[0].axes.len(), 5);
         let names: Vec<String> = p.name_axes(0).into_iter().map(|(_, n)| n).collect();
         assert_eq!(names[2], "Position X (mm)");
         assert_eq!(names[3], "Position Y (mm)", "in the legend's order");
         let x_axis = p.traces[2].axis;
-        p.move_trace(y, x_axis);
+        p.move_by_hand(y, x_axis);
         assert_eq!(p.panes[0].axes.len(), 4);
         // Removing a trace removes its axis with it.
         p.remove_pv("SR-DI-DCCT-01:LIFETIME");
@@ -3361,13 +3685,17 @@ mod tests {
                 p.settle_axes(&data, step as f64 * 0.1);
             }
             assert!(p.traces.iter().all(|t| t.axis.is_some()), "{order:?}");
-            let names: Vec<String> = p.name_axes(0).into_iter().map(|(_, n)| n).collect();
-            (axis_indices(&p), names)
+            (axis_indices(&p), all_names(&p), pane_indices(&p))
         };
         let first = settle(&[0, 1, 2, 3, 4, 5]);
         assert_eq!(
             first.0,
             [Some(0), Some(1), Some(2), Some(2), Some(3), Some(4)]
+        );
+        // Four axes fill the first pane: the gauge has a pane of its own.
+        assert_eq!(
+            first.2,
+            [Some(0), Some(0), Some(0), Some(0), Some(0), Some(1)]
         );
         assert_eq!(
             first.1,
@@ -3402,7 +3730,7 @@ mod tests {
         assert!(p.panes[0].axes[0].log);
         p.panes[0].axes[0].name = Some("Vac".into());
         let id = p.traces[0].id;
-        p.move_trace(id, None);
+        p.move_by_hand(id, None);
         assert_eq!(p.panes[0].axes.len(), 1);
         assert!(p.panes[0].axes[0].log);
         assert_eq!(p.panes[0].axes[0].name.as_deref(), Some("Vac"));
@@ -3423,7 +3751,7 @@ mod tests {
         p.settle_axes(&data, 0.0);
         assert_eq!(p.panes[0].axes.len(), 4);
         // Hide SA:X: SA:Y still joins it, and the four axes are still
-        // four, so E (mm, but far bigger) joins it too.
+        // four, so E (mm, but far bigger) needs a pane of its own.
         p.traces[3].visible = false;
         data[3] = Vec::new();
         data[4] = later[0].clone();
@@ -3431,7 +3759,8 @@ mod tests {
         p.settle_axes(&data, 1.0);
         assert_eq!(p.panes[0].axes.len(), 4);
         assert_eq!(p.traces[4].axis, p.traces[3].axis);
-        assert_eq!(p.traces[5].axis, p.traces[3].axis);
+        assert_eq!(p.panes.len(), 2);
+        assert_eq!(pane_indices(&p)[5], Some(1));
     }
 
     #[test]
@@ -3682,7 +4011,7 @@ mod tests {
         h.frame(vec![]);
         let open = egui::Popup::is_any_open(&h.ctx);
         assert!(open, "the dot opens its menu");
-        h.plot.move_trace(h.plot.traces[1].id, None);
+        h.plot.move_by_hand(h.plot.traces[1].id, None);
         assert_eq!(h.plot.panes[0].axes.len(), 2);
     }
 
@@ -4186,7 +4515,7 @@ mod tests {
 
         // SA:Y to an axis of its own, then onto the lifetime's.
         let y = p.traces[3].id;
-        p.move_trace(y, None);
+        p.move_by_hand(y, None);
         p.commit(false);
         assert_eq!(
             p.undo_label(),
@@ -4195,7 +4524,7 @@ mod tests {
         // Named as drawn before the drop.
         p.panes[0].axis_names = p.name_axes(0);
         let lifetime = p.traces[1].axis;
-        p.move_trace(y, lifetime);
+        p.move_by_hand(y, lifetime);
         p.commit(false);
         assert_eq!(
             p.undo_label(),

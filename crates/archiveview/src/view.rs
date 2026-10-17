@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// The view file format's version. Files with a newer one are refused.
 /// Additions an older program can ignore (value axes after the first, a
-/// trace's axis, axis names) keep the version.
+/// trace's axis, axis names, panes) keep the version.
 pub const VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -26,6 +26,13 @@ pub struct View {
     /// these are 1, 2, ...
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub axes: Vec<YAxis>,
+    /// The panes, top to bottom, when there are several: each takes the
+    /// next `axes` of the value axes (`y`, then `axes`), and with them
+    /// their traces. Empty (one pane, or files from before there were
+    /// panes): one pane with every axis. (Added after version 1 without
+    /// a bump: an older program shows every axis in one pane.)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panes: Vec<PaneView>,
     /// The archiver's retrieval URL when the view was saved, if any.
     /// Opening the view switches to it. (Added after version 1 without a
     /// bump: older files simply lack it.)
@@ -41,6 +48,7 @@ impl Default for View {
             range: Range::default(),
             y: YAxis::default(),
             axes: Vec::new(),
+            panes: Vec::new(),
             archiver: None,
         }
     }
@@ -51,6 +59,27 @@ impl View {
     /// then `axes`.
     pub fn value_axes(&self) -> impl Iterator<Item = &YAxis> {
         std::iter::once(&self.y).chain(&self.axes)
+    }
+}
+
+/// One pane of a view: a plot of its own under the one before, on the
+/// same time axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PaneView {
+    /// How many of the value axes are its (the next ones in order).
+    #[serde(default)]
+    pub axes: usize,
+    /// Its share of the height, against the other panes' (equal at 1).
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub height: f32,
+}
+
+impl Default for PaneView {
+    fn default() -> Self {
+        Self {
+            axes: 0,
+            height: 1.0,
+        }
     }
 }
 
@@ -136,6 +165,14 @@ pub fn parse_time(text: &str) -> Option<f64> {
 
 fn yes() -> bool {
     true
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn is_one(x: &f32) -> bool {
+    *x == 1.0
 }
 
 fn is_true(b: &bool) -> bool {
@@ -277,6 +314,33 @@ mod tests {
         .unwrap();
         assert_eq!(old.archiver, None);
         assert_eq!(old.pvs.len(), 1);
+    }
+
+    #[test]
+    fn views_keep_their_panes() {
+        let v = View {
+            axes: vec![YAxis::default(), YAxis::default()],
+            panes: vec![
+                PaneView {
+                    axes: 2,
+                    height: 1.5,
+                },
+                PaneView {
+                    axes: 1,
+                    ..PaneView::default()
+                },
+            ],
+            ..View::default()
+        };
+        let json = serde_json::to_value(&v).unwrap();
+        assert_eq!(
+            json["panes"],
+            serde_json::json!([{ "axes": 2, "height": 1.5 }, { "axes": 1 }])
+        );
+        assert_eq!(serde_json::from_value::<View>(json).unwrap(), v);
+        // One pane: no key, as before there were panes.
+        let json = serde_json::to_value(View::default()).unwrap();
+        assert!(json.get("panes").is_none());
     }
 
     #[test]
