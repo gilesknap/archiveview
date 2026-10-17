@@ -427,25 +427,28 @@ impl Plot {
         let ppp = ui.ctx().pixels_per_point();
         self.schedule_fetches(now, f.data.width() * ppp);
 
-        // Paint.
+        // Paint. Bands are lighter the more traces have one; a picked-out
+        // trace keeps its band, the others lose theirs.
+        let bands = (self.traces.iter().zip(&data))
+            .filter(|(t, pts)| t.visible && pts.iter().any(Pt::is_bin))
+            .count();
         let lines: Vec<render::Line> = self
-            .traces
-            .iter()
-            .zip(&data)
-            .zip(&self.axis_of)
-            .filter(|((t, _), _)| t.visible)
-            .map(|((t, pts), &axis)| {
+            .paint_order()
+            .into_iter()
+            .map(|i| {
+                let t = &self.traces[i];
                 let color = self.color(t, dark);
-                let (color, width) = match self.highlight {
-                    Some(h) if h == t.id => (color, 2.5),
-                    Some(_) => (color.gamma_multiply(0.25), 1.5),
-                    None => (color, 1.5),
+                let (color, width, band) = match self.highlight {
+                    Some(h) if h == t.id => (color, 2.5, render::band_alpha(1)),
+                    Some(_) => (color.gamma_multiply(0.25), 1.5, 0.0),
+                    None => (color, 1.5, render::band_alpha(bands)),
                 };
                 render::Line {
-                    pts,
+                    pts: &data[i],
                     color,
                     width,
-                    axis,
+                    axis: self.axis_of.get(i).copied().unwrap_or(0),
+                    band,
                 }
             })
             .collect();
@@ -499,6 +502,17 @@ impl Plot {
                 ctx.request_repaint_after(std::time::Duration::from_millis(66));
             }
         }
+    }
+
+    /// The visible traces (indices) in the order they are drawn: as listed,
+    /// but the one whose chip is hovered last, on top of any it coincides
+    /// with.
+    fn paint_order(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.traces.len())
+            .filter(|&i| self.traces[i].visible)
+            .collect();
+        order.sort_by_key(|&i| Some(self.traces[i].id) == self.highlight);
+        order
     }
 
     /// Whether the Live pill's dot pulses this frame: for a few seconds
@@ -1201,6 +1215,23 @@ mod tests {
         let slots: Vec<usize> = p.traces.iter().map(|t| t.slot).collect();
         assert_eq!(slots, [1, 2, 3, 0]);
         assert!(!p.is_loading(), "nothing to fetch without an archiver");
+    }
+
+    #[test]
+    fn hovering_a_chip_brings_its_trace_to_the_front() {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        p.add_pvs(&names(&["sim://sine", "sim://ramp", "sim://noise"]));
+        let mut h = Harness::new(p);
+        assert_eq!(h.plot.paint_order(), [0, 1, 2]);
+        // The chips hug the bottom; the first is on the left.
+        h.frame(vec![egui::Event::PointerMoved(Pos2::new(30.0, 587.0))]);
+        h.frame(vec![]);
+        assert_eq!(h.plot.highlight, Some(h.plot.traces[0].id));
+        assert_eq!(h.plot.paint_order(), [1, 2, 0]);
+        // A hidden trace is not drawn at all.
+        h.plot.traces[1].visible = false;
+        assert_eq!(h.plot.paint_order(), [2, 0]);
     }
 
     #[test]
