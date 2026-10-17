@@ -9,7 +9,8 @@ use archiver::ArchiverClient;
 use pv::PvManager;
 
 use crate::config::{self, DEFAULT_VIEW, Settings, Theme};
-use crate::plot::Plot;
+use crate::plot::{MiddleClick, Plot};
+use crate::selection::Selection;
 use crate::view::{Range, View};
 
 /// How long the "Restored last session" notice shows (seconds).
@@ -120,6 +121,9 @@ pub struct ArchiveApp {
     /// The archiver in use as last seen, to notice the user switching
     /// (in the pill, or by opening a view) and remember it.
     known_archiver: Option<String>,
+    /// The primary selection and the clipboard, for middle-click; none
+    /// in snapshot mode.
+    selection: Option<Box<dyn Selection>>,
 }
 
 impl ArchiveApp {
@@ -228,6 +232,7 @@ impl ArchiveApp {
             range: opts.range,
             kept_archiver,
             known_archiver,
+            selection: None,
         }
     }
 
@@ -245,6 +250,42 @@ impl ArchiveApp {
         if let Some(url) = now {
             self.settings.remember_archiver(&url);
             self.settings.save();
+        }
+    }
+
+    /// Where middle-click reads the primary selection (or the clipboard),
+    /// and the search box's selected text goes.
+    pub fn set_selection(&mut self, selection: Option<Box<dyn Selection>>) {
+        self.selection = selection;
+    }
+
+    /// Answer the plot's middle-clicks from the selection, make text
+    /// selected in its search box the primary selection, and say what a
+    /// paste added.
+    fn paste(&mut self, now: f64) {
+        if let Some(sel) = &mut self.selection {
+            // Read before the search box sets it.
+            if let Some(click) = self.plot.take_middle_click() {
+                let text = sel
+                    .primary()
+                    .or_else(|| sel.clipboard())
+                    .unwrap_or_default();
+                match click {
+                    MiddleClick::Plot => {
+                        self.plot.paste_pvs(&text);
+                    }
+                    MiddleClick::Search => self.plot.paste_into_search(&text),
+                }
+            }
+            if let Some(text) = self.plot.take_search_selection() {
+                sel.set_primary(&text);
+            }
+        }
+        if let Some(pasted) = self.plot.take_pasted() {
+            let error = pasted.added.is_empty() && pasted.present.is_empty();
+            let mut notice = Notice::new(pasted.message(), error, 3.0);
+            notice.until = now + notice.secs;
+            self.notice = Some(notice);
         }
     }
 
@@ -294,6 +335,7 @@ impl ArchiveApp {
         if self.plot.search_history_changed() {
             self.history_unsaved = !config::save_history(self.plot.search_history());
         }
+        self.paste(now);
         self.toast(&ctx, now);
 
         let title = match self.plot.title() {
@@ -464,6 +506,8 @@ impl eframe::App for ArchiveApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.exit();
+        // Before the window (and a Wayland connection) goes.
+        self.selection = None;
     }
 }
 
@@ -579,6 +623,115 @@ mod tests {
                 "{cli:?} {no} {view:?} {settings:?}"
             );
         }
+    }
+
+    /// A selection the test fills, sharing what was set with the test.
+    struct FakeSelection {
+        primary: Option<String>,
+        clipboard: Option<String>,
+        set: Arc<parking_lot::Mutex<Vec<String>>>,
+    }
+
+    impl Selection for FakeSelection {
+        fn primary(&mut self) -> Option<String> {
+            self.primary.clone()
+        }
+        fn clipboard(&mut self) -> Option<String> {
+            self.clipboard.clone()
+        }
+        fn set_primary(&mut self, text: &str) {
+            self.set.lock().push(text.to_string());
+        }
+    }
+
+    #[test]
+    fn middle_click_adds_the_selected_pvs_and_says_so() {
+        let ctx = egui::Context::default();
+        let mut app = ArchiveApp::new(&ctx, Options::default());
+        app.plot.set_archiver(None);
+        let mut t = 0.0;
+        let mut frame = |app: &mut ArchiveApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                time: Some(t),
+                events,
+                ..Default::default()
+            };
+            t += 0.05;
+            let mut out = ctx.run_ui(input, |ui| app.draw(ui));
+            out.textures_delta.clear();
+        };
+        let click = |pos| {
+            let ev = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Middle,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            [
+                vec![egui::Event::PointerMoved(pos), ev(true)],
+                vec![ev(false)],
+            ]
+        };
+        let set = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let select = |app: &mut ArchiveApp, primary: Option<&str>, clipboard: Option<&str>| {
+            app.set_selection(Some(Box::new(FakeSelection {
+                primary: primary.map(Into::into),
+                clipboard: clipboard.map(Into::into),
+                set: set.clone(),
+            })));
+        };
+        let on_plot = egui::pos2(500.0, 300.0);
+        frame(&mut app, vec![]);
+
+        // The primary selection's PVs, with a toast.
+        select(
+            &mut app,
+            Some("BL16I-EA-DET-01:COUNT\nSR:X"),
+            Some("CLIP:BOARD"),
+        );
+        for events in click(on_plot) {
+            frame(&mut app, events);
+        }
+        assert_eq!(app.plot.names(), ["BL16I-EA-DET-01:COUNT", "SR:X"]);
+        assert_eq!(app.notice.as_ref().unwrap().text, "Added 2 PVs");
+        // No primary selection: the clipboard.
+        select(&mut app, None, Some("CLIP:BOARD"));
+        for events in click(on_plot) {
+            frame(&mut app, events);
+        }
+        assert_eq!(app.plot.names().last().unwrap(), "CLIP:BOARD");
+        assert_eq!(app.notice.as_ref().unwrap().text, "Added CLIP:BOARD");
+        // Nothing usable: the toast says so.
+        select(&mut app, Some("just words"), None);
+        for events in click(on_plot) {
+            frame(&mut app, events);
+        }
+        assert_eq!(app.plot.names().len(), 3);
+        let notice = app.notice.as_ref().unwrap();
+        assert!(notice.error && notice.text.contains("No PV names"));
+
+        // In the search box: pasted there, not added.
+        select(&mut app, Some("SR-DI-DCCT-01:SIGNAL"), None);
+        for events in click(egui::pos2(80.0, 22.0)) {
+            frame(&mut app, events);
+        }
+        frame(&mut app, vec![]);
+        assert_eq!(app.plot.names().len(), 3);
+        // Selecting it there makes it the primary selection.
+        let select_all = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        frame(&mut app, vec![select_all]);
+        frame(&mut app, vec![]);
+        assert_eq!(*set.lock(), ["SR-DI-DCCT-01:SIGNAL"]);
     }
 
     #[test]

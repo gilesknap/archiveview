@@ -18,8 +18,15 @@ required-features = ["app"]
 default = ["app"]
 # The standalone application (window, snapshot mode, command line). An
 # embedding host such as bobview turns it off (`default-features = false`)
-# and gets only `Plot`, with egui and no eframe, png or clap.
-app = ["dep:eframe", "dep:png", "dep:clap"]
+# and gets only `Plot`, with egui and no eframe, png, clap or clipboard.
+app = [
+    "dep:eframe",
+    "dep:png",
+    "dep:clap",
+    "dep:arboard",
+    "dep:smithay-clipboard",
+    "dep:raw-window-handle",
+]
 
 [dependencies]
 # Must stay identical to bobview's egui/eframe so bobview can embed `archiveview::Plot`.
@@ -37,6 +44,14 @@ png = { version = "0.18.1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { version = "4.6.7", optional = true, features = ["derive", "wrap_help"] }
+# The primary selection and the clipboard (`selection.rs`), at egui-winit's
+# versions and features, so nothing new is built.
+arboard = { version = "3.6", optional = true, default-features = false }
+raw-window-handle = { version = "0.6.2", optional = true }
+
+# Wayland's primary selection, read as egui-winit reads its clipboard.
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android", target_os = "emscripten"))))'.dependencies]
+smithay-clipboard = { version = "0.7.2", optional = true }
 
 [dev-dependencies]
 archiveview-mockarchiver = { path = "../mockarchiver" }
