@@ -258,6 +258,7 @@ mod tests {
                 name: "MOCK:SINE".into(),
                 color: None,
                 visible: true,
+                axis: Some(0),
             }],
             range: Range::Relative { secs: 86_400.0 },
             ..View::default()

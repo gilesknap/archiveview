@@ -19,56 +19,102 @@ pub struct Frame {
     /// Where data is drawn.
     pub data: Rect,
     pub xs: Scale,
-    /// The primary value axis, left of the data.
+    /// The first value axis' scale: the grid follows it.
     pub ys: Scale,
-    y_labels: Vec<(f64, String)>,
-    title: String,
-    title_color: Option<Color32>,
-    /// More value axes, right of the data, nearest first: one per unit
-    /// beyond the primary's.
-    extra: Vec<Axis>,
+    /// The value axes, in order: alternately left and right of the data,
+    /// each pair further out than the one before.
+    axes: Vec<Axis>,
     font: FontId,
 }
 
-/// A value axis right of the data.
+/// A value axis beside the data.
 struct Axis {
     scale: Scale,
     labels: Vec<(f64, String)>,
     title: String,
     color: Option<Color32>,
-    /// Where its labels start.
-    left: f32,
+    tint_labels: bool,
+    dots: Vec<Color32>,
+    highlight: bool,
+    /// The strip it takes beside the data: labels and title.
+    rect: Rect,
+    /// Where its title goes, at the outer edge of `rect`.
+    title_rect: Rect,
     label_w: f32,
+    /// Right of the data (labels left-aligned, title outside them).
+    right: bool,
 }
 
-/// A value axis to lay out: its range, its title (units) and the colour of
-/// its labels (`None`: muted text).
+/// A value axis to lay out.
 pub struct AxisSpec {
     pub lo: f64,
     pub hi: f64,
+    pub log: bool,
+    /// Its name, up the side.
     pub title: String,
+    /// The colour of its name (`None`: muted text): its trace's when it
+    /// has one.
     pub color: Option<Color32>,
+    /// Its labels in `color` too (with several axes, to tell them apart).
+    pub tint_labels: bool,
+    /// With several traces, a small dot in each one's colour by the name.
+    pub dots: Vec<Color32>,
     /// Its traces hold whole numbers (enum states): ticks at whole
     /// numbers only.
     pub whole: bool,
+    /// Picked out (clicked): its strip is tinted.
+    pub highlight: bool,
+}
+
+impl Default for AxisSpec {
+    fn default() -> Self {
+        Self {
+            lo: 0.0,
+            hi: 1.0,
+            log: false,
+            title: String::new(),
+            color: None,
+            tint_labels: false,
+            dots: Vec::new(),
+            whole: false,
+            highlight: false,
+        }
+    }
 }
 
 impl Frame {
-    /// The value-axis strip left of the data, for dragging values.
-    pub fn value_axis(&self) -> Rect {
-        Rect::from_min_max(
-            Pos2::new(self.outer.left(), self.data.top()),
-            Pos2::new(self.data.left(), self.data.bottom()),
-        )
+    /// The number of value axes.
+    pub fn axis_count(&self) -> usize {
+        self.axes.len()
     }
 
-    /// The scale of value axis `axis` (0, the primary, for any past the
-    /// last).
-    pub fn scale(&self, axis: usize) -> &Scale {
-        match axis.checked_sub(1).and_then(|i| self.extra.get(i)) {
-            Some(a) => &a.scale,
-            None => &self.ys,
+    /// The strip value axis `i` takes beside the data (labels and name),
+    /// for dragging and scrolling its values.
+    pub fn axis_rect(&self, i: usize) -> Option<Rect> {
+        self.axes.get(i).map(|a| a.rect)
+    }
+
+    /// Where value axis `i`'s name is (the outer part of its strip), for
+    /// renaming it.
+    pub fn title_rect(&self, i: usize) -> Option<Rect> {
+        self.axes.get(i).map(|a| a.title_rect)
+    }
+
+    /// Pick out value axis `i` (a chip dragged over it).
+    pub fn set_highlight(&mut self, i: usize) {
+        if let Some(a) = self.axes.get_mut(i) {
+            a.highlight = true;
         }
+    }
+
+    /// The value axis whose strip holds `p`.
+    pub fn axis_at(&self, p: Pos2) -> Option<usize> {
+        self.axes.iter().position(|a| a.rect.contains(p))
+    }
+
+    /// The scale of value axis `axis` (the first's for any past the last).
+    pub fn scale(&self, axis: usize) -> &Scale {
+        self.axes.get(axis).map_or(&self.ys, |a| &a.scale)
     }
 
     /// The time at screen `x`.
@@ -77,14 +123,15 @@ impl Frame {
         self.xs.lo + f * (self.xs.hi - self.xs.lo)
     }
 
-    /// The value at screen `y` on the primary axis.
-    pub fn value_at(&self, y: f32) -> f64 {
-        let f = ((y - self.ys.from) / (self.ys.to - self.ys.from)) as f64;
-        if self.ys.log && self.ys.lo > 0.0 {
-            let (l, h) = (self.ys.lo.log10(), self.ys.hi.log10());
+    /// The value at screen `y` on value axis `axis`.
+    pub fn value_on(&self, axis: usize, y: f32) -> f64 {
+        let s = self.scale(axis);
+        let f = ((y - s.from) / (s.to - s.from)) as f64;
+        if s.log && s.lo > 0.0 {
+            let (l, h) = (s.lo.log10(), s.hi.log10());
             10f64.powf(l + f * (h - l))
         } else {
-            self.ys.lo + f * (self.ys.hi - self.ys.lo)
+            s.lo + f * (s.hi - s.lo)
         }
     }
 }
@@ -92,90 +139,103 @@ impl Frame {
 const PAD: f32 = 8.0;
 const TICK_GAP: f32 = 6.0;
 
-/// Lay out the plot in `rect` for times `from..to` and the value `axes`:
-/// the first left of the data, any others right of it, each with its
-/// title (units) up the side.
+/// Lay out the plot in `rect` for times `from..to` and the value `axes`
+/// (at least one is drawn: a blank 0..1 without any).
+///
+/// The axes alternate sides, nearest the data first: the first left, the
+/// second right, the third left of the first, the fourth right of the
+/// second. Each side then holds at most two of the usual four, every
+/// axis' labels sit as close to the data as they can, and the data stays
+/// centred; the common pair reads as the familiar two-sided chart.
 pub fn frame(
     painter: &egui::Painter,
     rect: Rect,
     (from, to): (f64, f64),
     axes: &[AxisSpec],
-    log: bool,
     font: &FontId,
 ) -> Frame {
     let label_h = text_size(painter, "0", font).y;
     let bottom = rect.bottom() - PAD - label_h - TICK_GAP;
     let top = rect.top() + PAD + label_h / 2.0;
-    let scale = |lo, hi| Scale {
-        lo,
-        hi,
-        log,
-        from: bottom,
-        to: top,
-    };
-    let labels = |s: &Scale, whole: bool| -> (Vec<(f64, String)>, f32) {
-        let (ticks, step) = if whole {
-            s.whole_ticks(label_h * 3.0)
-        } else {
-            s.ticks(label_h * 3.0)
-        };
-        let labels: Vec<(f64, String)> =
-            ticks.iter().map(|v| (*v, axis::label(*v, step))).collect();
-        let w = labels
-            .iter()
-            .map(|(_, l)| text_size(painter, l, font).x)
-            .fold(text_size(painter, "0000", font).x, f32::max);
-        (labels, w)
-    };
-    let title_w = |t: &str| {
-        if t.is_empty() {
-            0.0
-        } else {
-            label_h + PAD / 2.0
-        }
-    };
-    let (lo, hi, title, title_color, whole) = match axes.first() {
-        Some(a) => (a.lo, a.hi, a.title.clone(), a.color, a.whole),
-        None => (0.0, 1.0, String::new(), None, false),
-    };
-    let ys = scale(lo, hi);
-    let (y_labels, label_w) = labels(&ys, whole);
-    let left = rect.left() + PAD + title_w(&title) + label_w + TICK_GAP;
-
-    // The right axes, measured before the data rect is known.
-    let mut extra: Vec<Axis> = axes
+    let blank = [AxisSpec::default()];
+    let specs = if axes.is_empty() { &blank[..] } else { axes };
+    let mut list: Vec<Axis> = specs
         .iter()
-        .skip(1)
-        .map(|a| {
-            let s = scale(a.lo, a.hi);
-            let (labels, label_w) = labels(&s, a.whole);
+        .enumerate()
+        .map(|(i, a)| {
+            let scale = Scale {
+                lo: a.lo,
+                hi: a.hi,
+                log: a.log,
+                from: bottom,
+                to: top,
+            };
+            let (ticks, step) = if a.whole {
+                scale.whole_ticks(label_h * 3.0)
+            } else {
+                scale.ticks(label_h * 3.0)
+            };
+            let labels: Vec<(f64, String)> =
+                ticks.iter().map(|v| (*v, axis::label(*v, step))).collect();
+            let label_w = labels
+                .iter()
+                .map(|(_, l)| text_size(painter, l, font).x)
+                .fold(text_size(painter, "0000", font).x, f32::max);
             Axis {
-                scale: s,
+                scale,
                 labels,
                 title: a.title.clone(),
                 color: a.color,
-                left: 0.0,
+                tint_labels: a.tint_labels,
+                dots: a.dots.clone(),
+                highlight: a.highlight,
+                rect: Rect::NOTHING,
+                title_rect: Rect::NOTHING,
                 label_w,
+                right: i % 2 == 1,
             }
         })
         .collect();
-    let widths: Vec<f32> = extra
-        .iter()
-        .map(|a| TICK_GAP + a.label_w + title_w(&a.title) + PAD / 2.0)
-        .collect();
-    let right = if extra.is_empty() {
-        rect.right() - PAD * 2.0
+    // Each strip: a gap, the name (when it has one), a gap, the labels and
+    // the tick gap, mirrored on the right.
+    let width = |a: &Axis| {
+        let title = if a.title.is_empty() {
+            0.0
+        } else {
+            label_h + PAD / 2.0
+        };
+        PAD / 2.0 + title + a.label_w + TICK_GAP
+    };
+    let sum = |right: bool| -> f32 { list.iter().filter(|a| a.right == right).map(width).sum() };
+    let left = rect.left() + PAD / 2.0 + sum(false);
+    let right = if list.iter().any(|a| a.right) {
+        rect.right() - PAD / 2.0 - sum(true)
     } else {
-        rect.right() - PAD / 2.0 - widths.iter().sum::<f32>()
+        rect.right() - PAD * 2.0
     };
     let data = Rect::from_min_max(
         Pos2::new(left, top),
         Pos2::new(right.max(left + 1.0), bottom),
     );
-    let mut x = data.right();
-    for (a, w) in extra.iter_mut().zip(&widths) {
-        a.left = x + TICK_GAP;
-        x += w;
+    let (mut l, mut r) = (data.left(), data.right());
+    for a in &mut list {
+        let w = width(a);
+        let title = if a.title.is_empty() { 0.0 } else { label_h };
+        (a.rect, a.title_rect) = if a.right {
+            r += w;
+            let t = r - PAD / 2.0;
+            (
+                Rect::from_x_y_ranges(r - w..=r, data.y_range()),
+                Rect::from_x_y_ranges(t - title..=t, data.y_range()),
+            )
+        } else {
+            l -= w;
+            let t = l + PAD / 2.0;
+            (
+                Rect::from_x_y_ranges(l..=l + w, data.y_range()),
+                Rect::from_x_y_ranges(t..=t + title, data.y_range()),
+            )
+        };
     }
     let xs = Scale {
         lo: from,
@@ -188,11 +248,8 @@ pub fn frame(
         outer: rect,
         data,
         xs,
-        ys,
-        y_labels,
-        title,
-        title_color,
-        extra,
+        ys: list[0].scale,
+        axes: list,
         font: font.clone(),
     }
 }
@@ -236,7 +293,7 @@ pub fn paint(
             grid,
         );
     }
-    for (v, _) in &f.y_labels {
+    for (v, _) in &f.axes[0].labels {
         let y = f.ys.pos(*v).round() + 0.5;
         painter.line_segment(
             [Pos2::new(data.left(), y), Pos2::new(data.right(), y)],
@@ -272,52 +329,60 @@ pub fn paint(
         }
         painter.galley(Pos2::new(left, data.bottom() + TICK_GAP), galley, weak);
     }
-    for (v, label) in &f.y_labels {
-        let y = f.ys.pos(*v);
-        painter.text(
-            Pos2::new(data.left() - TICK_GAP, y),
-            Align2::RIGHT_CENTER,
-            label,
-            f.font.clone(),
-            weak,
+    for a in &f.axes {
+        paint_axis(painter, f, a, visuals);
+    }
+}
+
+/// A value axis: its labels beside the data and its name up the outer
+/// side, in its trace's colour when it has one.
+fn paint_axis(painter: &egui::Painter, f: &Frame, a: &Axis, visuals: &egui::Visuals) {
+    let weak = visuals.weak_text_color();
+    let color = a.color.filter(|_| a.tint_labels).unwrap_or(weak);
+    if a.highlight {
+        let accent = visuals.selection.bg_fill;
+        painter.rect_filled(
+            a.rect.expand2(Vec2::new(0.0, 4.0)),
+            4.0,
+            accent.gamma_multiply(0.18),
         );
     }
-    if !f.title.is_empty() {
-        let h = text_size(painter, &f.title, &f.font).y;
-        vertical_text(
-            painter,
-            Pos2::new(f.outer.left() + PAD + h / 2.0, data.center().y),
-            &f.title,
-            f.font.clone(),
-            f.title_color.unwrap_or(weak),
-        );
-    }
-    // The right axes: labels and title in their traces' colour.
-    for a in &f.extra {
-        let color = a.color.unwrap_or(weak);
-        for (v, label) in &a.labels {
-            let y = a.scale.pos(*v);
-            // The top one would sit under the "now" tag.
-            if y < data.top() + 4.0 {
-                continue;
-            }
-            painter.text(
-                Pos2::new(a.left, y),
-                Align2::LEFT_CENTER,
-                label,
-                f.font.clone(),
-                color,
-            );
+    for (v, label) in &a.labels {
+        let y = a.scale.pos(*v);
+        // The top one on the right would sit under the "now" tag.
+        if a.right && y < f.data.top() + 4.0 {
+            continue;
         }
-        if !a.title.is_empty() {
-            let h = text_size(painter, &a.title, &f.font).y;
-            vertical_text(
-                painter,
-                Pos2::new(a.left + a.label_w + PAD / 2.0 + h / 2.0, data.center().y),
-                &a.title,
-                f.font.clone(),
-                color,
-            );
+        let (x, align) = if a.right {
+            (a.rect.left() + TICK_GAP, Align2::LEFT_CENTER)
+        } else {
+            (a.rect.right() - TICK_GAP, Align2::RIGHT_CENTER)
+        };
+        painter.text(Pos2::new(x, y), align, label, f.font.clone(), color);
+    }
+    if a.title.is_empty() {
+        return;
+    }
+    let size = text_size(painter, &a.title, &f.font);
+    let x = a.title_rect.center().x;
+    let mid = f.data.center().y;
+    let title_color = match a.color {
+        Some(c) => c,
+        None if a.highlight => visuals.strong_text_color(),
+        None => weak,
+    };
+    vertical_text(
+        painter,
+        Pos2::new(x, mid),
+        &a.title,
+        f.font.clone(),
+        title_color,
+    );
+    // Its traces' colours, above the name (which reads upwards).
+    for (k, c) in a.dots.iter().enumerate() {
+        let y = mid - size.x / 2.0 - 8.0 - k as f32 * 9.0;
+        if y > f.data.top() + 4.0 {
+            painter.circle_filled(Pos2::new(x, y), 3.0, *c);
         }
     }
 }

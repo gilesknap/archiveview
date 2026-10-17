@@ -34,6 +34,15 @@ struct Chip {
 }
 
 impl Chip {
+    /// Where its colour dot is, with room to click it.
+    fn dot_rect(&self, origin: Vec2) -> Rect {
+        let r = self.rect.translate(origin);
+        Rect::from_center_size(
+            Pos2::new(r.left() + PAD + DOT / 2.0, r.center().y),
+            Vec2::new(DOT + 10.0, HEIGHT),
+        )
+    }
+
     fn close_rect(&self, origin: Vec2) -> Rect {
         let r = self.rect.translate(origin);
         Rect::from_center_size(
@@ -113,7 +122,11 @@ pub fn layout(plot: &Plot, ui: &egui::Ui, width: f32) -> Chips {
                 "Archive: fetching…".to_string()
             });
         }
-        note.push("Click to hide or show; ✕ to remove".into());
+        note.push(
+            "Click to hide or show; ✕ to remove\n\
+             Its dot, or drag it onto an axis: choose its value axis"
+                .into(),
+        );
         let mark = if plot.archiver.is_some() && t.fetch.not_archived {
             Some("live only")
         } else if value == "—" && t.history.as_ref().is_some_and(|h| h.samples.is_empty()) {
@@ -189,6 +202,8 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
         Sense::hover(),
     );
     chips.origin = rect.min.to_vec2();
+    #[cfg(test)]
+    plot.seen.1.clear();
     let mut highlight = None;
     let mut toggle = None;
     let mut remove = None;
@@ -197,15 +212,31 @@ pub fn interact(plot: &mut Plot, ui: &mut egui::Ui, chips: &mut Chips) {
             .interact(
                 c.rect.translate(chips.origin),
                 plot.id.with(("chip", c.trace)),
-                Sense::click(),
+                Sense::click_and_drag(),
             )
             .on_hover_text(&c.note);
+        #[cfg(test)]
+        plot.seen
+            .1
+            .push((c.rect.translate(chips.origin), c.dot_rect(chips.origin)));
+        if r.drag_started() {
+            plot.chip_drag = Some(c.trace);
+        }
         let x = ui.interact(
             c.close_rect(chips.origin),
             plot.id.with(("chip-x", c.trace)),
             Sense::click(),
         );
-        if r.hovered() || x.hovered() {
+        // The colour dot: a menu of the value axes.
+        let dot = ui
+            .interact(
+                c.dot_rect(chips.origin),
+                plot.id.with(("chip-dot", c.trace)),
+                Sense::click(),
+            )
+            .on_hover_text("Choose its value axis");
+        egui::Popup::menu(&dot).show(|ui| plot.axis_menu(ui, c.trace));
+        if r.hovered() || x.hovered() || dot.hovered() {
             highlight = Some(c.trace);
         }
         if x.clicked() {

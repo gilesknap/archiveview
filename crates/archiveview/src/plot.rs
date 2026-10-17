@@ -10,8 +10,11 @@
 //! - `render`: painting the plot area;
 //! - `bar`: the slim top bar (search, range pill, live pill, buttons);
 //! - `legend`: the chips under the plot;
-//! - `hover`: the crosshair readout, empty state and status line.
+//! - `hover`: the crosshair readout, empty state and status line;
+//! - `axes`: which value axis a trace joins, and the axes' names.
 
+mod axes;
+mod axisui;
 mod bar;
 mod fetch;
 mod hover;
@@ -29,6 +32,7 @@ use pv::PvManager;
 
 use crate::axis;
 use crate::view::{self, TraceView, View, YAxis};
+use axes::{Choice, Members, Stats};
 use fetch::Fetcher;
 pub use series::now;
 use series::{History, Pt, Trace};
@@ -50,8 +54,9 @@ const RETRY: f64 = 10.0;
 /// The Live pill pulses this long after following now starts (seconds).
 const PULSE_SECS: f64 = 3.0;
 
-/// The most value axes: traces with yet more units share the last.
-const MAX_AXES: usize = 3;
+/// A trace with live data waits this long (seconds) for its archived
+/// history before it settles on an axis by the live data alone.
+const SETTLE_WAIT: f64 = 5.0;
 
 /// The smallest plot (top bar and chips aside), so one in an auto-sized
 /// window neither collapses nor grows without end.
@@ -79,12 +84,28 @@ pub struct Plot {
     home_span: f64,
     /// The range drawn, easing toward `window`'s.
     shown: Option<(f64, f64)>,
-    y: YState,
-    /// The ranges drawn on the value axes after the first, by units,
-    /// easing toward their targets (always autoscaled).
-    axis_shown: Vec<(String, (f64, f64))>,
-    /// Each trace's value axis this frame, in trace order.
+    /// The value axes, in the order they are laid out (those with no
+    /// visible trace aside).
+    axes: Vec<ValueAxis>,
+    next_axis: u32,
+    /// The axes drawn this frame, as ids in `axes`: `None` for a trace's
+    /// provisional axis while it waits to settle.
+    drawn: Vec<Option<u32>>,
+    /// Each axis' name, by id, as of this frame.
+    axis_names: Vec<(u32, String)>,
+    /// Each trace's value axis this frame (an index into `drawn`), in
+    /// trace order.
     axis_of: Vec<usize>,
+    /// The axis clicked: its traces are picked out, the others dimmed.
+    axis_highlight: Option<u32>,
+    /// The axis whose name is being edited, and the text so far.
+    renaming: Option<axisui::Renaming>,
+    /// A legend chip being dragged (its trace), to drop on an axis.
+    chip_drag: Option<u64>,
+    /// Where the axes (strip, name) and chips (whole, dot) were last
+    /// drawn, for tests to point at.
+    #[cfg(test)]
+    seen: Seen,
     fetcher: Fetcher,
     /// When (seconds since 1970) the user last panned or zoomed, for the
     /// fetch debounce.
@@ -113,9 +134,16 @@ pub struct Plot {
     custom: bar::CustomState,
 }
 
-/// The value axis.
-#[derive(Clone, Copy, Debug)]
-struct YState {
+/// Where the axes (strip, name) and chips (whole, dot) were last drawn.
+#[cfg(test)]
+type Seen = (Vec<(Rect, Rect)>, Vec<(Rect, Rect)>);
+
+/// A value axis and the traces on it (those whose `axis` is its id).
+#[derive(Clone, Debug)]
+struct ValueAxis {
+    id: u32,
+    /// The name the user gave it; else it names itself.
+    name: Option<String>,
     autoscale: bool,
     /// The fixed range when not autoscaling.
     lo: f64,
@@ -123,16 +151,61 @@ struct YState {
     log: bool,
     /// The range drawn, easing toward the target.
     shown: Option<(f64, f64)>,
+    /// It has had a trace, so it goes when its last one leaves. An axis
+    /// from a view that no trace is on yet waits for the first to settle.
+    used: bool,
 }
 
-impl Default for YState {
-    fn default() -> Self {
+impl ValueAxis {
+    fn new(id: u32) -> Self {
+        Self::from_view(id, &YAxis::default())
+    }
+
+    fn from_view(id: u32, y: &YAxis) -> Self {
         Self {
-            autoscale: true,
-            lo: 0.0,
-            hi: 1.0,
-            log: false,
+            id,
+            name: y.name.clone(),
+            autoscale: y.autoscale || y.min.is_none() || y.max.is_none(),
+            lo: y.min.unwrap_or(0.0),
+            hi: y.max.unwrap_or(1.0),
+            log: y.log,
             shown: None,
+            used: false,
+        }
+    }
+
+    fn view(&self) -> YAxis {
+        YAxis {
+            autoscale: self.autoscale,
+            min: (!self.autoscale).then_some(self.lo),
+            max: (!self.autoscale).then_some(self.hi),
+            log: self.log,
+            name: self.name.clone(),
+        }
+    }
+
+    /// On a log scale a fixed range must be above zero: back to
+    /// autoscaling if not.
+    fn fit_log_range(&mut self) {
+        if self.log && !self.autoscale && self.lo <= 0.0 {
+            self.autoscale = true;
+            self.shown = None;
+        }
+    }
+
+    /// Zoom by `factor` about `at` (the middle when `None`), from the
+    /// range `shown` (else its own), leaving autoscale.
+    fn zoom(&mut self, factor: f64, at: Option<f64>, shown: (f64, f64)) {
+        let (lo, hi) = self.shown.unwrap_or(shown);
+        let mid = if self.log && lo > 0.0 {
+            (lo * hi).sqrt()
+        } else {
+            (lo + hi) / 2.0
+        };
+        let (l, h) = window::zoom_values(lo, hi, factor, at.unwrap_or(mid), self.log);
+        if l.is_finite() && h.is_finite() && l < h {
+            self.autoscale = false;
+            (self.lo, self.hi) = (l, h);
         }
     }
 }
@@ -141,8 +214,8 @@ impl Default for YState {
 enum Drag {
     /// Moving through time.
     Pan,
-    /// Zooming values on the value axis.
-    Axis,
+    /// Zooming values on the value axis with this id.
+    Axis(u32),
     /// Drawing a box to zoom to, from here.
     Box(Pos2),
 }
@@ -180,9 +253,16 @@ impl Plot {
             window: Window::live(3600.0),
             home_span: 3600.0,
             shown: None,
-            y: YState::default(),
-            axis_shown: Vec::new(),
+            axes: Vec::new(),
+            next_axis: 0,
+            drawn: Vec::new(),
+            axis_names: Vec::new(),
             axis_of: Vec::new(),
+            axis_highlight: None,
+            renaming: None,
+            chip_drag: None,
+            #[cfg(test)]
+            seen: Default::default(),
             fetcher: Fetcher::default(),
             changed_at: f64::NEG_INFINITY,
             pending: false,
@@ -248,6 +328,7 @@ impl Plot {
         let key = pv::PvName::parse(name).key();
         self.traces
             .retain(|t| t.name != name && t.pv.name().key() != key);
+        self.prune_axes();
     }
 
     /// The plotted PV names, in legend order.
@@ -267,7 +348,7 @@ impl Plot {
         }
     }
 
-    /// The current view (traces, range, y axis), to save.
+    /// The current view (traces, range, value axes), to save.
     pub fn view(&self) -> View {
         let range = if self.window.live {
             view::Range::Relative {
@@ -280,6 +361,7 @@ impl Plot {
                 end: view::format_time(to),
             }
         };
+        let mut axes = self.axes.iter().map(ValueAxis::view);
         View {
             version: view::VERSION,
             pvs: self
@@ -289,36 +371,45 @@ impl Plot {
                     name: t.name.clone(),
                     color: t.color.clone(),
                     visible: t.visible,
+                    axis: t
+                        .axis
+                        .and_then(|id| self.axes.iter().position(|a| a.id == id)),
                 })
                 .collect(),
             range,
-            y: YAxis {
-                autoscale: self.y.autoscale,
-                min: (!self.y.autoscale).then_some(self.y.lo),
-                max: (!self.y.autoscale).then_some(self.y.hi),
-                log: self.y.log,
-            },
+            y: axes.next().unwrap_or_default(),
+            axes: axes.collect(),
         }
     }
 
-    /// Show `view`, replacing the traces and range.
+    /// Show `view`, replacing the traces, range and value axes. Traces
+    /// the view puts on an axis stay there; others join one when their
+    /// data arrives.
     pub fn set_view(&mut self, view: &View) {
         self.traces.clear();
+        self.axes = view
+            .value_axes()
+            .map(|y| {
+                let mut a = ValueAxis::from_view(self.next_axis, y);
+                self.next_axis += 1;
+                a.fit_log_range();
+                a
+            })
+            .collect();
+        self.axis_highlight = None;
+        self.renaming = None;
         for tv in &view.pvs {
+            let axis = tv.axis.and_then(|i| self.axes.get_mut(i)).map(|a| {
+                a.used = true;
+                a.id
+            });
             if let Some(t) = self.add(&tv.name) {
                 t.color = tv.color.clone();
                 t.visible = tv.visible;
+                t.axis = axis;
             }
         }
         self.set_range(&view.range);
-        self.y = YState {
-            autoscale: view.y.autoscale || view.y.min.is_none() || view.y.max.is_none(),
-            lo: view.y.min.unwrap_or(0.0),
-            hi: view.y.max.unwrap_or(1.0),
-            log: view.y.log,
-            shown: None,
-        };
-        self.fit_log_range();
         self.snap = true;
     }
 
@@ -419,11 +510,19 @@ impl Plot {
                 }
             })
             .collect();
+        self.settle_axes(&data, now);
         let axes = self.value_axes(&data, from, to, dt, dark);
 
         let font = egui::FontId::proportional(11.5);
-        let f = render::frame(ui.painter(), rect, (from, to), &axes, self.y.log, &font);
+        let mut f = render::frame(ui.painter(), rect, (from, to), &axes, &font);
         self.interact(ui, &resp, &f, now);
+        self.axis_interact(ui, &mut f);
+        #[cfg(test)]
+        {
+            self.seen.0 = (0..f.axis_count())
+                .filter_map(|k| f.axis_rect(k).zip(f.title_rect(k)))
+                .collect();
+        }
         let ppp = ui.ctx().pixels_per_point();
         self.schedule_fetches(now, f.data.width() * ppp);
 
@@ -436,10 +535,11 @@ impl Plot {
             .filter(|((t, _), _)| t.visible)
             .map(|((t, pts), &axis)| {
                 let color = self.color(t, dark);
-                let (color, width) = match self.highlight {
-                    Some(h) if h == t.id => (color, 2.5),
-                    Some(_) => (color.gamma_multiply(0.25), 1.5),
-                    None => (color, 1.5),
+                let (color, width) = match (self.highlight, self.axis_highlight) {
+                    (Some(h), _) if h == t.id => (color, 2.5),
+                    (Some(_), _) => (color.gamma_multiply(0.25), 1.5),
+                    (None, Some(a)) if t.axis != Some(a) => (color.gamma_multiply(0.25), 1.5),
+                    _ => (color, 1.5),
                 };
                 render::Line {
                     pts,
@@ -451,9 +551,10 @@ impl Plot {
             .collect();
         let painter = ui.painter_at(rect);
         // The crosshair, first so its time tag can hide the label under it.
-        let hair = (!self.traces.is_empty() && !matches!(self.drag, Some(Drag::Pan | Drag::Axis)))
-            .then(|| hover::hairline(self, ui, &f, &data))
-            .flatten();
+        let hair = (!self.traces.is_empty()
+            && !matches!(self.drag, Some(Drag::Pan | Drag::Axis(_))))
+        .then(|| hover::hairline(self, ui, &f, &data))
+        .flatten();
         if self.traces.is_empty() {
             painter.rect_filled(rect, 10.0, ui.visuals().extreme_bg_color);
         } else {
@@ -481,6 +582,8 @@ impl Plot {
         }
         hover::status(self, ui, &f);
         legend::paint(self, ui, &chips, &data, dark);
+        self.rename_box(ui, &f);
+        self.chip_ghost(ui, dark);
 
         // Keep moving: easing, gliding, and time passing while live.
         let target = self.window.range(now);
@@ -537,10 +640,176 @@ impl Plot {
         (a, b)
     }
 
-    /// The value axes to draw this frame, one per distinct unit among the
-    /// visible traces with data (at most [`MAX_AXES`]), and `axis_of`, each trace's.
-    /// The first takes the fixed range, log scale and value zooming; the
-    /// others autoscale to their own traces.
+    /// What trace `i`'s values look like, from `data` (this frame's
+    /// points); `None` with nothing to show.
+    fn trace_stats(&self, i: usize, data: &[Vec<Pt>]) -> Option<Stats> {
+        let t = &self.traces[i];
+        Stats::of(data[i].iter().map(|p| p.v), &units(t), whole_valued(t))
+    }
+
+    /// The stats of each axis with a trace showing data on it, by id.
+    fn axis_stats(&self, data: &[Vec<Pt>]) -> Vec<(u32, Stats)> {
+        let stats: Vec<Option<Stats>> = (0..self.traces.len())
+            .map(|i| self.trace_stats(i, data))
+            .collect();
+        self.axes
+            .iter()
+            .filter_map(|a| {
+                let members = self
+                    .traces
+                    .iter()
+                    .zip(&stats)
+                    .filter(|(t, _)| t.axis == Some(a.id))
+                    .filter_map(|(_, s)| s.as_ref());
+                Stats::merge(members).map(|s| (a.id, s))
+            })
+            .collect()
+    }
+
+    /// Whether trace `t` still waits for its first archived history.
+    fn awaits_history(&self, t: &Trace) -> bool {
+        self.archiver.is_some()
+            && t.archive_name().is_some()
+            && !t.fetch.not_archived
+            && t.history.is_none()
+            && t.fetch.error.is_none()
+    }
+
+    /// Settle each new trace with data on an axis, once: when its archived
+    /// history has come (or it has none, or it has waited [`SETTLE_WAIT`]
+    /// with live data). Then drop the axes left with no trace.
+    fn settle_axes(&mut self, data: &[Vec<Pt>], now: f64) {
+        for i in 0..self.traces.len() {
+            let t = &self.traces[i];
+            if t.axis.is_some() {
+                continue;
+            }
+            let Some(stats) = self.trace_stats(i, data) else {
+                continue;
+            };
+            let since = *self.traces[i].data_since.get_or_insert(now);
+            if self.awaits_history(&self.traces[i]) && now - since < SETTLE_WAIT {
+                continue;
+            }
+            let choice = axes::choose(&stats, &self.axis_stats(data));
+            let id = match choice {
+                Choice::Join(id) => id,
+                Choice::New => self.new_axis(Some(&stats)),
+            };
+            self.put_on(i, id);
+        }
+        self.prune_axes();
+    }
+
+    /// An axis for a trace with `stats` to settle on: one from a view
+    /// that no trace is on yet (keeping its settings), else a new one,
+    /// on a log scale for values over several decades. Its id.
+    fn new_axis(&mut self, stats: Option<&Stats>) -> u32 {
+        if let Some(a) = self.axes.iter().find(|a| !a.used) {
+            return a.id;
+        }
+        let mut a = ValueAxis::new(self.next_axis);
+        self.next_axis += 1;
+        a.log = stats.is_some_and(Stats::wants_log);
+        let id = a.id;
+        self.axes.push(a);
+        id
+    }
+
+    /// Put trace `i` on axis `id`.
+    fn put_on(&mut self, i: usize, id: u32) {
+        self.traces[i].axis = Some(id);
+        if let Some(a) = self.axes.iter_mut().find(|a| a.id == id) {
+            a.used = true;
+        }
+    }
+
+    /// Move the trace with id `trace` to axis `to`, or to a new axis of
+    /// its own with `None`, by hand.
+    fn move_trace(&mut self, trace: u64, to: Option<u32>) {
+        let Some(i) = self.traces.iter().position(|t| t.id == trace) else {
+            return;
+        };
+        let id = match to {
+            Some(id) if self.axes.iter().any(|a| a.id == id) => id,
+            Some(_) => return,
+            None => {
+                // Fresh, not one waiting for a view's trace.
+                let a = ValueAxis::new(self.next_axis);
+                self.next_axis += 1;
+                let id = a.id;
+                self.axes.push(a);
+                id
+            }
+        };
+        self.put_on(i, id);
+        self.prune_axes();
+    }
+
+    /// Drop the axes whose last trace has left, and keep the others in
+    /// the legend's order (of each one's first trace), so the first chip's
+    /// axis is always the first, whatever order the data came in.
+    fn prune_axes(&mut self) {
+        let traces = &self.traces;
+        self.axes
+            .retain(|a| !a.used || traces.iter().any(|t| t.axis == Some(a.id)));
+        self.axes.sort_by_key(|a| {
+            traces
+                .iter()
+                .position(|t| t.axis == Some(a.id))
+                .unwrap_or(usize::MAX)
+        });
+        if let Some(h) = self.axis_highlight
+            && !self.axes.iter().any(|a| a.id == h)
+        {
+            self.axis_highlight = None;
+        }
+    }
+
+    /// The axes' names, by id, for those with traces: as the user named
+    /// them, else built from their traces' units and names.
+    fn name_axes(&self) -> Vec<(u32, String)> {
+        let labels: Vec<String> = self.traces.iter().map(Trace::label).collect();
+        let unit: Vec<String> = self.traces.iter().map(units).collect();
+        let descs: Vec<String> = self
+            .traces
+            .iter()
+            .map(|t| {
+                t.history
+                    .as_ref()
+                    .and_then(|h| h.meta.desc.clone())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let with: Vec<&ValueAxis> = self
+            .axes
+            .iter()
+            .filter(|a| self.traces.iter().any(|t| t.axis == Some(a.id)))
+            .collect();
+        let members: Vec<Members> = with
+            .iter()
+            .map(|a| {
+                let on: Vec<usize> = (0..self.traces.len())
+                    .filter(|&i| self.traces[i].axis == Some(a.id))
+                    .collect();
+                Members {
+                    units: on.iter().map(|&i| unit[i].as_str()).collect(),
+                    names: on.iter().map(|&i| labels[i].as_str()).collect(),
+                    descs: on.iter().map(|&i| descs[i].as_str()).collect(),
+                }
+            })
+            .collect();
+        let auto = axes::names(&members);
+        with.iter()
+            .zip(auto)
+            .map(|(a, auto)| (a.id, a.name.clone().unwrap_or(auto)))
+            .collect()
+    }
+
+    /// The value axes to draw this frame: each axis with a visible trace,
+    /// in order, then a provisional one for each visible trace with data
+    /// that has not settled and would not join one of those. Sets
+    /// `drawn`, `axis_of` and `axis_names`.
     fn value_axes(
         &mut self,
         data: &[Vec<Pt>],
@@ -549,86 +818,108 @@ impl Plot {
         dt: f64,
         dark: bool,
     ) -> Vec<render::AxisSpec> {
-        // Only traces with something to show claim an axis.
-        let trace_units: Vec<Option<String>> = self
-            .traces
+        self.axis_names = self.name_axes();
+        let mut drawn: Vec<Option<u32>> = self
+            .axes
             .iter()
-            .zip(data)
-            .map(|(t, pts)| (t.visible && pts.iter().any(|p| p.v.is_finite())).then(|| units(t)))
+            .filter(|a| {
+                self.traces
+                    .iter()
+                    .any(|t| t.visible && t.axis == Some(a.id))
+            })
+            .map(|a| Some(a.id))
             .collect();
-        let (names, axis_of) = group_units(&trace_units);
+        // Waiting to settle: where it would go now (the stats sort every
+        // point, so only then).
+        let waiting = self.traces.iter().any(|t| t.visible && t.axis.is_none());
+        let stats = if waiting {
+            self.axis_stats(data)
+        } else {
+            Vec::new()
+        };
+        let mut axis_of = vec![0; self.traces.len()];
+        let mut provisional: Vec<(usize, Stats)> = Vec::new();
+        for (i, t) in self.traces.iter().enumerate() {
+            axis_of[i] = match t.axis {
+                Some(id) => drawn.iter().position(|d| *d == Some(id)).unwrap_or(0),
+                None if t.visible => {
+                    let Some(s) = self.trace_stats(i, data) else {
+                        continue;
+                    };
+                    match axes::choose(&s, &stats) {
+                        Choice::Join(id) if drawn.contains(&Some(id)) => {
+                            drawn.iter().position(|d| *d == Some(id)).unwrap_or(0)
+                        }
+                        _ => {
+                            drawn.push(None);
+                            provisional.push((i, s));
+                            drawn.len() - 1
+                        }
+                    }
+                }
+                None => 0,
+            };
+        }
         self.axis_of = axis_of;
-        let several = names.len() > 1;
-        self.axis_shown.retain(|(u, _)| names[1..].contains(u));
+        let several = drawn.len() > 1;
         let mut specs = Vec::new();
-        for (a, name) in names.iter().enumerate() {
+        for (k, d) in drawn.iter().enumerate() {
             let members: Vec<usize> = (0..self.traces.len())
-                .filter(|&i| trace_units[i].is_some() && self.axis_of[i] == a)
+                .filter(|&i| self.traces[i].visible && self.axis_of[i] == k)
+                .filter(|&i| self.traces[i].axis == *d || d.is_none())
                 .collect();
-            let pts = members.iter().map(|&i| &data[i]);
             let whole =
                 !members.is_empty() && members.iter().all(|&i| whole_valued(&self.traces[i]));
-            let (lo, hi) = if a == 0 {
-                self.shown_values(pts, (from, to), whole, dt)
-            } else {
-                let fit = fit_values(self.y.log, whole, pts, from, to);
-                let i = match self.axis_shown.iter().position(|(u, _)| u == name) {
-                    Some(i) => i,
-                    None => {
-                        let first = fit.unwrap_or((0.0, 1.0));
-                        self.axis_shown.push((name.clone(), first));
-                        self.axis_shown.len() - 1
-                    }
-                };
-                let shown = &mut self.axis_shown[i].1;
-                *shown = ease_values(*shown, fit.unwrap_or(*shown), dt);
-                *shown
+            let pts = members.iter().map(|&i| &data[i]);
+            let (lo, hi, log, title) = match d {
+                Some(id) => {
+                    let a = self.axes.iter_mut().find(|a| a.id == *id).expect("drawn");
+                    let (lo, hi) = shown_values(a, pts, (from, to), whole, dt);
+                    let title = self
+                        .axis_names
+                        .iter()
+                        .find(|(n, _)| n == id)
+                        .map(|(_, name)| name.clone())
+                        .unwrap_or_default();
+                    (lo, hi, a.log, title)
+                }
+                None => {
+                    // Provisional: fitted, as it would be on its own.
+                    let s = provisional.iter().find(|(i, _)| members.contains(i));
+                    let log = s.is_some_and(|(_, s)| s.wants_log());
+                    let (lo, hi) = fit_values(log, whole, pts, from, to).unwrap_or((0.0, 1.0));
+                    let units = members.first().map(|&i| units(&self.traces[i]));
+                    let title = axes::names(&[Members {
+                        units: units.iter().map(String::as_str).collect(),
+                        ..Members::default()
+                    }])
+                    .remove(0);
+                    (lo, hi, log, title)
+                }
             };
-            let title = axis_title(members.iter().filter_map(|&i| trace_units[i].as_deref()));
-            let color = match members.as_slice() {
-                [one] if several => Some(self.color(&self.traces[*one], dark)),
-                _ => None,
+            let colors: Vec<Color32> = members
+                .iter()
+                .map(|&i| self.color(&self.traces[i], dark))
+                .collect();
+            let (color, dots) = match colors.as_slice() {
+                [one] => (Some(*one), Vec::new()),
+                _ => (None, colors),
             };
             specs.push(render::AxisSpec {
                 lo,
                 hi,
+                log,
                 title,
                 color,
+                // With one axis, its name alone in its trace's colour.
+                tint_labels: several,
+                dots,
                 whole,
+                highlight: d.is_some() && *d == self.axis_highlight,
             });
         }
+        self.drawn = drawn;
         specs
-    }
-
-    /// The primary axis' value range to draw this frame: fitted to its
-    /// traces' visible data (envelopes included) or fixed, easing toward
-    /// it.
-    fn shown_values<'a>(
-        &mut self,
-        data: impl Iterator<Item = &'a Vec<Pt>>,
-        (from, to): (f64, f64),
-        whole: bool,
-        dt: f64,
-    ) -> (f64, f64) {
-        let log = self.y.log;
-        let target = if self.y.autoscale {
-            fit_values(log, whole, data, from, to).or(self.y.shown)
-        } else {
-            Some((self.y.lo, self.y.hi))
-        };
-        let target = target.unwrap_or(if log { (1.0, 10.0) } else { (0.0, 1.0) });
-        let shown = ease_values(self.y.shown.unwrap_or(target), target, dt);
-        self.y.shown = Some(shown);
-        shown
-    }
-
-    /// On a log scale a fixed range must be above zero: back to
-    /// autoscaling if not.
-    fn fit_log_range(&mut self) {
-        if self.y.log && !self.y.autoscale && self.y.lo <= 0.0 {
-            self.y.autoscale = true;
-            self.y.shown = None;
-        }
     }
 
     /// Take in finished fetches and searches.
@@ -848,11 +1139,14 @@ impl Plot {
                 .unwrap_or(data.center());
             let shift = ui.input(|i| i.modifiers.shift);
             self.glide = 0.0;
+            let axis = f
+                .axis_at(origin)
+                .and_then(|k| self.drawn.get(k).copied().flatten());
             self.drag = Some(
                 if shift || resp.dragged_by(egui::PointerButton::Secondary) {
                     Drag::Box(origin)
-                } else if f.value_axis().contains(origin) {
-                    Drag::Axis
+                } else if let Some(id) = axis {
+                    Drag::Axis(id)
                 } else {
                     Drag::Pan
                 },
@@ -863,19 +1157,26 @@ impl Plot {
             match self.drag {
                 Some(Drag::Pan) => {
                     self.window.pan(-d.x as f64 * per_px, now);
-                    if !self.y.autoscale && d.y != 0.0 {
-                        let (lo, hi) = self.y.shown.unwrap_or((self.y.lo, self.y.hi));
+                    if d.y != 0.0 {
+                        // Axes with a fixed range move with the pointer.
                         let frac = -(d.y / data.height().max(1.0)) as f64;
-                        (self.y.lo, self.y.hi) = window::pan_values(lo, hi, frac, self.y.log);
-                        self.y.shown = Some((self.y.lo, self.y.hi));
+                        for a in self.drawn_axes_mut().filter(|a| !a.autoscale) {
+                            let (lo, hi) = a.shown.unwrap_or((a.lo, a.hi));
+                            (a.lo, a.hi) = window::pan_values(lo, hi, frac, a.log);
+                            a.shown = Some((a.lo, a.hi));
+                        }
                     }
                     self.snap = true;
                     self.changed_at = now;
                 }
-                Some(Drag::Axis) => {
+                Some(Drag::Axis(id)) => {
                     let factor = (d.y as f64 * 0.01).exp();
-                    self.zoom_values(factor, None, f);
-                    self.y.shown = Some((self.y.lo, self.y.hi));
+                    if let Some(k) = self.drawn.iter().position(|d| *d == Some(id)) {
+                        self.zoom_axis(k, factor, None, f);
+                    }
+                    if let Some(a) = self.axes.iter_mut().find(|a| a.id == id) {
+                        a.shown = Some((a.lo, a.hi));
+                    }
                 }
                 _ => {}
             }
@@ -895,8 +1196,13 @@ impl Plot {
                             self.window.set(f.time_at(r.left()), f.time_at(r.right()));
                         }
                         if r.height() > 6.0 {
-                            self.y.autoscale = false;
-                            (self.y.lo, self.y.hi) = (f.value_at(r.bottom()), f.value_at(r.top()));
+                            for (k, id) in self.drawn.clone().into_iter().enumerate() {
+                                let range = (f.value_on(k, r.bottom()), f.value_on(k, r.top()));
+                                if let Some(a) = self.axes.iter_mut().find(|a| Some(a.id) == id) {
+                                    a.autoscale = false;
+                                    (a.lo, a.hi) = range;
+                                }
+                            }
                         }
                     }
                 }
@@ -914,14 +1220,13 @@ impl Plot {
                 )
             });
             let anchor = pointer.map_or(1.0, |p| ((p.x - data.left()) / data.width()) as f64);
-            let at_value = pointer.map(|p| f.value_at(p.y));
             if mods.shift && (scroll.x != 0.0 || scroll.y != 0.0) {
                 // Shift+wheel arrives as horizontal scrolling.
                 let amount = (scroll.x + scroll.y) as f64;
-                self.zoom_values((-amount / 300.0).exp(), at_value, f);
+                self.zoom_values((-amount / 300.0).exp(), pointer, f);
             } else if zoom != 1.0 {
                 if mods.ctrl || mods.command {
-                    self.zoom_values(1.0 / zoom as f64, at_value, f);
+                    self.zoom_values(1.0 / zoom as f64, pointer, f);
                 } else {
                     self.window.zoom(1.0 / zoom as f64, anchor, now);
                     self.changed_at = now;
@@ -948,26 +1253,70 @@ impl Plot {
         }
     }
 
-    /// Zoom values by `factor` about `at` (the middle when `None`), leaving
-    /// autoscale.
-    fn zoom_values(&mut self, factor: f64, at: Option<f64>, f: &render::Frame) {
-        let (lo, hi) = self.y.shown.unwrap_or((f.ys.lo, f.ys.hi));
-        let mid = if self.y.log && lo > 0.0 {
-            (lo * hi).sqrt()
-        } else {
-            (lo + hi) / 2.0
-        };
-        let (l, h) = window::zoom_values(lo, hi, factor, at.unwrap_or(mid), self.y.log);
-        if l.is_finite() && h.is_finite() && l < h {
-            self.y.autoscale = false;
-            (self.y.lo, self.y.hi) = (l, h);
+    /// Zoom values by `factor` about the pointer at `at`: the axis under
+    /// it alone, or over the data every axis drawn, each about its own
+    /// value there (the middle without a pointer). Leaves autoscale.
+    fn zoom_values(&mut self, factor: f64, at: Option<Pos2>, f: &render::Frame) {
+        match at.and_then(|p| f.axis_at(p)) {
+            Some(k) => self.zoom_axis(k, factor, at, f),
+            None => {
+                for k in 0..self.drawn.len() {
+                    self.zoom_axis(k, factor, at, f);
+                }
+            }
+        }
+    }
+
+    /// Zoom drawn axis `k` by `factor` about its value at `at`'s height.
+    fn zoom_axis(&mut self, k: usize, factor: f64, at: Option<Pos2>, f: &render::Frame) {
+        let s = f.scale(k);
+        let (shown, value) = ((s.lo, s.hi), at.map(|p| f.value_on(k, p.y)));
+        if let Some(a) = self.drawn_axis_mut(k) {
+            a.zoom(factor, value, shown);
+        }
+    }
+
+    /// The value axis drawn `k`th this frame (not a provisional one).
+    fn drawn_axis_mut(&mut self, k: usize) -> Option<&mut ValueAxis> {
+        let id = self.drawn.get(k).copied().flatten()?;
+        self.axes.iter_mut().find(|a| a.id == id)
+    }
+
+    /// The value axes drawn this frame.
+    fn drawn_axes_mut(&mut self) -> impl Iterator<Item = &mut ValueAxis> {
+        let drawn = &self.drawn;
+        self.axes.iter_mut().filter(|a| drawn.contains(&Some(a.id)))
+    }
+
+    /// Every value axis back to autoscaling.
+    fn autoscale(&mut self) {
+        for a in &mut self.axes {
+            a.autoscale = true;
+        }
+    }
+
+    /// Every value axis autoscales.
+    fn autoscaling(&self) -> bool {
+        self.axes.iter().all(|a| a.autoscale)
+    }
+
+    /// Every value axis is on a log scale (and there is one).
+    fn all_log(&self) -> bool {
+        !self.axes.is_empty() && self.axes.iter().all(|a| a.log)
+    }
+
+    /// Every value axis on a log scale, or none.
+    fn set_log(&mut self, log: bool) {
+        for a in &mut self.axes {
+            a.log = log;
+            a.fit_log_range();
         }
     }
 
     /// Back to the home span, following now, values fitted.
     fn reset(&mut self) {
         self.window = Window::live(self.home_span);
-        self.y.autoscale = true;
+        self.autoscale();
         self.glide = 0.0;
     }
 
@@ -1022,7 +1371,7 @@ impl Plot {
             self.toggle_live(now);
         }
         if pressed(Key::A) {
-            self.y.autoscale = true;
+            self.autoscale();
         }
         if pressed(Key::Home) {
             self.reset();
@@ -1030,43 +1379,25 @@ impl Plot {
     }
 }
 
-/// Group traces by units (`None`: hidden) into value axes, in order of
-/// first appearance: the axes' units, and each trace's axis (0 when
-/// hidden). Units beyond [`MAX_AXES`] share the last axis. With no visible
-/// traces there is one axis, without units.
-fn group_units(units: &[Option<String>]) -> (Vec<String>, Vec<usize>) {
-    let mut names: Vec<String> = Vec::new();
-    let of = units
-        .iter()
-        .map(|u| {
-            let Some(u) = u else { return 0 };
-            match names.iter().position(|n| n == u) {
-                Some(i) => i,
-                None if names.len() < MAX_AXES => {
-                    names.push(u.clone());
-                    names.len() - 1
-                }
-                None => MAX_AXES - 1,
-            }
-        })
-        .collect();
-    if names.is_empty() {
-        names.push(String::new());
-    }
-    (names, of)
-}
-
-/// A value axis' title: its traces' units, distinct and in order, joined
-/// with " · " when the last axis is shared by several ("degC · V").
-/// Traces without units add nothing.
-fn axis_title<'a>(units: impl Iterator<Item = &'a str>) -> String {
-    let mut seen: Vec<&str> = Vec::new();
-    for u in units {
-        if !u.is_empty() && !seen.contains(&u) {
-            seen.push(u);
-        }
-    }
-    seen.join(" · ")
+/// Axis `a`'s value range to draw this frame: fitted to `data` (its
+/// traces' visible points, envelopes included) or fixed, easing toward
+/// it.
+fn shown_values<'a>(
+    a: &mut ValueAxis,
+    data: impl Iterator<Item = &'a Vec<Pt>>,
+    (from, to): (f64, f64),
+    whole: bool,
+    dt: f64,
+) -> (f64, f64) {
+    let target = if a.autoscale {
+        fit_values(a.log, whole, data, from, to).or(a.shown)
+    } else {
+        Some((a.lo, a.hi))
+    };
+    let target = target.unwrap_or(if a.log { (1.0, 10.0) } else { (0.0, 1.0) });
+    let shown = ease_values(a.shown.unwrap_or(target), target, dt);
+    a.shown = Some(shown);
+    shown
 }
 
 /// Whether trace `t` holds whole numbers: an enum (live with state
@@ -1213,11 +1544,19 @@ mod tests {
                     name: "SR-DI-DCCT-01:SIGNAL".into(),
                     color: None,
                     visible: true,
+                    axis: Some(0),
                 },
                 TraceView {
                     name: "bl01t:SUM".into(),
                     color: Some("#d62728".into()),
                     visible: false,
+                    axis: Some(1),
+                },
+                TraceView {
+                    name: "SR-DI-DCCT-01:LIFETIME".into(),
+                    color: None,
+                    visible: true,
+                    axis: Some(1),
                 },
             ],
             range: view::Range::Relative { secs: 8.0 * 3600.0 },
@@ -1226,11 +1565,33 @@ mod tests {
                 min: Some(0.0),
                 max: Some(300.0),
                 log: false,
+                name: Some("Beam".into()),
             },
+            axes: vec![YAxis {
+                log: true,
+                ..YAxis::default()
+            }],
             ..View::default()
         };
         p.set_view(&v);
         assert_eq!(p.view(), v);
+        // A file from before there were several axes: its `y` waits for
+        // the first trace to settle, and nothing is lost meanwhile.
+        let old = View {
+            pvs: vec![TraceView {
+                name: "A".into(),
+                color: None,
+                visible: true,
+                axis: None,
+            }],
+            y: YAxis {
+                log: true,
+                ..YAxis::default()
+            },
+            ..View::default()
+        };
+        p.set_view(&old);
+        assert_eq!(p.view(), old);
         let fixed = View {
             range: view::Range::Absolute {
                 start: "2026-10-17T09:00:00Z".into(),
@@ -1248,6 +1609,8 @@ mod tests {
         ctx: egui::Context,
         plot: Plot,
         t: f64,
+        /// The modifier keys held.
+        mods: egui::Modifiers,
     }
 
     impl Harness {
@@ -1256,12 +1619,14 @@ mod tests {
                 ctx: egui::Context::default(),
                 plot,
                 t: 0.0,
+                mods: egui::Modifiers::NONE,
             };
             h.frame(vec![]);
             h
         }
 
-        fn frame(&mut self, events: Vec<egui::Event>) {
+        fn frame(&mut self, mut events: Vec<egui::Event>) {
+            events.insert(0, egui::Event::ModifiersChanged(self.mods));
             let input = egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0))),
                 time: Some(self.t),
@@ -1329,7 +1694,7 @@ mod tests {
             h.button(MIDDLE, false);
         }
         assert!(h.plot.window.live);
-        assert!(h.plot.y.autoscale);
+        assert!(h.plot.autoscaling());
     }
 
     #[test]
@@ -1609,40 +1974,257 @@ mod tests {
         }
     }
 
+    /// A plot of `traces` (name, units, values), each given its units
+    /// as archived, and its points.
+    fn plot_of(traces: &[(&str, &str, &[f64])]) -> (Plot, Vec<Vec<Pt>>) {
+        let pvs = PvManager::new();
+        let mut p = Plot::new(&pvs, None);
+        let mut data = Vec::new();
+        for (name, egu, values) in traces {
+            p.add_pvs(&names(&[name]));
+            let t = p.traces.last_mut().unwrap();
+            t.history = Some(History {
+                meta: archiver::Meta {
+                    egu: Some(egu.to_string()).filter(|u| !u.is_empty()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            data.push(
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| Pt::raw(i as f64, *v))
+                    .collect(),
+            );
+        }
+        (p, data)
+    }
+
+    /// Each trace's axis, as an index into the plot's axes.
+    fn axis_indices(p: &Plot) -> Vec<Option<usize>> {
+        p.traces
+            .iter()
+            .map(|t| t.axis.and_then(|id| p.axes.iter().position(|a| a.id == id)))
+            .collect()
+    }
+
     #[test]
-    fn traces_get_an_axis_per_unit() {
-        let u = |s: &[Option<&str>]| -> Vec<Option<String>> {
-            s.iter().map(|u| u.map(str::to_string)).collect()
-        };
-        let (names, of) = group_units(&u(&[Some("mA"), Some("V"), None, Some("mA")]));
-        assert_eq!(names, ["mA", "V"]);
-        assert_eq!(of, [0, 1, 0, 0]);
-        // Past the last axis, units share it.
-        let (names, of) = group_units(&u(&[Some("a"), Some("b"), Some("c"), Some("d")]));
-        assert_eq!(names, ["a", "b", "c"]);
-        assert_eq!(of, [0, 1, 2, 2]);
-        assert_eq!(group_units(&u(&[None])).0, [""]);
-        // A shared axis is titled with all its units.
+    fn traces_settle_on_axes_once_and_name_them() {
+        let (mut p, mut data) = plot_of(&[
+            ("SR-DI-DCCT-01:SIGNAL", "mA", &[299.5, 300.0, 0.0, 299.8]),
+            ("SR-DI-DCCT-01:LIFETIME", "h", &[5.2, 11.9, 12.7]),
+            ("SR01C-DI-EBPM-01:SA:X", "mm", &[0.0, 0.026, 0.04]),
+            ("SR01C-DI-EBPM-01:SA:Y", "mm", &[0.0, 0.58, 0.6]),
+            ("VAC:P", "mbar", &[]),
+        ]);
+        p.settle_axes(&data, 0.0);
         assert_eq!(
-            axis_title(["degC", "V", "", "degC"].into_iter()),
-            "degC · V"
+            axis_indices(&p),
+            [Some(0), Some(1), Some(2), Some(2), None],
+            "no data, no axis yet"
         );
-        assert_eq!(axis_title(["mA"].into_iter()), "mA");
-        assert_eq!(axis_title(["", ""].into_iter()), "");
+        let names: Vec<String> = p.name_axes().into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, ["Current (mA)", "Time (h)", "Position (mm)"]);
+        // Pressure over decades: an axis of its own, on a log scale.
+        data[4] = (0..50)
+            .map(|i| Pt::raw(i as f64, 1e-10 * 1.2f64.powi(i)))
+            .collect();
+        p.settle_axes(&data, 1.0);
+        assert_eq!(axis_indices(&p)[4], Some(3));
+        assert!(p.axes[3].log && !p.axes[0].log);
+        // Decisions stick, whatever the data does next.
+        data[1] = data[0].clone();
+        p.settle_axes(&data, 2.0);
+        assert_eq!(
+            axis_indices(&p),
+            [Some(0), Some(1), Some(2), Some(2), Some(3)]
+        );
+        // Moved by hand to its own axis, then back: the empty axis goes.
+        let y = p.traces[3].id;
+        p.move_trace(y, None);
+        assert_eq!(p.axes.len(), 5);
+        let names: Vec<String> = p.name_axes().into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names[2], "Position X (mm)");
+        assert_eq!(names[3], "Position Y (mm)", "in the legend's order");
+        let x_axis = p.traces[2].axis;
+        p.move_trace(y, x_axis);
+        assert_eq!(p.axes.len(), 4);
+        // Removing a trace removes its axis with it.
+        p.remove_pv("SR-DI-DCCT-01:LIFETIME");
+        assert_eq!(p.axes.len(), 3);
+        assert_eq!(axis_indices(&p), [Some(0), Some(1), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn a_view_axis_is_taken_by_the_first_trace_to_settle() {
+        let (mut p, data) = plot_of(&[("A", "mA", &[300.0]), ("B", "h", &[10.0])]);
+        let mut v = p.view();
+        v.y = YAxis {
+            autoscale: false,
+            min: Some(1.0),
+            max: Some(500.0),
+            log: true,
+            name: None,
+        };
+        let hist: Vec<Option<History>> = p.traces.iter().map(|t| t.history.clone()).collect();
+        p.set_view(&v);
+        for (t, h) in p.traces.iter_mut().zip(hist) {
+            t.history = h;
+        }
+        assert_eq!(axis_indices(&p), [None, None]);
+        p.settle_axes(&data, 0.0);
+        assert_eq!(axis_indices(&p), [Some(0), Some(1)]);
+        let a = &p.axes[0];
+        assert!(
+            a.log && !a.autoscale && a.hi == 500.0,
+            "the view's settings"
+        );
+        assert!(!p.axes[1].log && p.axes[1].autoscale);
+    }
+
+    #[test]
+    fn traces_on_the_mock_settle_and_the_view_keeps_them() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&[
+            "MOCK:SINE",
+            "MOCK:NOISE",
+            "BL01T-MO-SIMC-01:M1.RBV",
+            "BL01T-MO-SIMC-01:M2.RBV",
+            "MOCK:ENUM",
+        ]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading() && p.traces.iter().all(|t| t.axis.is_some()));
+        assert_eq!(
+            axis_indices(&h.plot),
+            [Some(0), Some(1), Some(2), Some(2), Some(3)]
+        );
+        h.frame(vec![]);
+        assert_eq!(h.plot.drawn.len(), 4);
+        let names: Vec<String> = h.plot.axis_names.iter().map(|(_, n)| n.clone()).collect();
+        assert_eq!(
+            names,
+            ["Current (mA)", "Voltage (V)", "Position (mm)", "Axis 4"]
+        );
+        let v = h.plot.view();
+        assert_eq!(v.axes.len(), 3);
+        assert_eq!(
+            v.pvs.iter().map(|t| t.axis).collect::<Vec<_>>(),
+            [Some(0), Some(1), Some(2), Some(2), Some(3)]
+        );
+        // Shift+wheel over the second axis (right of the data) zooms it
+        // alone.
+        let edge = Pos2::new(985.0, 300.0);
+        h.frame(vec![egui::Event::PointerMoved(edge)]);
+        let shift = egui::Modifiers::SHIFT;
+        h.mods = shift;
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, 100.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: shift,
+        }]);
+        for _ in 0..20 {
+            h.frame(vec![]);
+        }
+        let auto: Vec<bool> = h.plot.axes.iter().map(|a| a.autoscale).collect();
+        assert_eq!(auto, [true, true, true, false], "the outer right axis");
+        // ... and over the data, every axis.
+        h.frame(vec![egui::Event::PointerMoved(MIDDLE)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, 100.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: shift,
+        }]);
+        for _ in 0..20 {
+            h.frame(vec![]);
+        }
+        assert!(h.plot.axes.iter().all(|a| !a.autoscale));
+        h.mods = egui::Modifiers::NONE;
+        h.key(egui::Key::A);
+        assert!(h.plot.autoscaling());
+    }
+
+    #[test]
+    fn axes_are_renamed_picked_out_and_given_traces_by_hand() {
+        let mock = mockarchiver::MockArchiver::start_local().unwrap();
+        let pvs = PvManager::new();
+        let client = ArchiverClient::new(&mock.url()).unwrap();
+        let mut p = Plot::new(&pvs, Some(client));
+        p.add_pvs(&names(&["MOCK:SINE", "MOCK:NOISE"]));
+        let mut h = Harness::new(p);
+        h.until(|p| !p.is_loading() && p.traces.iter().all(|t| t.axis.is_some()));
+        h.frame(vec![]);
+        assert_eq!(h.plot.seen.0.len(), 2);
+        let click = |h: &mut Harness, at: Pos2| {
+            h.frame(vec![egui::Event::PointerMoved(at)]);
+            h.button(at, true);
+            h.button(at, false);
+        };
+
+        // Double-click the first axis' name, type, Enter: renamed.
+        let name = h.plot.seen.0[0].1.center();
+        click(&mut h, name);
+        click(&mut h, name);
+        assert!(h.plot.renaming.is_some());
+        // The name so far is selected, to type over.
+        h.frame(vec![]);
+        h.frame(vec![egui::Event::Text("Beam".into())]);
+        h.key(egui::Key::Enter);
+        assert!(h.plot.renaming.is_none());
+        assert_eq!(h.plot.axes[0].name.as_deref(), Some("Beam"));
+        assert_eq!(h.plot.view().y.name.as_deref(), Some("Beam"));
+
+        // Click the second axis: its trace is picked out; again, not.
+        let second = h.plot.seen.0[1].0.center();
+        click(&mut h, second);
+        assert_eq!(h.plot.axis_highlight, Some(h.plot.axes[1].id));
+        h.frame(vec![]);
+        click(&mut h, second);
+        assert_eq!(h.plot.axis_highlight, None);
+
+        // Drag the second chip onto the first axis: one axis left.
+        h.frame(vec![]);
+        let chip = h.plot.seen.1[1].0.center();
+        let onto = h.plot.seen.0[0].0.center();
+        h.frame(vec![egui::Event::PointerMoved(chip)]);
+        h.button(chip, true);
+        for i in 1..=10 {
+            let at = chip + (onto - chip) * (i as f32 / 10.0);
+            h.frame(vec![egui::Event::PointerMoved(at)]);
+        }
+        assert!(h.plot.chip_drag.is_some());
+        h.button(onto, false);
+        h.frame(vec![]);
+        assert!(h.plot.chip_drag.is_none());
+        assert_eq!(h.plot.axes.len(), 1);
+        assert_eq!(h.plot.traces[1].axis, h.plot.traces[0].axis);
+
+        // Its dot's menu, "New axis": back on an axis of its own.
+        let dot = h.plot.seen.1[1].1.center();
+        click(&mut h, dot);
+        h.frame(vec![]);
+        let open = egui::Popup::is_any_open(&h.ctx);
+        assert!(open, "the dot opens its menu");
+        h.plot.move_trace(h.plot.traces[1].id, None);
+        assert_eq!(h.plot.axes.len(), 2);
     }
 
     #[test]
     fn log_scale_leaves_a_fixed_range_through_zero() {
-        let pvs = PvManager::new();
-        let mut p = Plot::new(&pvs, None);
-        p.y.autoscale = false;
-        (p.y.lo, p.y.hi) = (0.0, 100.0);
-        p.y.log = true;
-        p.fit_log_range();
-        assert!(p.y.autoscale);
-        (p.y.autoscale, p.y.lo) = (false, 1.0);
-        p.fit_log_range();
-        assert!(!p.y.autoscale, "a positive range stays");
+        let mut a = ValueAxis::new(0);
+        a.autoscale = false;
+        (a.lo, a.hi) = (0.0, 100.0);
+        a.log = true;
+        a.fit_log_range();
+        assert!(a.autoscale);
+        (a.autoscale, a.lo) = (false, 1.0);
+        a.fit_log_range();
+        assert!(!a.autoscale, "a positive range stays");
     }
 
     #[test]
