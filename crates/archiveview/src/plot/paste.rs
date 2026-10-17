@@ -92,8 +92,10 @@ pub(super) struct PasteState {
 
 /// The PV names in `text`, in order and once each. It is split into words
 /// on whitespace, commas and semicolons, except inside the `(arguments)`
-/// of a `scheme://` name (`sim://sine(0, 10, 0.1)` is one word), and quotes
-/// and brackets around a word are dropped.
+/// of a `loc://` or `sim://` name closed on the same line
+/// (`sim://sine(0, 10, 0.1)` is one word), and quotes and brackets around
+/// a word are dropped, as is a lone bracket left by a list in brackets
+/// (`(A:B, C:D)`).
 ///
 /// The schemes taken are those the host's [`pv::PvManager`] serves, as
 /// [`pv::PvName::parse`] reads them: `ca://` and `pva://` (in either case),
@@ -106,9 +108,11 @@ pub(super) struct PasteState {
 /// has only characters EPICS record names use (letters, digits,
 /// `_ - + : [ ] < > { } $`, and `.` before a field), at least one letter,
 /// and does not start with `-` or `+` (a command-line flag) or start or
-/// end with `.` or `:`. After `loc://` or `sim://` such a name can be
-/// followed by a `<VType>` and then `(arguments)`, which end it:
-/// `loc://x<VLong>(7)`, `sim://ramp`. Unless it has a scheme, shapes that
+/// end with `.` or `:`. After `loc://` such a name can be followed by a
+/// `<VType>` and then `(arguments)`, which end it (`loc://x<VLong>(7)`);
+/// after `sim://` it is one of bobview-pv's functions (`sine`,
+/// `sawtooth`, `ramp`, `noise`, `gaussianNoise`, `flipflop`, `const`), then
+/// optionally `(arguments)` (`sim://ramp`, `sim://sine(0, 10, 0.1)`). Unless it has a scheme, shapes that
 /// are something else are left out: times and dates (`12:30:00`,
 /// `2026-10-17T13:41:52Z`), `host:port` (two parts, a host name with a
 /// `.`, `localhost` or lower case, then digits: not `SR:BPM:01` or
@@ -137,56 +141,82 @@ pub fn pv_names(text: &str) -> Vec<String> {
 }
 
 /// `text` split on whitespace, commas and semicolons, except inside the
-/// parentheses of a word that has a `://` before them: the arguments of
-/// `sim://sine(0, 10, 0.1)` or `loc://s<VString>("a b")`. A `(` that is
-/// never closed is an ordinary character, so it cannot swallow the rest.
+/// parentheses of a word that starts (after any quotes or brackets) with
+/// `loc://` or `sim://`: the arguments of `sim://sine(0, 10, 0.1)` or
+/// `loc://s<VString>("a b")`. A `(` not closed on its line within
+/// [`MAX_ARGS`] bytes is an ordinary character, so it cannot swallow the
+/// rest, and the work stays linear in a large selection.
 fn words(text: &str) -> Vec<&str> {
     let sep = |c: char| c.is_whitespace() || c == ',' || c == ';';
     let mut words = Vec::new();
-    let mut start: Option<usize> = None;
+    // Where the word started, and whether its arguments are kept whole.
+    let mut start: Option<(usize, bool)> = None;
     let mut i = 0;
     while let Some(c) = text[i..].chars().next() {
         if sep(c) {
-            if let Some(s) = start.take() {
+            if let Some((s, _)) = start.take() {
                 words.push(&text[s..i]);
             }
         } else {
-            let s = *start.get_or_insert(i);
-            if c == '('
-                && text[s..i].contains("://")
-                && let Some(len) = closing(&text[i..])
-            {
-                i += len;
-                continue;
+            let (_, glue) = start.get_or_insert_with(|| (i, has_arguments(&text[i..])));
+            if c == '(' && *glue {
+                if let Some(len) = closing(&text[i..]) {
+                    i += len;
+                    continue;
+                }
+                // Not a name's arguments, so neither is a later `(`.
+                *glue = false;
             }
         }
         i += c.len_utf8();
     }
-    if let Some(s) = start {
+    if let Some((s, _)) = start {
         words.push(&text[s..]);
     }
     words
 }
 
+/// Whether `text`, from a word's start, names a `loc://` or `sim://` PV,
+/// whose `(arguments)` may hold spaces and commas.
+fn has_arguments(text: &str) -> bool {
+    let quote_or_bracket = |c| {
+        matches!(
+            c,
+            '"' | '\'' | '`' | '“' | '”' | '‘' | '’' | '(' | '[' | '{' | '<'
+        )
+    };
+    let name = text.trim_start_matches(quote_or_bracket);
+    name.starts_with("loc://") || name.starts_with("sim://")
+}
+
+/// The longest `(arguments)` kept whole, in bytes: bobview's names are
+/// one short line.
+const MAX_ARGS: usize = 256;
+
 /// The length of `text`, which starts with `(`, up to and including the
 /// `)` that closes it, passing over parentheses in `"strings"`; `None`
-/// when it is never closed.
+/// when it is not closed before a new line or within [`MAX_ARGS`] bytes.
 fn closing(text: &str) -> Option<usize> {
+    // Bytes: the delimiters are ASCII, which no other character's UTF-8
+    // contains.
     let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
-    for (i, c) in text.char_indices() {
+    for (i, &b) in text.as_bytes().iter().enumerate().take(MAX_ARGS) {
+        if b == b'\n' {
+            return None;
+        }
         if quoted {
-            match c {
+            match b {
                 _ if escaped => escaped = false,
-                '\\' => escaped = true,
-                '"' => quoted = false,
+                b'\\' => escaped = true,
+                b'"' => quoted = false,
                 _ => {}
             }
             continue;
         }
-        match c {
-            '"' => quoted = true,
-            '(' => depth += 1,
-            ')' => {
+        match b {
+            b'"' => quoted = true,
+            b'(' => depth += 1,
+            b')' => {
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
                     return Some(i + 1);
@@ -199,7 +229,9 @@ fn closing(text: &str) -> Option<usize> {
 }
 
 /// `word` without the quotes and brackets around it: `"A:B"`, `(A:B)`,
-/// `['A:B']`. A bracket that belongs to the name (`A:B[1]`) stays.
+/// `['A:B']`, and a leading `(`/`[` or trailing `)`/`]` the word has one
+/// too many of, as a list in brackets splits into (`(A:B,` `C:D)`). A bracket
+/// that belongs to the name (`A:B[1]`, `loc://x(1)`) stays.
 fn unwrap(mut word: &str) -> &str {
     loop {
         let quotes = |c| matches!(c, '"' | '\'' | '`' | '“' | '”' | '‘' | '’');
@@ -212,6 +244,17 @@ fn unwrap(mut word: &str) -> &str {
                     .and_then(|w| w.strip_suffix(close))
             })
             .unwrap_or(trimmed);
+        let inner = [('(', ')'), ('[', ']')]
+            .iter()
+            .fold(inner, |w, &(open, close)| {
+                let count = |c| w.chars().filter(|&x| x == c).count();
+                let (opens, closes) = (count(open), count(close));
+                match (w.strip_prefix(open), w.strip_suffix(close)) {
+                    (Some(rest), _) if opens > closes => rest,
+                    (_, Some(rest)) if closes > opens => rest,
+                    _ => w,
+                }
+            });
         if inner == word {
             return word;
         }
@@ -234,7 +277,8 @@ fn looks_like_pv(word: &str, alone: bool) -> bool {
     // PvManager serves it.
     match pv::PvName::parse(word).scheme {
         pv::Scheme::Ca | pv::Scheme::Pva => record_name(body),
-        pv::Scheme::Loc | pv::Scheme::Sim => host_name(body),
+        pv::Scheme::Loc => host_name(body, false),
+        pv::Scheme::Sim => host_name(body, true),
         // Not told from prose (see `pv_names`).
         pv::Scheme::Formula => false,
         // `CA://`, `PVA://`, as some lists write them.
@@ -257,11 +301,29 @@ fn record_name(body: &str) -> bool {
     chars_ok && ends_ok && body.chars().any(|c| c.is_ascii_alphabetic())
 }
 
-/// A `loc://` or `sim://` name after its scheme: a record name, then
-/// optionally a `<VType>`, then optionally `(arguments)` that end it.
-fn host_name(body: &str) -> bool {
+/// The functions bobview-pv's `sim://` PVs know (its `sim::run`, which
+/// does not export them): any other is "unknown simulated PV".
+const SIM_FUNCTIONS: [&str; 7] = [
+    "sine",
+    "sawtooth",
+    "ramp",
+    "noise",
+    "gaussianNoise",
+    "flipflop",
+    "const",
+];
+
+/// A `loc://` name after its scheme: a record name, then optionally a
+/// `<VType>`, then optionally `(arguments)` that end it. `sim`: a
+/// `sim://` name, one of [`SIM_FUNCTIONS`] with no `<VType>`.
+fn host_name(body: &str, sim: bool) -> bool {
     let (base, mut rest) = body.split_at(body.find(['<', '(']).unwrap_or(body.len()));
-    if let Some(after) = rest.strip_prefix('<') {
+    if sim && !SIM_FUNCTIONS.contains(&base) {
+        return false;
+    }
+    if let Some(after) = rest.strip_prefix('<')
+        && !sim
+    {
         let Some((vtype, after)) = after.split_once('>') else {
             return false;
         };
@@ -443,6 +505,58 @@ mod tests {
         }
         // An unclosed bracket does not swallow what follows.
         assert_eq!(pv_names("sim://sine(0, SR:X"), ["SR:X"]);
+        // Nor does one closed lines later, or far on.
+        assert_eq!(
+            pv_names("loc://x(1 or\n\nSR:A1 SR:B1\nlater)"),
+            ["SR:A1", "SR:B1"]
+        );
+        let far = format!("loc://x(1 {} SR:A1)", "word ".repeat(60));
+        assert_eq!(pv_names(&far), ["SR:A1"]);
+        // Only loc:// and sim:// arguments are kept whole: the URL's
+        // words split, and the name after its comma is found.
+        assert_eq!(pv_names("https://x/Foo_(SR:A1, SR:B1)"), ["SR:B1"]);
+        // sim:// names only bobview-pv's functions, with no type.
+        for text in [
+            "sim://foo",
+            "sim://Sine",
+            "sim://a:b<VLong>",
+            "sim://ramp<VLong>(1)",
+        ] {
+            assert!(pv_names(text).is_empty(), "{text:?}");
+        }
+        for f in SIM_FUNCTIONS {
+            let name = format!("sim://{f}(1, 2)");
+            assert_eq!(pv_names(&name), [name.as_str()]);
+        }
+    }
+
+    #[test]
+    fn a_large_selection_is_parsed_in_linear_time() {
+        // Each `(` here once scanned to the end of the text: a 120 KB
+        // selection took 20 s. A megabyte now takes well under a second; the
+        // bound is generous for a slow CI machine in a debug build.
+        for text in [
+            "loc://( ".repeat(150_000),
+            format!("loc://{}", "(".repeat(1_000_000)),
+            format!("sim://sine{}", "(x ".repeat(350_000)),
+        ] {
+            let started = web_time::Instant::now();
+            pv_names(&text);
+            let took = started.elapsed();
+            assert!(took.as_secs() < 10, "{}: took {took:?}", &text[..20]);
+        }
+    }
+
+    #[test]
+    fn lone_brackets_of_a_list_are_dropped() {
+        assert_eq!(pv_names("the beam (SR:X, SR:Y) is down"), ["SR:X", "SR:Y"]);
+        assert_eq!(
+            pv_names("[SR:X1, SR:Y1] and (A:B[1], loc://x(1))"),
+            ["SR:X1", "SR:Y1", "A:B[1]", "loc://x(1)"]
+        );
+        // Brackets that belong to the name stay.
+        assert_eq!(pv_names("A:B[1] C:D[2]"), ["A:B[1]", "C:D[2]"]);
+        assert!(pv_names("A:B(1)").is_empty());
     }
 
     #[test]
