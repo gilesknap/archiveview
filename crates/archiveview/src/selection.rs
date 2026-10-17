@@ -14,6 +14,8 @@
 //! per format) so the app never reads on its own thread: a [`Worker`]
 //! owns the selection on a thread of its own.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -52,10 +54,17 @@ enum Job<T> {
 
 /// A [`Selection`] on a thread of its own: reads answer later, tagged
 /// with what asked, and nothing ever blocks the caller.
+///
+/// Jobs run one at a time, so a read stuck on a hung selection owner
+/// holds up those after it: each of those clicks times out in the app
+/// with its notice, until the owner answers or goes.
 pub struct Worker<T> {
     jobs: Option<mpsc::Sender<Job<T>>>,
     answers: mpsc::Receiver<(T, Option<String>)>,
     done: mpsc::Receiver<()>,
+    /// The worker was given up on (stuck past [`Worker`]'s drop): it must
+    /// not touch the selection again, as the display may be gone.
+    abandoned: Arc<AtomicBool>,
 }
 
 impl<T: Send + 'static> Worker<T> {
@@ -65,11 +74,16 @@ impl<T: Send + 'static> Worker<T> {
         let (jobs, rx) = mpsc::channel::<Job<T>>();
         let (tx, answers) = mpsc::channel();
         let (done_tx, done) = mpsc::channel();
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let given_up = abandoned.clone();
         let spawned = std::thread::Builder::new()
             .name("archiveview-selection".into())
             .spawn(move || {
                 let mut sel = make();
                 for job in rx {
+                    if given_up.load(Ordering::Acquire) {
+                        break;
+                    }
                     match job {
                         Job::Read(tag) => {
                             let text = sel.middle_click_text();
@@ -81,8 +95,16 @@ impl<T: Send + 'static> Worker<T> {
                         Job::Set(text) => sel.set_primary(&text),
                     }
                 }
-                drop(sel);
-                let _ = done_tx.send(());
+                if given_up.load(Ordering::Acquire) {
+                    // Dropping it now would close its Wayland queue on a
+                    // display that may be gone: leak it, the process is
+                    // ending.
+                    log::warn!("the selection was stuck at exit; leaving it");
+                    std::mem::forget(sel);
+                } else {
+                    drop(sel);
+                    let _ = done_tx.send(());
+                }
             });
         if let Err(e) = spawned {
             log::warn!("no selection thread: {e}");
@@ -91,6 +113,7 @@ impl<T: Send + 'static> Worker<T> {
             jobs: Some(jobs),
             answers,
             done,
+            abandoned,
         }
     }
 
@@ -116,10 +139,15 @@ impl<T: Send + 'static> Worker<T> {
 
 impl<T> Drop for Worker<T> {
     /// Stop the thread and wait (a little) for it to drop the selection,
-    /// which on Wayland must go before the display does.
+    /// which on Wayland must go before the display does. A thread stuck
+    /// in a read (smithay's has no timeout) is given up on: it leaks the
+    /// selection when it wakes, rather than racing the display's teardown.
     fn drop(&mut self) {
         self.jobs = None;
-        let _ = self.done.recv_timeout(Duration::from_secs(1));
+        if self.done.recv_timeout(Duration::from_secs(1)).is_err() {
+            log::warn!("the selection thread is stuck; abandoning it");
+            self.abandoned.store(true, Ordering::Release);
+        }
     }
 }
 

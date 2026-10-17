@@ -310,7 +310,7 @@ impl ArchiveApp {
                 }
             }
             if let Some((_, since)) = self.reading
-                && now - since > SELECTION_WAIT
+                && now - since >= SELECTION_WAIT
             {
                 self.reading = None;
                 let mut notice = Notice::new("Could not read the selection", true, 4.0);
@@ -703,6 +703,15 @@ mod tests {
         }
     }
 
+    impl Drop for FakeSelection {
+        /// A slow one says when it is dropped (it should be leaked).
+        fn drop(&mut self) {
+            if !self.slow.is_zero() {
+                self.set.lock().push("dropped".into());
+            }
+        }
+    }
+
     #[test]
     fn middle_click_adds_the_selected_pvs_and_says_so() {
         let ctx = egui::Context::default();
@@ -807,12 +816,13 @@ mod tests {
 
         // A selection owner that never answers: the window goes on, and
         // after a while says so.
+        let late = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let fake = FakeSelection {
             has: true,
             primary: Some("LATE:PV".into()),
             clipboard: None,
-            set: set.clone(),
-            slow: Duration::from_secs(3),
+            set: late.clone(),
+            slow: Duration::from_millis(1500),
         };
         app.set_selection(&ctx, Some(Box::new(move || Box::new(fake))));
         let ev = |pressed| egui::Event::PointerButton {
@@ -833,7 +843,11 @@ mod tests {
         let notice = app.notice.as_ref().unwrap();
         assert!(notice.error && notice.text.contains("Could not read"));
         assert_eq!(app.plot.names().len(), 3, "the late answer is dropped");
+        // Still stuck when dropped (as at exit): given up on, and when it
+        // wakes it leaks the selection rather than dropping it.
         app.set_selection(&ctx, None);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(late.lock().is_empty(), "{:?}", late.lock());
     }
 
     #[test]
