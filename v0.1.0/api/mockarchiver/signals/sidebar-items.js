@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HISTORY_DAYS","NAN_CYCLE","NAN_LOST","NAN_REGAINED"],"enum":["Kind","Shape","Value"],"fn":["all","find"],"struct":["Event","Signal"]};

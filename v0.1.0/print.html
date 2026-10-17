@@ -1,0 +1,1155 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>archiveview</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="A modern plotter for archived and live EPICS PVs">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="theme/grid.css">
+        <link rel="stylesheet" href="theme/sidebar.css">
+
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="tutorials/quickstart.html"><strong aria-hidden="true">1.</strong> Quick start</a></li><li class="chapter-item expanded affix "><li class="part-title">How-to guides</li><li class="chapter-item expanded "><a href="how-to/install.html"><strong aria-hidden="true">2.</strong> Install archiveview</a></li><li class="chapter-item expanded "><a href="how-to/connect.html"><strong aria-hidden="true">3.</strong> Connect to an archiver and IOCs</a></li><li class="chapter-item expanded "><a href="how-to/search.html"><strong aria-hidden="true">4.</strong> Find and add PVs</a></li><li class="chapter-item expanded "><a href="how-to/navigate.html"><strong aria-hidden="true">5.</strong> Navigate the plot</a></li><li class="chapter-item expanded "><a href="how-to/views.html"><strong aria-hidden="true">6.</strong> Save and load views</a></li><li class="chapter-item expanded "><a href="how-to/software-rendering.html"><strong aria-hidden="true">7.</strong> Run over ssh</a></li><li class="chapter-item expanded "><a href="how-to/snapshots.html"><strong aria-hidden="true">8.</strong> Take snapshots</a></li><li class="chapter-item expanded "><a href="how-to/embed.html"><strong aria-hidden="true">9.</strong> Embed the plot in an egui app</a></li><li class="chapter-item expanded "><a href="how-to/build.html"><strong aria-hidden="true">10.</strong> Build from source</a></li><li class="chapter-item expanded "><a href="how-to/release.html"><strong aria-hidden="true">11.</strong> Make a release</a></li><li class="chapter-item expanded affix "><li class="part-title">Explanations</li><li class="chapter-item expanded "><a href="explanations/scope.html"><strong aria-hidden="true">12.</strong> Scope, and how it differs from the Data Browser</a></li><li class="chapter-item expanded "><a href="explanations/architecture.html"><strong aria-hidden="true">13.</strong> Architecture</a></li><li class="chapter-item expanded affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="reference/cli.html"><strong aria-hidden="true">14.</strong> Command line</a></li><li class="chapter-item expanded "><a href="reference/controls.html"><strong aria-hidden="true">15.</strong> Gestures and keys</a></li><li class="chapter-item expanded "><a href="reference/environment.html"><strong aria-hidden="true">16.</strong> Environment variables</a></li><li class="chapter-item expanded "><a href="reference/config.html"><strong aria-hidden="true">17.</strong> Config files and the view format</a></li><li class="chapter-item expanded "><a href="reference/archiver-api.html"><strong aria-hidden="true">18.</strong> The archiver URL and API</a></li><li class="chapter-item expanded "><a href="reference/mockarchiver.html"><strong aria-hidden="true">19.</strong> Mock archiver</a></li><li class="chapter-item expanded "><a href="reference/api.html"><strong aria-hidden="true">20.</strong> Rust API</a></li><li class="chapter-item expanded "><a href="reference/licences.html"><strong aria-hidden="true">21.</strong> Licences</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">archiveview</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/gilesknap/archiveview" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="archiveview"><a class="header" href="#archiveview">archiveview</a></h1>
+<p>archiveview plots EPICS PVs against time. History comes from an
+<a href="https://github.com/archiver-appliance/epicsarchiverap">EPICS Archiver Appliance</a>
+and live values come from Channel Access or PV Access, joined into one line
+per PV. It is written in Rust with <a href="https://github.com/emilk/egui">egui</a>,
+in the style of <a href="https://github.com/gilesknap/bobview">bobview</a>.</p>
+<p>It covers what most people use the Phoebus Data Browser for, with a much
+smaller interface. The plot fills the window, a slim bar holds search and
+the time range, and everything else is direct manipulation: drag to pan,
+scroll to zoom, hover to read values. See
+<a href="explanations/scope.html">Scope, and how it differs from the Data Browser</a>.</p>
+<div class="compass">
+  <div class="axis axis-top-left">Learning: acquiring skills</div>
+  <div class="axis axis-top-right">Working: applying skills</div>
+  <div class="axis axis-left-top">Practical: doing</div>
+  <div class="axis axis-left-bottom">Theoretical: knowing</div>
+  <a class="grid-card tutorials" href="tutorials/quickstart.html">
+    <span class="card-title">📚 Tutorials</span>
+    <span class="orientation">learning-oriented</span>
+    <p>New to archiveview? Install it, start the mock archiver and a
+    simulated beamline, and plot your first PVs.</p>
+  </a>
+  <a class="grid-card how-to" href="how-to/install.html">
+    <span class="card-title">🧭 How-to guides</span>
+    <span class="orientation">goal-oriented</span>
+    <p>Practical steps: connect to your archiver and IOCs, find PVs, save
+    views, take snapshots, embed the plot.</p>
+  </a>
+  <a class="grid-card explanations" href="explanations/scope.html">
+    <span class="card-title">💡 Explanations</span>
+    <span class="orientation">understanding-oriented</span>
+    <p>Background and design: what archiveview sets out to do and how
+    archive and live data become one plot.</p>
+  </a>
+  <a class="grid-card reference" href="reference/cli.html">
+    <span class="card-title">📖 Reference</span>
+    <span class="orientation">information-oriented</span>
+    <p>Command-line options, gestures and keys, config files, the archiver
+    API, the mock archiver and the Rust API.</p>
+  </a>
+</div>
+<p>The <a href="reference/api.html">Rust API docs</a> for the workspace's crates are
+published alongside this book.</p>
+<p>The docs follow the <a href="https://diataxis.fr">Diátaxis</a> framework: four kinds of
+page for four needs, learning, doing, understanding and looking things up.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="quick-start"><a class="header" href="#quick-start">Quick start</a></h1>
+<p>This tutorial installs archiveview and plots archived and live PVs on your
+own machine. It takes about ten minutes and needs no EPICS installation, no
+IOCs and no real archiver:</p>
+<ul>
+<li><code>archiveview-mockarchiver</code> plays the part of an Archiver Appliance,
+serving 30 days of synthetic history for a handful of PVs;</li>
+<li><code>bobview-testioc</code> (from <a href="https://github.com/gilesknap/bobview">bobview</a>)
+serves the BL01T simulated beamline live, including PVs the mock also
+archives, so you can watch the archive and the live values join up.</li>
+</ul>
+<p>You need an x86_64 or aarch64 Linux machine, or a Mac.</p>
+<h2 id="1-install"><a class="header" href="#1-install">1. Install</a></h2>
+<p>On Debian or Ubuntu, first install the graphics libraries:</p>
+<pre><code class="language-bash">sudo apt install libxkbcommon0 libwayland-client0 libegl1 libgl1-mesa-dri
+</code></pre>
+<p>(on RHEL and Fedora see <a href="tutorials/../how-to/install.html">Install archiveview</a>; macOS
+needs nothing). Then install archiveview into <code>~/.local</code>:</p>
+<pre><code class="language-bash">curl -sSfL https://raw.githubusercontent.com/gilesknap/archiveview/main/install.sh | bash
+archiveview --version
+</code></pre>
+<p>If the command is not found, add <code>export PATH=$HOME/.local/bin:$PATH</code> to your
+shell's start-up file and open a new terminal.</p>
+<h2 id="2-start-the-mock-archiver"><a class="header" href="#2-start-the-mock-archiver">2. Start the mock archiver</a></h2>
+<pre><code class="language-bash">archiveview-mockarchiver &amp;
+</code></pre>
+<p>It listens on <code>http://127.0.0.1:17668</code>, the Archiver Appliance's usual
+retrieval port. The PVs it serves are listed in
+<a href="tutorials/../reference/mockarchiver.html">Mock archiver</a>.</p>
+<h2 id="3-plot-some-history"><a class="header" href="#3-plot-some-history">3. Plot some history</a></h2>
+<pre><code class="language-bash">archiveview --archiver http://127.0.0.1:17668 MOCK:SINE MOCK:NOISE
+</code></pre>
+<p>The window opens on the last hour. Each PV is a line in its own colour, and a
+chip for each sits along the bottom with its latest value.</p>
+<ul>
+<li><strong>Hover</strong> over the plot: a crosshair shows every trace's value and the
+time under the pointer.</li>
+<li><strong>Scroll</strong> to zoom the time axis about the pointer, and <strong>drag</strong> to pan.
+As you zoom out, the archiver sends the data thinned to the plot's width;
+where a pixel holds many samples you see the line's mean with a shaded
+min-to-max band.</li>
+<li>Click <strong>7d</strong> in the time-range pill to see the whole week, then
+<strong>double-click</strong> the plot to return to where you started.</li>
+</ul>
+<h2 id="4-find-another-pv"><a class="header" href="#4-find-another-pv">4. Find another PV</a></h2>
+<p>Press <code>/</code> (or click the search box) and type <code>ramp</code>. The archiver's
+matching PVs appear as you type; pick <code>MOCK:RAMP</code> with the arrow keys and
+Enter, or click it.</p>
+<h2 id="5-add-live-values"><a class="header" href="#5-add-live-values">5. Add live values</a></h2>
+<p>Start the simulated beamline, and tell Channel Access to look for PVs on this
+machine:</p>
+<pre><code class="language-bash">bobview-testioc &amp;
+export EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO
+archiveview --archiver http://127.0.0.1:17668 --range 10m bl01t:SUM
+</code></pre>
+<p>(install the IOC first with <code>cargo install bobview-testioc</code>, or take it from a
+<a href="https://github.com/gilesknap/bobview/releases">bobview release</a>).</p>
+<p>The mock archives <code>bl01t:SUM</code> and the IOC serves it live. The line runs from
+the archive into the live values at the right edge, and the <strong>● Live</strong> pill
+shows a red dot while the plot follows the current time. Drag the plot to the left:
+live following stops. Press <code>L</code>, or click the pill, to jump back to now.</p>
+<h2 id="6-save-the-view"><a class="header" href="#6-save-the-view">6. Save the view</a></h2>
+<p>Open the <strong>≡</strong> menu, type <code>demo</code> into the <strong>Save as…</strong> field under Views
+and press Enter. Next
+time, <code>archiveview --archiver http://127.0.0.1:17668 --view demo</code> reopens the
+same PVs and time range. See <a href="tutorials/../how-to/views.html">Save and load views</a>.</p>
+<h2 id="7-finish"><a class="header" href="#7-finish">7. Finish</a></h2>
+<p>Close the window, then stop the background programs:</p>
+<pre><code class="language-bash">kill %1 %2
+</code></pre>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next steps</a></h2>
+<ul>
+<li>Point archiveview at your own appliance and IOCs:
+<a href="tutorials/../how-to/connect.html">Connect to an archiver and IOCs</a>.</li>
+<li>Learn the rest of the gestures: <a href="tutorials/../how-to/navigate.html">Navigate the plot</a>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="install-archiveview"><a class="header" href="#install-archiveview">Install archiveview</a></h1>
+<p>archiveview runs on x86_64 and aarch64 Linux and on macOS 11 or later
+(Apple silicon or Intel). <code>install.sh</code> picks the release build to match the
+machine.</p>
+<h2 id="install-the-prerequisites"><a class="header" href="#install-the-prerequisites">Install the prerequisites</a></h2>
+<p>On Debian and Ubuntu:</p>
+<pre><code class="language-bash">sudo apt install libxkbcommon0 libwayland-client0 libegl1 libgl1-mesa-dri
+</code></pre>
+<p>On RHEL, Rocky, Alma and Fedora:</p>
+<pre><code class="language-bash">sudo dnf install libxkbcommon libwayland-client libglvnd-egl mesa-dri-drivers
+</code></pre>
+<p>None are needed on macOS.</p>
+<h2 id="install-the-release"><a class="header" href="#install-the-release">Install the release</a></h2>
+<pre><code class="language-bash">curl -sSfL https://raw.githubusercontent.com/gilesknap/archiveview/main/install.sh | bash
+</code></pre>
+<p>This installs into <code>~/.local</code> (set <code>PREFIX</code> to choose another place):</p>
+<div class="table-wrapper"><table><thead><tr><th>file</th><th>what</th></tr></thead><tbody>
+<tr><td><code>bin/archiveview</code></td><td>the plotter</td></tr>
+<tr><td><code>bin/archiveview-ssh</code></td><td>runs the plotter with software OpenGL, for <code>ssh -X</code>; see <a href="how-to/software-rendering.html">Run over ssh</a></td></tr>
+<tr><td><code>bin/archiveview-mockarchiver</code></td><td>a mock Archiver Appliance with synthetic history; see <a href="how-to/../reference/mockarchiver.html">Mock archiver</a></td></tr>
+<tr><td><code>share/archiveview/</code></td><td>the README, licence and <code>THIRD_PARTY_LICENSES.txt</code></td></tr>
+</tbody></table>
+</div>
+<p>The Linux binaries are linked against glibc 2.28, so they run on RHEL 8+,
+Ubuntu 20.04+ and Debian 10+.</p>
+<p>Run from inside an unpacked release tarball, <code>install.sh</code> installs that
+tarball rather than downloading one.</p>
+<h2 id="put-it-on-your-path"><a class="header" href="#put-it-on-your-path">Put it on your PATH</a></h2>
+<p>On macOS <code>~/.local/bin</code> is not on <code>PATH</code> by default; add this to <code>~/.zshrc</code>:</p>
+<pre><code class="language-bash">export PATH=$HOME/.local/bin:$PATH
+</code></pre>
+<h2 id="upgrade-or-remove"><a class="header" href="#upgrade-or-remove">Upgrade or remove</a></h2>
+<p>Run the install command again to upgrade. To remove archiveview, delete the
+<code>bin/archiveview*</code> files and <code>share/archiveview</code> from <code>~/.local</code>. Your saved
+views and settings are in <code>~/.config/archiveview</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="connect-to-an-archiver-and-iocs"><a class="header" href="#connect-to-an-archiver-and-iocs">Connect to an archiver and IOCs</a></h1>
+<p>archiveview reads history from an Archiver Appliance over HTTP and live
+values from IOCs over Channel Access or PV Access. Either can be left out:
+with no archiver it plots live values only, and a PV the archiver does not
+know about still plots live.</p>
+<h2 id="point-it-at-the-archiver"><a class="header" href="#point-it-at-the-archiver">Point it at the archiver</a></h2>
+<p>Pass the appliance's <strong>retrieval</strong> URL, normally port 17668:</p>
+<pre><code class="language-bash">archiveview --archiver http://archiver.example.org:17668 SR-DI-DCCT-01:SIGNAL
+</code></pre>
+<p><code>/retrieval</code> is added for you, so <code>http://host:17668</code> and
+<code>http://host:17668/retrieval</code> mean the same. A single-container appliance
+that serves everything on one port works the same way, e.g.
+<code>http://host:17665</code>. See <a href="how-to/../reference/archiver-api.html">The archiver URL and API</a>.</p>
+<p>To avoid typing it each time, put it in <code>settings.json</code>:</p>
+<pre><code class="language-json">{ "archiver_url": "http://archiver.example.org:17668" }
+</code></pre>
+<p>in <code>~/.config/archiveview/</code> (see <a href="how-to/../reference/config.html">Config files</a>).
+<code>--archiver</code> on the command line wins over the file.</p>
+<h2 id="reach-the-iocs"><a class="header" href="#reach-the-iocs">Reach the IOCs</a></h2>
+<p>Live values use the standard EPICS client environment variables, as any CA
+or PVA client does:</p>
+<pre><code class="language-bash">export EPICS_CA_ADDR_LIST="10.0.0.10" EPICS_CA_AUTO_ADDR_LIST=NO
+export EPICS_PVA_ADDR_LIST="10.0.0.10" EPICS_PVA_AUTO_ADDR_LIST=NO
+</code></pre>
+<p>A PV name with no prefix uses Channel Access. Prefix it with <code>pva://</code> for PV
+Access, e.g. <code>pva://bl01t:SUM</code>. The other prefixes of bobview's <code>pv</code> crate
+also work for live values (<code>sim://sine</code>, <code>loc://name</code>), which is handy for
+trying the plot out; the archiver is asked only about plain names.</p>
+<p>archiveview never writes to PVs.</p>
+<h2 id="check-what-is-happening"><a class="header" href="#check-what-is-happening">Check what is happening</a></h2>
+<p>The plot's chips show a PV's state: a spinner while its history loads, a
+grey "—" when it is disconnected (hover for the reason), and a "live only"
+mark when the archiver has no record of it (HTTP 404). For more detail run
+with <code>ARCHIVEVIEW_LOG=debug</code>, which logs every archiver request.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="find-and-add-pvs"><a class="header" href="#find-and-add-pvs">Find and add PVs</a></h1>
+<h2 id="search-the-archiver"><a class="header" href="#search-the-archiver">Search the archiver</a></h2>
+<p>Press <code>/</code>, or click the search box at the left of the bar, and type part of
+a name. After a short pause the box lists the archiver's matching PVs:</p>
+<ul>
+<li>The first row is highlighted: <code>↑</code>/<code>↓</code> move through the list, <code>Enter</code> adds
+the highlighted row, and a click adds the one clicked.</li>
+<li>A PV whose name is exactly what you typed is always the first row, so
+typing a full name and pressing <code>Enter</code> adds that PV, even when other
+names containing it sort before it.</li>
+<li><code>Esc</code> closes the list, and a second <code>Esc</code> clears the box.</li>
+</ul>
+<div class="table-wrapper"><table><thead><tr><th>you type</th><th>archiver is asked for (regex)</th><th>matches</th></tr></thead><tbody>
+<tr><td><code>dcct</code></td><td><code>(?i).*dcct.*</code></td><td>any name containing <code>dcct</code>, in any case (<code>SR-DI-DCCT-01:SIGNAL</code>)</td></tr>
+<tr><td><code>ES{Dif}</code></td><td><code>(?i).*ES\{Dif\}.*</code></td><td>as written: <code>{</code>, <code>(</code>, <code>.</code>, <code>+</code> and the like match only themselves</td></tr>
+<tr><td><code>SR-DI-*:SIGNAL</code></td><td><code>SR-DI-.*:SIGNAL</code></td><td>the whole name, with case; <code>*</code> is any run of characters</td></tr>
+<tr><td><code>BL0?T*</code></td><td><code>BL0.T.*</code></td><td><code>?</code> is any one character</td></tr>
+</tbody></table>
+</div>
+<p>Text without <code>*</code> or <code>?</code> is searched as a substring, ignoring case. With <code>*</code>
+or <code>?</code> it is a glob: it must match the whole name, case and all, and every
+other character stands for itself.</p>
+<p>Click the <code>.*</code> toggle inside the box to type a Java regular expression
+instead. It must match the <strong>whole</strong> name: <code>SR-DI</code> matches nothing, while
+<code>SR-DI.*</code> works. Start it with <code>(?i)</code> to ignore case.</p>
+<p>The list shows the first 50 matches; type more of the name to narrow it.</p>
+<h2 id="add-a-pv-the-archiver-doesnt-know"><a class="header" href="#add-a-pv-the-archiver-doesnt-know">Add a PV the archiver doesn't know</a></h2>
+<p>Type the full name: as well as any archived matches, the list ends with an
+<strong>Add "…" as typed</strong> row. Highlight it with <code>↓</code> (or click it) and press
+<code>Enter</code>. The text is added as written, so this is how to add a PV that is
+not archived; it plots live only. A PV Access or simulated name
+(<code>pva://name</code>, <code>sim://sine</code>), or several names separated by spaces or
+commas, can only be added as typed, so that row comes first and <code>Enter</code>
+adds it straight away.</p>
+<h2 id="add-pvs-from-the-command-line"><a class="header" href="#add-pvs-from-the-command-line">Add PVs from the command line</a></h2>
+<p>Name them after the options:</p>
+<pre><code class="language-bash">archiveview --archiver http://archiver:17668 SR-DI-DCCT-01:SIGNAL SR-DI-DCCT-01:LIFETIME
+</code></pre>
+<p>Globs are not expanded on the command line; each argument is one PV.</p>
+<h2 id="remove-or-hide-a-pv"><a class="header" href="#remove-or-hide-a-pv">Remove or hide a PV</a></h2>
+<p>Each PV has a chip along the bottom of the plot. Click a chip to hide its
+trace (the dot turns hollow) and again to show it. Hover a chip to highlight
+its trace, and click its <code>✕</code> to remove it.</p>
+<h2 id="with-no-archiver"><a class="header" href="#with-no-archiver">With no archiver</a></h2>
+<p>Without <code>--archiver</code> or a saved <code>archiver_url</code>, there is nothing to search:
+the only row is <strong>Add "…" as typed</strong>, so type full names and press <code>Enter</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="navigate-the-plot"><a class="header" href="#navigate-the-plot">Navigate the plot</a></h1>
+<p>Everything happens on the plot itself; there are no axis dialogs. The full
+list is in <a href="how-to/../reference/controls.html">Gestures and keys</a>.</p>
+<h2 id="choose-a-time-range"><a class="header" href="#choose-a-time-range">Choose a time range</a></h2>
+<p>The pill in the bar holds the presets <strong>1h</strong>, <strong>8h</strong>, <strong>1d</strong> and <strong>7d</strong>. A
+preset shows that span ending now, following the current time.</p>
+<p>The <strong>⋯</strong> segment opens a small popover for anything else: type a span such
+as <code>90m</code>, <code>2 days</code> or <code>1 hour 30 min</code>, or give a start and an end date-time.</p>
+<p>When you have zoomed or panned away from a preset, no segment is lit and the
+pill shows the span you are looking at, such as <code>3h 20m</code>.</p>
+<h2 id="pan-and-zoom-time"><a class="header" href="#pan-and-zoom-time">Pan and zoom time</a></h2>
+<ul>
+<li><strong>Drag</strong> the plot left or right to pan. Let go while moving and it glides
+to a stop.</li>
+<li><strong>Scroll</strong>, or pinch on a trackpad, to zoom about the pointer.</li>
+<li>A horizontal trackpad swipe pans.</li>
+<li><code>←</code> and <code>→</code> pan by a tenth of the span; <code>+</code> and <code>-</code> zoom about the middle.</li>
+</ul>
+<h2 id="zoom-to-a-box"><a class="header" href="#zoom-to-a-box">Zoom to a box</a></h2>
+<p>Right-drag, or shift-drag, a box over the part you want. Both the time and
+value axes zoom to it.</p>
+<h2 id="zoom-values"><a class="header" href="#zoom-values">Zoom values</a></h2>
+<p>The value axis scales itself to the visible data, including the min/max
+bands. Traces with different units each get their own axis (up to three: the
+first on the left, the others on the right, labelled in the trace's colour).
+The left axis is the one you can set yourself; the others always scale
+themselves:</p>
+<ul>
+<li><strong>Drag</strong> on the value axis (the labels on the left) to pan values, or
+shift- or ctrl-<strong>scroll</strong> over the plot to zoom them.</li>
+<li>Doing either turns autoscale off. The <strong>⤢</strong> button, or <code>A</code>, turns it back on.</li>
+</ul>
+<h2 id="follow-now-or-look-at-the-past"><a class="header" href="#follow-now-or-look-at-the-past">Follow now, or look at the past</a></h2>
+<p>While the plot follows the current time, the <strong>● Live</strong> pill shows a red dot
+and new values appear at the right edge. Panning or zooming into the past
+stops following. Click the pill, press <code>L</code>, or drag back to the right edge to
+follow again.</p>
+<h2 id="read-values"><a class="header" href="#read-values">Read values</a></h2>
+<p>Hover over the plot. A vertical hairline follows the pointer, with a card
+showing the time and each visible trace's value there, with its units,
+coloured by alarm severity when it is in alarm. Where the archiver has
+thinned the data into bins, the card also shows the bin's min and max.</p>
+<h2 id="start-again"><a class="header" href="#start-again">Start again</a></h2>
+<p>Double-click the plot, press <code>Home</code>, or click <strong>⌂</strong>: the time range returns
+to the last preset and autoscale turns on.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="save-and-load-views"><a class="header" href="#save-and-load-views">Save and load views</a></h1>
+<p>A view is the set of PVs on the plot (with their colours and whether they
+are shown), the time range and the value-axis settings. Views are saved as
+small JSON files in <code>~/.config/archiveview/views/</code>, one per name.</p>
+<h2 id="save-a-view"><a class="header" href="#save-a-view">Save a view</a></h2>
+<p>Open the <strong>≡</strong> menu at the right of the bar. Under the <strong>Views</strong> heading:</p>
+<ul>
+<li><strong>Save NAME</strong> saves over the view you opened.</li>
+<li>The <strong>Save as…</strong> field: type a name and press Enter (or <strong>Save</strong>). Names can't be empty, start with <code>.</code>, or
+contain <code>/</code> or <code>\</code>.</li>
+<li><strong>Save as default</strong> saves to <code>default</code>, which opens when archiveview
+starts with no PVs and no <code>--view</code>.</li>
+</ul>
+<h2 id="open-or-delete-a-view"><a class="header" href="#open-or-delete-a-view">Open or delete a view</a></h2>
+<p><strong>≡ ▸ Open ▸ NAME</strong> opens a saved view (the default is listed first).
+<strong>≡ ▸ Delete ▸ NAME</strong> removes one. From the command line:</p>
+<pre><code class="language-bash">archiveview --view beam
+</code></pre>
+<h2 id="keep-the-default-up-to-date"><a class="header" href="#keep-the-default-up-to-date">Keep the default up to date</a></h2>
+<p><strong>Save default on exit</strong> (under Views in the ≡ menu) is on unless you turn
+it off: archiveview saves the current plot as <code>default</code> whenever you quit,
+so starting it with no PVs and no <code>--view</code> reopens it as you left it. The
+choice is kept in <code>settings.json</code>.</p>
+<h2 id="what-is-restored"><a class="header" href="#what-is-restored">What is restored</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>saved</th><th>restored as</th></tr></thead><tbody>
+<tr><td>a relative range (e.g. the last 8 hours)</td><td>that span ending now, following live</td></tr>
+<tr><td>an absolute range</td><td>exactly those start and end times</td></tr>
+<tr><td>autoscale off, with a min and max</td><td>that value range</td></tr>
+<tr><td>a trace's colour and hidden state</td><td>as saved</td></tr>
+</tbody></table>
+</div>
+<p>The archiver URL is not part of a view; it comes from <code>--archiver</code> or
+<code>settings.json</code>, so the same view works against another appliance.</p>
+<p>Views can be edited by hand or shared by copying the file; see
+<a href="how-to/../reference/config.html">Config files and the view format</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="run-over-ssh"><a class="header" href="#run-over-ssh">Run over ssh</a></h1>
+<p>archiveview draws with OpenGL. Two commands start it:</p>
+<div class="table-wrapper"><table><thead><tr><th>command</th><th>draws with</th><th>use it</th></tr></thead><tbody>
+<tr><td><code>archiveview</code></td><td>the machine's own OpenGL: the GPU, or whatever driver the desktop provides</td><td>normally: on a local desktop, a laptop, a Mac</td></tr>
+<tr><td><code>archiveview-ssh</code></td><td>Mesa in software, on the CPU of the machine archiveview runs on</td><td>when the OpenGL path can't work, such as over <code>ssh -X</code></td></tr>
+</tbody></table>
+</div>
+<p>Both take the same arguments. Start with <code>archiveview</code>, and switch to
+<code>archiveview-ssh</code> if it fails to start or draws nothing.</p>
+<h2 id="when-to-use-archiveview-ssh"><a class="header" href="#when-to-use-archiveview-ssh">When to use archiveview-ssh</a></h2>
+<ul>
+<li><strong>Over <code>ssh -X</code> or <code>-Y</code>.</strong> This is what it was named for. Forwarded OpenGL
+reaches your local X server as indirect GLX, which current X servers
+refuse, so <code>archiveview</code> exits with <code>glutin error: [2] BadValue</code>.</li>
+<li><strong>Where a GPU driver is installed but can't be used</strong>, for example a
+remote desktop, VNC or Xvfb session on a machine with an NVIDIA driver:
+glvnd picks NVIDIA's GL, which then has no GPU display to draw on.</li>
+<li><strong>Where the GPU driver is broken</strong> or misbehaves, as a workaround while
+you sort it out.</li>
+</ul>
+<p>There is no need for it on macOS or on Wayland or X11 desktops with working
+graphics. <code>--snapshot</code> needs neither: it draws without OpenGL or a display.</p>
+<h2 id="what-it-does"><a class="header" href="#what-it-does">What it does</a></h2>
+<p><code>archiveview-ssh</code> is a small script that runs <code>archiveview</code> with:</p>
+<ul>
+<li><code>LIBGL_ALWAYS_SOFTWARE=1</code>, so Mesa renders on the CPU (llvmpipe);</li>
+<li><code>__GLX_VENDOR_LIBRARY_NAME=mesa</code>, and <code>__EGL_VENDOR_LIBRARY_FILENAMES</code>
+pointing at Mesa's EGL vendor file, so libglvnd picks Mesa rather than a
+GPU vendor's library such as NVIDIA's.</li>
+</ul>
+<p>Over X forwarding the finished window then travels to your X server as
+plain images, which every X server accepts.</p>
+<p>Software rendering costs CPU on the machine running archiveview, and over
+<code>ssh -X</code> each redraw sends the whole window over the network. archiveview
+redraws only for your input, when new data arrives, and, while following
+now, at the pace the time axis scrolls, so this is usually quick enough.</p>
+<h2 id="requirement"><a class="header" href="#requirement">Requirement</a></h2>
+<p>Mesa must be installed where archiveview runs: <code>mesa-dri-drivers</code> on RHEL,
+<code>libgl1-mesa-dri</code> on Debian and Ubuntu (both are in the
+<a href="how-to/install.html">install prerequisites</a>).</p>
+<h2 id="example"><a class="header" href="#example">Example</a></h2>
+<pre><code class="language-bash">ssh -X control-host
+archiveview-ssh --archiver http://archiver:17668 SR-DI-DCCT-01:SIGNAL
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="take-snapshots"><a class="header" href="#take-snapshots">Take snapshots</a></h1>
+<p><code>--snapshot</code> renders the plot to a PNG without opening a window, then
+exits. It needs no display and no GPU, so it works in CI, over ssh and in
+containers. Use it for documentation, regression checks, and reports.</p>
+<pre><code class="language-bash">archiveview --archiver http://archiver:17668 --snapshot beam.png --range 7d SR-DI-DCCT-01:SIGNAL
+</code></pre>
+<p>Everything else on the command line applies as usual: the PVs, <code>--view</code>,
+<code>--range</code> and the archiver.</p>
+<h2 id="size-scale-and-theme"><a class="header" href="#size-scale-and-theme">Size, scale and theme</a></h2>
+<pre><code class="language-bash">archiveview --snapshot out.png --size 1920x1080 ...
+archiveview --snapshot out.png --scale-factor 2 ...      # as on a high-DPI screen
+archiveview --snapshot out.png --theme dark ...
+</code></pre>
+<p><code>--size</code> is in pixels and defaults to <code>1280x800</code>. Snapshots use the light
+theme unless <code>--theme dark</code> is given.</p>
+<h2 id="wait-for-data"><a class="header" href="#wait-for-data">Wait for data</a></h2>
+<p>The snapshot is taken after <code>--wait</code> seconds (default 2), and not before
+every archive request has finished, so history is always drawn. It gives up
+waiting after 60 seconds. Raise <code>--wait</code> to give live PVs time to connect
+and gather a few values:</p>
+<pre><code class="language-bash">archiveview --snapshot out.png --wait 5 --range 10m bl01t:SUM
+</code></pre>
+<h2 id="what-ci-does"><a class="header" href="#what-ci-does">What CI does</a></h2>
+<p>CI starts the <a href="how-to/../reference/mockarchiver.html">mock archiver</a> and
+<code>bobview-testioc</code>, then snapshots a set of views and uploads them as the
+<code>snapshots</code> artifact of each run:</p>
+<pre><code class="language-bash">archiveview-mockarchiver --port 17668 &amp;
+bobview-testioc &amp;
+export EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO
+archiveview --archiver http://127.0.0.1:17668 --snapshot snapshots/mock-1h.png \
+    --size 1280x800 --wait 5 --range 1h MOCK:SINE MOCK:NOISE MOCK:NAN
+archiveview --archiver http://127.0.0.1:17668 --snapshot snapshots/empty.png --size 1280x800
+kill %1 %2
+</code></pre>
+<p>The set covers the empty state, a short and a long range (raw steps and
+min/max bands), the dark theme, a live trace joining its history, a narrow
+window and a plot with no archiver. See <code>.github/workflows/ci.yml</code> for the
+full list. Look at them, rather than only checking they were written: the
+plot should fill the window, bands should shade binned data, the time labels
+should read well and the chips should be tidy.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="embed-the-plot-in-an-egui-app"><a class="header" href="#embed-the-plot-in-an-egui-app">Embed the plot in an egui app</a></h1>
+<p>The plot is a library widget, <code>archiveview::Plot</code>, and the <code>archiveview</code>
+program is a thin window around it. Any egui 0.36 app can show one, and as
+many as it likes; bobview is meant to use it for its trend windows.</p>
+<pre><code class="language-toml">[dependencies]
+# default-features = false: just the widget, without the standalone app's
+# eframe, png and clap
+archiveview = { git = "https://github.com/gilesknap/archiveview", default-features = false }
+pv = { package = "bobview-pv", version = "1.8" }
+egui = "0.36.2"
+</code></pre>
+<p>The host must use the <strong>same <code>pv</code> crate</strong> as archiveview, the <code>bobview-pv</code>
+package: Cargo treats two packages with different names as different
+crates, even from the same source, so a <code>PvManager</code> from a path dependency
+on a package called <code>pv</code> cannot be passed to <code>Plot::new</code>. bobview itself
+therefore names its in-tree crate's package <code>bobview-pv</code> (keeping <code>pv</code> as
+the name it is imported by) and points the published one at it:</p>
+<pre><code class="language-toml"># bobview's workspace Cargo.toml
+[patch.crates-io]
+bobview-pv = { path = "crates/pv" }
+</code></pre>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use archiveview::{ArchiverClient, Plot};
+
+// once, in the app's constructor; share the app's own PvManager
+let pvs = pv::PvManager::new();
+let archiver = ArchiverClient::new("http://archiver:17668").ok();
+let mut plot = Plot::new(&amp;pvs, archiver);
+plot.add_pvs(&amp;["SR-DI-DCCT-01:SIGNAL".to_string()]);
+
+// each frame, e.g. inside an egui::Window: give it a size, as the plot
+// fills whatever space it is offered (at least 360 x 200)
+egui::Window::new(plot.title())
+    .id(egui::Id::new("trend-1"))
+    .default_size([720.0, 420.0])
+    .resizable(true)
+    .show(ctx, |ui| plot.ui(ui));
+<span class="boring">}</span></code></pre></pre>
+<p>What the widget does, and doesn't, assume:</p>
+<ul>
+<li><strong>It uses the host's PV context.</strong> <code>Plot::new</code> takes the host's
+<code>pv::PvManager</code>, subscribes through it, and runs archive requests on that
+manager's tokio runtime. It starts no runtime or threads of its own.</li>
+<li><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
+bobview's trend window. <code>set_archiver</code> changes it later.</li>
+<li><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
+be open at once. <code>Plot::new</code> salts its ids with a running count;
+<code>Plot::with_id_salt(&amp;pvs, archiver, "trend-1")</code> uses the host's own salt,
+which keeps them stable when the host rebuilds its plots.</li>
+<li><strong>The host owns the look.</strong> The plot follows <code>ui.visuals()</code> (light or dark)
+and the host's fonts; it never sets the theme or installs fonts.</li>
+<li><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
+last drawn in, so a plot in its own native window is repainted, not the
+root one) and, while following now, at the pace the time axis scrolls.</li>
+</ul>
+<p>To save a plot in the host's own layout files, store <code>plot.view()</code> (it is
+<code>serde</code>-serialisable) and restore it with <code>plot.set_view(&amp;view)</code>.
+<code>plot.is_loading()</code> is true while archive requests are in flight.</p>
+<p>See the <a href="how-to/../reference/api.html">Rust API</a> for the full interface.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="build-from-source"><a class="header" href="#build-from-source">Build from source</a></h1>
+<p>You need a stable Rust toolchain (<a href="https://rustup.rs">rustup</a>).</p>
+<pre><code class="language-bash">git clone https://github.com/gilesknap/archiveview
+cd archiveview
+cargo build --release
+cargo test --workspace
+</code></pre>
+<p>The binaries are in <code>target/release</code>. To try a change against the mock
+archiver:</p>
+<pre><code class="language-bash">cargo run --bin archiveview-mockarchiver &amp;
+cargo run --bin archiveview -- --archiver http://127.0.0.1:17668 MOCK:SINE MOCK:NOISE
+</code></pre>
+<h2 id="build-for-rhel-8-and-other-older-linux"><a class="header" href="#build-for-rhel-8-and-other-older-linux">Build for RHEL 8 and other older Linux</a></h2>
+<p>With <a href="https://ziglang.org">zig</a> and
+<a href="https://github.com/rust-cross/cargo-zigbuild">cargo-zigbuild</a> installed,
+link against glibc 2.28 as the release builds do:</p>
+<pre><code class="language-bash">cargo zigbuild --release --workspace --target x86_64-unknown-linux-gnu.2.28
+</code></pre>
+<h2 id="build-these-docs"><a class="header" href="#build-these-docs">Build these docs</a></h2>
+<p>The docs are an <a href="https://rust-lang.github.io/mdBook/">mdBook</a>:</p>
+<pre><code class="language-bash">cargo install mdbook
+scripts/build-docs.sh serve --open
+</code></pre>
+<p>This builds the Rust API docs into the book under <code>api/</code>, then serves it;
+<code>mdbook serve</code> rebuilds and reloads the page as you edit. Run it again to
+pick up changes to the API docs. <code>scripts/build-docs.sh</code> alone builds the
+book into <code>docs/book</code>.</p>
+<h2 id="checks-ci-runs"><a class="header" href="#checks-ci-runs">Checks CI runs</a></h2>
+<pre><code class="language-bash">cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+</code></pre>
+<p>CI then snapshots the app against the mock archiver and <code>bobview-testioc</code>;
+see <a href="how-to/snapshots.html#what-ci-does">Take snapshots</a>.</p>
+<h2 id="how-the-docs-are-published"><a class="header" href="#how-the-docs-are-published">How the docs are published</a></h2>
+<p>The <code>Docs</code> workflow builds the book and the API docs on every pull request.
+On a push to <code>main</code> or a <code>v*</code> tag it publishes them to the <code>gh-pages</code> branch
+in a folder named after the branch or tag, writes <code>switcher.json</code> (the list
+of versions for the menu in the top bar) and leaves the other versions in
+place. The site's root redirects to <code>main/</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="make-a-release"><a class="header" href="#make-a-release">Make a release</a></h1>
+<p>Push a tag such as <code>v0.1.0</code>:</p>
+<pre><code class="language-bash">git tag v0.1.0
+git push origin v0.1.0
+</code></pre>
+<p>CI creates the GitHub Release itself and builds with the version taken from
+the tag, so <code>Cargo.toml</code> needs no bump. It builds on native runners for
+each platform (<code>ubuntu-24.04</code>, <code>ubuntu-24.04-arm</code> and macOS) and attaches an
+<code>archiveview-&lt;arch&gt;-&lt;os&gt;.tar.gz</code> for each, such as
+<code>archiveview-x86_64-linux.tar.gz</code> and <code>archiveview-aarch64-linux.tar.gz</code>.</p>
+<p>The Linux builds use <code>cargo zigbuild</code> to link against glibc 2.28, so they
+run on RHEL 8+, Ubuntu 20.04+ and Debian 10+. Each tarball carries
+<code>THIRD_PARTY_LICENSES.txt</code>, generated by <code>scripts/third-party-licenses.py</code>.
+<code>install.sh</code> downloads the latest release for the machine it runs on.</p>
+<p>The tag also publishes a copy of these docs at
+<code>https://gilesknap.github.io/archiveview/&lt;tag&gt;/</code>, which the version menu in the
+docs' top bar then lists beside <code>main</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="scope-and-how-it-differs-from-the-data-browser"><a class="header" href="#scope-and-how-it-differs-from-the-data-browser">Scope, and how it differs from the Data Browser</a></h1>
+<h2 id="what-archiveview-is-for"><a class="header" href="#what-archiveview-is-for">What archiveview is for</a></h2>
+<p>Looking at how PVs have behaved: what the beam current did overnight, when a
+vacuum gauge started to climb, whether a motor's readback settled. You name
+some PVs, choose a time range, and read the plot. For that it needs:</p>
+<ul>
+<li>history from an EPICS Archiver Appliance, and live values from Channel
+Access or PV Access, as one line per PV;</li>
+<li>several PVs on one shared time axis;</li>
+<li>fast pan and zoom from a week down to seconds;</li>
+<li>reading exact values and times off the plot;</li>
+<li>saving a set of PVs and a range to come back to.</li>
+</ul>
+<h2 id="what-it-leaves-out"><a class="header" href="#what-it-leaves-out">What it leaves out</a></h2>
+<p>The Phoebus Data Browser does a great deal more, and exposes it through
+property sheets, trace tables, axis configuration dialogs, archive data
+source lists and long context menus. archiveview has none of these. In v1 it
+also leaves out:</p>
+<ul>
+<li>choosing value axes by hand (traces get one per unit, up to three);</li>
+<li>exporting data (CSV, spreadsheet);</li>
+<li>statistics, formulas and waveform views;</li>
+<li><code>.plt</code> files;</li>
+<li>more than one archiver at a time.</li>
+</ul>
+<p>Some of these may come later, but only where they can be done without
+bringing back the configuration panels.</p>
+<h2 id="how-it-feels-instead"><a class="header" href="#how-it-feels-instead">How it feels instead</a></h2>
+<p>archiveview takes its cues from modern charting tools such as Grafana,
+TradingView and Apple Stocks:</p>
+<ul>
+<li><strong>The plot is the interface.</strong> It fills the window; a slim bar holds
+search, the time-range pill, the live toggle and two buttons.</li>
+<li><strong>Direct manipulation</strong> replaces settings. Drag to pan, scroll or pinch to
+zoom, drag a box, drag the value axis; double-click to go back.</li>
+<li><strong>Read by hovering.</strong> A crosshair card shows every trace's value, units and
+severity at the pointer's time.</li>
+<li><strong>Traces are chips</strong>, not table rows: click to hide, hover to highlight, ✕
+to remove.</li>
+<li><strong>Sensible defaults</strong> stand in for options: autoscale over what is
+visible, colours from a palette that works on light and dark backgrounds,
+min/max bands wherever the archiver has thinned the data, and time labels
+that adapt from <code>14:30</code> to <code>Tue 17</code> to <code>Oct</code>.</li>
+</ul>
+<h2 id="relationship-to-bobview"><a class="header" href="#relationship-to-bobview">Relationship to bobview</a></h2>
+<p>archiveview shares bobview's look, fonts, palette and PV library, and its
+plot widget is meant to replace bobview's own trend window, so a trend
+opened from a bobview display gains history from the archiver.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
+<h2 id="crates"><a class="header" href="#crates">Crates</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>crate</th><th>what</th></tr></thead><tbody>
+<tr><td><code>archiver</code> (package <code>archiveview-archiver</code>)</td><td>the Archiver Appliance retrieval client: builds URLs, makes blocking HTTP requests, and decodes the JSON tolerantly. It knows nothing of egui or live PVs.</td></tr>
+<tr><td><code>archiveview</code></td><td>the <code>Plot</code> widget, the standalone app around it (window, menu, saved views, settings), snapshot mode and the command line</td></tr>
+<tr><td><code>mockarchiver</code> (package <code>archiveview-mockarchiver</code>)</td><td>a synthetic Archiver Appliance for tests, CI and demos</td></tr>
+</tbody></table>
+</div>
+<p>Live values come from bobview's <a href="https://crates.io/crates/bobview-pv"><code>pv</code></a>
+crate (published as <code>bobview-pv</code>), which speaks Channel Access and PV Access
+in pure Rust and runs its own small tokio runtime.</p>
+<p>The mock deliberately shares no code with the client, so the client's tests
+exercise the real wire format, including its oddities, rather than a common
+definition of it.</p>
+<h2 id="from-the-time-range-to-pixels"><a class="header" href="#from-the-time-range-to-pixels">From the time range to pixels</a></h2>
+<pre><code> user input ──► Plot (time range, value range, traces)
+                 │  range changed? ──300 ms debounce──► archive fetch per trace
+                 │                                       (on the pv runtime, blocking HTTP)
+                 │  ◄─────────── result + repaint ◄──────┘
+                 │
+ pv::Pv ──listener──► live ring buffer per trace (IOC timestamps)
+                 │
+                 ▼
+ each frame: history (cut at the first live sample) + live
+             → thinned to pixel columns → drawn
+</code></pre>
+<h3 id="fetching-history"><a class="header" href="#fetching-history">Fetching history</a></h3>
+<p>When the time range changes (a preset, a pan, a zoom, or the live view
+scrolling on), the plot waits 300 ms for things to settle, then asks the
+archiver for each PV's history over the visible range plus a quarter of the
+span either side, so small pans show data straight away. Each trace has at
+most one request in flight; a newer one makes older answers stale, and they
+are dropped when they arrive. The old history stays on screen until the new
+one lands, so nothing flickers.</p>
+<p>For scalar numeric PVs the request is wrapped in the appliance's
+<code>optimized_N</code> operator, with N twice the plot's width in device pixels (at
+most 4000). The appliance then decides:</p>
+<ul>
+<li>if the range holds no more than N samples, it returns them raw, drawn as
+steps (each value holds until the next sample, which is what an archived
+sample means);</li>
+<li>otherwise it returns N bins, each with the mean, min, max and count,
+drawn as the mean line over a translucent min..max band.</li>
+</ul>
+<p>So the amount of data sent is bounded by the plot's width, not the time
+range: a week of a 10 Hz PV costs the same as an hour.</p>
+<p>Waveforms, strings and enums are fetched raw (the first element of a
+waveform, an enum's index). The plot asks the archiver's <code>getMetadata</code> once
+per PV to learn its type, and falls back to the shape of the first response.</p>
+<h3 id="joining-live-values"><a class="header" href="#joining-live-values">Joining live values</a></h3>
+<p>Each trace subscribes to its PV through the <code>pv</code> crate and records every
+update into a ring buffer, stamped with the <strong>IOC's timestamp</strong>, the same
+clock the archiver stored, so the two line up. History is cut at the first
+live sample, so at the right edge the live values always win, and since both
+are drawn as steps the join is seamless. A disconnect records a gap.</p>
+<p>While the plot follows now, the history behind the live values is topped up:
+raw history every 30 seconds or so, by fetching only what is new since its
+last sample; binned history by fetching the (bounded) window again, but only
+once time has moved on by a few bins, so a week-long view asks the archiver
+for its week of bins every half hour, not every 30 seconds. Each
+trace has at most one request to the archiver at a time.</p>
+<h3 id="drawing"><a class="header" href="#drawing">Drawing</a></h3>
+<p>Each frame, the visible part of every trace is thinned to at most four
+points per pixel column (first, min, max, last), which keeps every peak
+while drawing a bounded number of segments. Gaps (NaN values, and the
+archiver's disconnection markers) break the line. Autoscale covers the
+visible values including the bands, and the value axes animate to their new
+ranges. Traces with different units get a value axis each (up to three), so
+a current in mA and a voltage of a few volts are both readable.</p>
+<h2 id="the-widget-and-the-app"><a class="header" href="#the-widget-and-the-app">The widget and the app</a></h2>
+<p><code>archiveview::Plot</code> holds everything about one plot and nothing global, so
+several can share one window or one program, and it borrows the host's PV
+manager and runtime. <code>ArchiveApp</code> wraps one plot with the window chrome:
+fonts, theme, the ≡ menu, and loading and saving views and settings in
+<code>~/.config/archiveview</code>. <code>main.rs</code> adds the command line and either opens a
+window or renders a snapshot.</p>
+<h2 id="snapshots"><a class="header" href="#snapshots">Snapshots</a></h2>
+<p><code>--snapshot</code> runs the same app in a bare egui context with no window, waits
+for the archive requests to finish, then draws egui's triangles with a small
+software rasteriser into a PNG. It is bobview's snapshot mode.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="command-line"><a class="header" href="#command-line">Command line</a></h1>
+<pre><code>archiveview [OPTIONS] [PV ...]
+archiveview-mockarchiver [--port PORT] [--bind ADDR]
+</code></pre>
+<p><code>archiveview --help</code> prints the same list.</p>
+<h2 id="archiveview-1"><a class="header" href="#archiveview-1">archiveview</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>argument</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>PV ...</code></td><td>PVs to plot. A plain name is Channel Access; <code>pva://name</code> is PV Access. With PVs given, archiveview starts a new view of them rather than opening the default view.</td></tr>
+<tr><td><code>-a</code>, <code>--archiver URL</code></td><td>the Archiver Appliance retrieval URL, e.g. <code>http://host:17668</code>. Phoebus's <code>pbraw://host:17668/retrieval</code> works too, as plain HTTP. <code>/retrieval</code> is added unless the URL ends with it. Overrides <code>archiver_url</code> in <code>settings.json</code>; with neither, the plot is live only.</td></tr>
+<tr><td><code>--no-archiver</code></td><td>use no archiver, even if <code>settings.json</code> names one: live values only.</td></tr>
+<tr><td><code>--view NAME</code></td><td>open the saved view <code>NAME</code> from <code>~/.config/archiveview/views/</code>. Giving PVs as well is a usage error.</td></tr>
+<tr><td><code>-r</code>, <code>--range SPAN</code></td><td>the time span to show, ending now: <code>1h</code>, <code>8h</code>, <code>7d</code>, <code>90m</code>, <code>2 days</code>, <code>1 hour 30 min</code>. Default <code>1h</code>.</td></tr>
+<tr><td><code>--theme system|light|dark</code></td><td>the colour theme. Default: <code>theme</code> in <code>settings.json</code>, else <code>system</code> (follow the OS).</td></tr>
+<tr><td><code>--ui-scale F</code></td><td>scale the whole interface by <code>F</code>, e.g. <code>1.25</code>. Default: <code>ARCHIVEVIEW_UI_SCALE</code>, else <code>1</code>.</td></tr>
+<tr><td><code>--version</code>, <code>--help</code></td><td></td></tr>
+</tbody></table>
+</div>
+<h3 id="snapshot-mode"><a class="header" href="#snapshot-mode">Snapshot mode</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>argument</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>--snapshot OUT.png</code></td><td>render to a PNG without opening a window, then exit</td></tr>
+<tr><td><code>--size WxH</code></td><td>image size in pixels. Default <code>1280x800</code>.</td></tr>
+<tr><td><code>--scale-factor F</code></td><td>pixels per point, as on a high-DPI screen. Default <code>1</code>.</td></tr>
+<tr><td><code>--wait SECONDS</code></td><td>render at least this long before writing, and until archive requests finish (at most 60 s). Default <code>2</code>.</td></tr>
+<tr><td><code>--hover X,Y</code></td><td>rest the pointer at this pixel, to show the crosshair readout</td></tr>
+<tr><td><code>--search TEXT</code></td><td>type <code>TEXT</code> into the search box, to show its matches</td></tr>
+</tbody></table>
+</div>
+<p>Snapshots use the light theme unless <code>--theme dark</code> is given. See
+<a href="reference/../how-to/snapshots.html">Take snapshots</a>.</p>
+<h3 id="startup"><a class="header" href="#startup">Startup</a></h3>
+<ol>
+<li>PVs on the command line start a new view of those PVs, over <code>--range</code>.</li>
+<li>Otherwise <code>--view NAME</code> opens that view.</li>
+<li>Otherwise the saved <code>default</code> view opens, if there is one.</li>
+<li>Otherwise the plot starts empty, ready for a PV name.</li>
+</ol>
+<h3 id="exit-status"><a class="header" href="#exit-status">Exit status</a></h3>
+<p><code>0</code> on success, <code>2</code> for a usage error (an unknown option or a bad value),
+<code>1</code> for any other failure, such as a snapshot that can't be written. A
+<code>--view</code> that can't be read, or a bad archiver URL, is a usage error. Messages are printed as <code>archiveview: message</code>.</p>
+<h2 id="archiveview-mockarchiver"><a class="header" href="#archiveview-mockarchiver">archiveview-mockarchiver</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>argument</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>--port PORT</code></td><td>the port to serve on. Default <code>17668</code>.</td></tr>
+<tr><td><code>--bind ADDR</code></td><td>the address to listen on. Default <code>127.0.0.1</code>; use <code>0.0.0.0</code> to serve other machines.</td></tr>
+</tbody></table>
+</div>
+<p>It runs until killed. See <a href="reference/mockarchiver.html">Mock archiver</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="gestures-and-keys"><a class="header" href="#gestures-and-keys">Gestures and keys</a></h1>
+<h2 id="the-bar"><a class="header" href="#the-bar">The bar</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>control</th><th>what it does</th></tr></thead><tbody>
+<tr><td>search box</td><td>find archived PVs as you type; Enter adds. See <a href="reference/../how-to/search.html">Find and add PVs</a></td></tr>
+<tr><td><code>.*</code> (in the search box, shown while it has the focus)</td><td>search with a regular expression instead of a glob</td></tr>
+<tr><td>✕ (in the search box)</td><td>clear it</td></tr>
+<tr><td><strong>1h 8h 1d 7d</strong></td><td>show that span ending now, following live</td></tr>
+<tr><td><strong>⋯</strong></td><td>a custom span (<code>90m</code>, <code>2 days</code>) or a start and end date-time</td></tr>
+<tr><td><strong>● Live</strong></td><td>red dot while following now (it pulses for a few seconds, and while the pointer is over the plot); click to pause, or to jump to now and follow</td></tr>
+<tr><td><strong>⤢</strong></td><td>autoscale the value axis</td></tr>
+<tr><td><strong>⌂</strong></td><td>reset: back to the last preset, autoscale on</td></tr>
+<tr><td><strong>≡</strong></td><td>Log scale; then Views (Save NAME, the Save as… field, Save as default, Open ▸, Delete ▸, Save default on exit); then Theme; then a summary of the gestures</td></tr>
+</tbody></table>
+</div>
+<p>In a narrow window the presets become a drop-down, and ⤢ and ⌂ move into
+the ≡ menu.</p>
+<h2 id="on-the-plot"><a class="header" href="#on-the-plot">On the plot</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
+<tr><td>drag</td><td>pan time, with a glide after a quick release; stops following live</td></tr>
+<tr><td>scroll wheel, trackpad pinch</td><td>zoom time about the pointer</td></tr>
+<tr><td>horizontal trackpad swipe</td><td>pan time</td></tr>
+<tr><td>shift- or ctrl-scroll</td><td>zoom values about the pointer; turns autoscale off</td></tr>
+<tr><td>drag up or down on the value axis</td><td>zoom values; turns autoscale off</td></tr>
+<tr><td>right-drag, or shift-drag</td><td>zoom to the box, time and values</td></tr>
+<tr><td>double-click</td><td>reset</td></tr>
+<tr><td>hover</td><td>crosshair: a hairline (snapping to a nearby sample), a time tag on the axis, and a card with every visible trace's value as its line shows it there ("—" in a gap)</td></tr>
+</tbody></table>
+</div>
+<h2 id="legend-chips"><a class="header" href="#legend-chips">Legend chips</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>gesture</th><th>effect</th></tr></thead><tbody>
+<tr><td>click</td><td>hide or show the trace</td></tr>
+<tr><td>hover</td><td>highlight the trace and dim the others</td></tr>
+<tr><td>click ✕</td><td>remove the PV</td></tr>
+</tbody></table>
+</div>
+<p>A chip shows the latest value and units, a spinner while history loads, a
+grey "—" while disconnected, and a "live only" mark when the archiver has no
+history of the PV. Hover it for details.</p>
+<h2 id="keys"><a class="header" href="#keys">Keys</a></h2>
+<p>These work whenever no text box has the focus.</p>
+<div class="table-wrapper"><table><thead><tr><th>key</th><th>effect</th></tr></thead><tbody>
+<tr><td><code>/</code></td><td>focus the search box</td></tr>
+<tr><td><code>Esc</code></td><td>close the search list or popover; clear the search box</td></tr>
+<tr><td><code>←</code> <code>→</code></td><td>pan by a tenth of the span</td></tr>
+<tr><td><code>+</code> (or <code>=</code>) <code>-</code></td><td>zoom time in and out about the middle</td></tr>
+<tr><td><code>L</code></td><td>follow now, or stop following</td></tr>
+<tr><td><code>A</code></td><td>autoscale</td></tr>
+<tr><td><code>Home</code></td><td>reset</td></tr>
+</tbody></table>
+</div>
+<p>In the search list, <code>↑</code> <code>↓</code> move and <code>Enter</code> adds.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="environment-variables"><a class="header" href="#environment-variables">Environment variables</a></h1>
+<div class="table-wrapper"><table><thead><tr><th>variable</th><th>used by</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>ARCHIVEVIEW_LOG</code></td><td>archiveview</td><td>log level on stderr: <code>error</code>, <code>warn</code> (default), <code>info</code>, <code>debug</code> or <code>trace</code>. Below <code>debug</code>, the egui, eframe, winit and EPICS libraries log warnings only.</td></tr>
+<tr><td><code>ARCHIVEVIEW_UI_SCALE</code></td><td>archiveview</td><td>as <code>--ui-scale</code></td></tr>
+<tr><td><code>XDG_CONFIG_HOME</code></td><td>archiveview</td><td>the config folder is <code>$XDG_CONFIG_HOME/archiveview</code> when set, else <code>~/.config/archiveview</code></td></tr>
+<tr><td><code>EPICS_CA_ADDR_LIST</code>, <code>EPICS_CA_AUTO_ADDR_LIST</code>, <code>EPICS_CA_SERVER_PORT</code>, ...</td><td>live PVs</td><td>the standard Channel Access client settings</td></tr>
+<tr><td><code>EPICS_PVA_ADDR_LIST</code>, <code>EPICS_PVA_AUTO_ADDR_LIST</code>, ...</td><td>live PVs</td><td>the standard PV Access client settings, for <code>pva://</code> PVs</td></tr>
+<tr><td><code>LIBGL_ALWAYS_SOFTWARE</code> and friends</td><td>archiveview-ssh</td><td>set by the script; see <a href="reference/../how-to/software-rendering.html">Run over ssh</a></td></tr>
+</tbody></table>
+</div>
+<p>The archiver URL has no environment variable; use <code>--archiver</code> or
+<code>settings.json</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="config-files-and-the-view-format"><a class="header" href="#config-files-and-the-view-format">Config files and the view format</a></h1>
+<p>archiveview keeps its files in <code>$XDG_CONFIG_HOME/archiveview</code> when
+<code>XDG_CONFIG_HOME</code> is set, otherwise <code>~/.config/archiveview</code>:</p>
+<pre><code>~/.config/archiveview/
+├── settings.json
+└── views/
+    ├── default.json
+    └── beam.json
+</code></pre>
+<p>All are pretty-printed JSON, written atomically (to a hidden temporary file,
+then renamed), so a crash never leaves half a file. Unknown fields are
+ignored and missing ones take their defaults, so files can be edited by hand.</p>
+<h2 id="settingsjson"><a class="header" href="#settingsjson">settings.json</a></h2>
+<pre><code class="language-json">{
+  "archiver_url": "http://archiver.example.org:17668",
+  "theme": "system",
+  "save_default_on_exit": true
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>default</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>archiver_url</code></td><td>none</td><td>the archiver used when <code>--archiver</code> is not given</td></tr>
+<tr><td><code>theme</code></td><td><code>"system"</code></td><td><code>"system"</code> (follow the OS), <code>"light"</code> or <code>"dark"</code>; set from the ≡ menu</td></tr>
+<tr><td><code>save_default_on_exit</code></td><td><code>true</code></td><td>save the plot as the <code>default</code> view on quit, so the next start (with no PVs or <code>--view</code>) reopens where you left off</td></tr>
+</tbody></table>
+</div>
+<p>A missing or unreadable <code>settings.json</code> gives the defaults (an unreadable
+one logs a warning).</p>
+<h2 id="viewsnamejson"><a class="header" href="#viewsnamejson">views/NAME.json</a></h2>
+<pre><code class="language-json">{
+  "version": 1,
+  "pvs": [
+    { "name": "SR-DI-DCCT-01:SIGNAL" },
+    { "name": "pva://bl01t:SUM", "color": "#d62728", "visible": false }
+  ],
+  "range": { "kind": "relative", "secs": 28800 },
+  "y": { "autoscale": true }
+}
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th>field</th><th>meaning</th></tr></thead><tbody>
+<tr><td><code>version</code></td><td>the format version, <code>1</code>. A file with a newer version than the program knows is refused.</td></tr>
+<tr><td><code>pvs</code></td><td>the traces, in chip order</td></tr>
+<tr><td><code>pvs[].name</code></td><td>the PV as typed: <code>NAME</code>, <code>ca://NAME</code>, <code>pva://NAME</code>, <code>sim://sine</code>, ...</td></tr>
+<tr><td><code>pvs[].color</code></td><td><code>#rrggbb</code>; when absent, the palette colour for its position</td></tr>
+<tr><td><code>pvs[].visible</code></td><td><code>false</code> for a hidden trace; default <code>true</code></td></tr>
+<tr><td><code>range</code></td><td><code>{"kind": "relative", "secs": S}</code>: the last <code>S</code> seconds, following now; or <code>{"kind": "absolute", "start": "...", "end": "..."}</code> with RFC 3339 UTC times such as <code>"2026-10-17T09:00:00Z"</code></td></tr>
+<tr><td><code>y.autoscale</code></td><td>default <code>true</code></td></tr>
+<tr><td><code>y.min</code>, <code>y.max</code></td><td>the value range when <code>autoscale</code> is <code>false</code></td></tr>
+<tr><td><code>y.log</code></td><td><code>true</code> for a log value axis; default <code>false</code></td></tr>
+</tbody></table>
+</div>
+<p>View names can't be empty, start with <code>.</code>, or contain <code>/</code> or <code>\</code>. The view
+called <code>default</code> opens at startup when no PVs and no <code>--view</code> are given.</p>
+<p>A host app that embeds the plot gets the same structure from
+<code>Plot::view()</code> and can store it in its own files; see
+<a href="reference/../how-to/embed.html">Embed the plot</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="the-archiver-url-and-api"><a class="header" href="#the-archiver-url-and-api">The archiver URL and API</a></h1>
+<p>archiveview talks to the
+<a href="https://github.com/archiver-appliance/epicsarchiverap">EPICS Archiver Appliance</a>
+over its HTTP retrieval API. It needs only read access to retrieval; nothing
+on the management interface.</p>
+<h2 id="the-url"><a class="header" href="#the-url">The URL</a></h2>
+<p>Give the retrieval base, as for any retrieval client:</p>
+<div class="table-wrapper"><table><thead><tr><th><code>--archiver</code></th><th>becomes</th></tr></thead><tbody>
+<tr><td><code>http://host:17668</code></td><td><code>http://host:17668/retrieval</code></td></tr>
+<tr><td><code>http://host:17668/</code></td><td><code>http://host:17668/retrieval</code></td></tr>
+<tr><td><code>http://host:17668/retrieval</code></td><td>unchanged</td></tr>
+<tr><td><code>https://archiver.example.org/retrieval</code></td><td>unchanged (behind a proxy)</td></tr>
+</tbody></table>
+</div>
+<p>An appliance installed as separate Tomcats serves retrieval on port
+<strong>17668</strong> (17665 is management). The single-container quick-start
+appliance serves everything on 17665.</p>
+<h2 id="requests"><a class="header" href="#requests">Requests</a></h2>
+<p>With <code>R</code> the retrieval base:</p>
+<div class="table-wrapper"><table><thead><tr><th>purpose</th><th>request</th></tr></thead><tbody>
+<tr><td>history</td><td><code>R/data/getData.json?pv=OP(PV)&amp;from=T&amp;to=T</code></td></tr>
+<tr><td>search</td><td><code>R/bpl/getMatchingPVs?pv=GLOB&amp;limit=50</code>, or <code>regex=RE</code></td></tr>
+<tr><td>PV type</td><td><code>R/bpl/getMetadata?pv=PV</code>, once per PV</td></tr>
+</tbody></table>
+</div>
+<p>Times are sent in UTC as <code>2026-10-17T09:00:00.000Z</code>. <code>OP</code> is
+<code>optimized_N</code> for scalar numeric PVs, with N twice the plot's width in
+device pixels, at most 4000; other PVs are fetched raw. See
+<a href="reference/../explanations/architecture.html#fetching-history">Architecture</a>.</p>
+<h2 id="what-the-client-copes-with"><a class="header" href="#what-the-client-copes-with">What the client copes with</a></h2>
+<p>The appliance's JSON has some quirks, all handled:</p>
+<ul>
+<li><code>NaN</code>, <code>Infinity</code> and <code>-Infinity</code> appear as bare tokens, which is not valid
+JSON; they are read as gaps.</li>
+<li>A range with no data returns <code>[ ]</code>, with no metadata.</li>
+<li>Metadata values such as <code>PREC</code> may be strings (<code>"3"</code>) or numbers.</li>
+<li>The first sample may be earlier than <code>from</code>: it is the value in force at
+<code>from</code>, and is drawn held from the left edge.</li>
+<li><code>optimized</code> bins carry <code>[mean, std, min, max, count]</code> as the value,
+timestamped at the bin's centre.</li>
+<li>Severity 3 with a <code>cnxlostepsecs</code> field marks a lost connection, drawn as a
+gap.</li>
+</ul>
+<h2 id="errors"><a class="header" href="#errors">Errors</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>response</th><th>shown as</th></tr></thead><tbody>
+<tr><td>404 from <code>getData.json</code></td><td>the PV is not archived: it plots live only, and its chip says "live only"</td></tr>
+<tr><td>any other non-2xx</td><td>the status and the first line of the reply, on the chip and in the status line</td></tr>
+<tr><td>no connection</td><td>the transport error, likewise; live values carry on</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="mock-archiver"><a class="header" href="#mock-archiver">Mock archiver</a></h1>
+<p><code>archiveview-mockarchiver</code> is a small stand-in for an EPICS Archiver
+Appliance. It serves synthetic, deterministic history for a fixed set of PVs
+over the same HTTP API and JSON as the real appliance, quirks included. It
+is used by the tests, by CI's snapshots, and by the
+<a href="reference/../tutorials/quickstart.html">quick start</a>.</p>
+<pre><code class="language-bash">archiveview-mockarchiver                   # http://127.0.0.1:17668
+archiveview-mockarchiver --port 18000 --bind 0.0.0.0
+</code></pre>
+<p>Point archiveview at it with <code>--archiver http://127.0.0.1:17668</code>.</p>
+<h2 id="pvs"><a class="header" href="#pvs">PVs</a></h2>
+<p>History starts 30 days before the mock starts; there is no data before that.
+Values are computed from the time, so the same request always gets the same
+answer.</p>
+<div class="table-wrapper"><table><thead><tr><th>PV</th><th>signal</th></tr></thead><tbody>
+<tr><td><code>MOCK:SINE</code></td><td>1 Hz, a sine with a 10-minute period, units <code>mA</code>, precision 3</td></tr>
+<tr><td><code>MOCK:RAMP</code></td><td>0.1 Hz sawtooth, 0 to 100</td></tr>
+<tr><td><code>MOCK:NOISE</code></td><td>10 Hz noise</td></tr>
+<tr><td><code>MOCK:SLOW</code></td><td>one sample every 5 minutes, so <code>optimized</code> requests come back raw</td></tr>
+<tr><td><code>MOCK:ENUM</code></td><td>enum index, 0 to 3</td></tr>
+<tr><td><code>MOCK:STRING</code></td><td>text</td></tr>
+<tr><td><code>MOCK:WAVE</code></td><td>an 8-element waveform</td></tr>
+<tr><td><code>MOCK:NAN</code></td><td>a sine with <code>NaN</code> every 50th sample and periodic disconnections</td></tr>
+<tr><td><code>bl01t:A</code>, <code>bl01t:B</code>, <code>bl01t:SUM</code>, <code>BL01T-MO-SIMC-01:M1.RBV</code>, <code>BL01T-MO-SIMC-01:M2.RBV</code></td><td>the names <code>bobview-testioc</code> serves live, so history and live values join up</td></tr>
+</tbody></table>
+</div>
+<h2 id="endpoints"><a class="header" href="#endpoints">Endpoints</a></h2>
+<p>Every endpoint is on the one port.</p>
+<div class="table-wrapper"><table><thead><tr><th>endpoint</th><th>notes</th></tr></thead><tbody>
+<tr><td><code>/retrieval/data/getData.json</code></td><td><code>pv</code>, <code>from</code>, <code>to</code>. Operators: raw (with the last sample before <code>from</code>), <code>optimized_N</code>, <code>mean_N</code>, <code>nth_N</code>, <code>ncount</code>, and the <code>…Sample_N</code> variants that leave empty bins out</td></tr>
+<tr><td><code>/retrieval/bpl/getMatchingPVs</code></td><td><code>pv</code> (glob) or <code>regex</code>, <code>limit</code></td></tr>
+<tr><td><code>/retrieval/bpl/getMetadata</code></td><td><code>pv</code></td></tr>
+<tr><td><code>/mgmt/bpl/getAllPVs</code></td><td><code>pv</code> (comma-separated globs), <code>regex</code>, <code>limit</code></td></tr>
+</tbody></table>
+</div>
+<p>As the real appliance does, it answers 404 with an HTML page for an unknown
+PV, 400 for an unparseable time or <code>to</code> before <code>from</code>, writes <code>NaN</code> as a bare
+token, and marks disconnections with severity 3 and <code>cnxlostepsecs</code>.</p>
+<h2 id="in-rust-tests"><a class="header" href="#in-rust-tests">In Rust tests</a></h2>
+<p>The <code>mockarchiver</code> library starts one on a free port:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mock = mockarchiver::MockArchiver::start_local()?;
+let client = archiver::ArchiverClient::new(&amp;mock.url())?;
+<span class="boring">}</span></code></pre></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="rust-api"><a class="header" href="#rust-api">Rust API</a></h1>
+<p>The workspace's crates are documented with rustdoc, built into this book
+under <code>api/</code>.</p>
+<ul>
+<li><a href="reference/../api/archiveview/index.html"><code>archiveview</code></a>: the <code>Plot</code> widget to embed
+in an egui app (see <a href="reference/../how-to/embed.html">Embed the plot</a>), the standalone
+<code>ArchiveApp</code>, views, config and snapshot mode</li>
+<li><a href="reference/../api/archiver/index.html"><code>archiver</code></a>: the Archiver Appliance retrieval
+client: URLs, requests and tolerant JSON decoding</li>
+<li><a href="reference/../api/mockarchiver/index.html"><code>mockarchiver</code></a>: the mock appliance, for
+tests</li>
+</ul>
+<p>The crates are not published to crates.io and their API is not yet stable.</p>
+<p>In a local build the links work when the book is built with
+<code>scripts/build-docs.sh</code> (see <a href="reference/../how-to/build.html#build-these-docs">Build from source</a>),
+not with a plain <code>mdbook serve</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="licences"><a class="header" href="#licences">Licences</a></h1>
+<p>archiveview is Apache-2.0.</p>
+<p>The release binaries include third-party crates, among them bobview's <code>pv</code>
+crate and the <a href="https://github.com/epics-rs/epics-rs">epics-rs</a> CA and PVA
+libraries (EPICS-style open licence), and embed the Liberation Sans fonts
+and a symbol subset of Noto Sans Math (both SIL Open Font Licence) and
+egui's default fonts. Their notices are in <code>THIRD_PARTY_LICENSES.txt</code> in
+each release tarball, generated by <code>scripts/third-party-licenses.py</code>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="theme/switcher.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,296 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Embed the plot in an egui app - archiveview</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="A modern plotter for archived and live EPICS PVs">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/grid.css">
+        <link rel="stylesheet" href="../theme/sidebar.css">
+
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="../tutorials/quickstart.html"><strong aria-hidden="true">1.</strong> Quick start</a></li><li class="chapter-item expanded affix "><li class="part-title">How-to guides</li><li class="chapter-item expanded "><a href="../how-to/install.html"><strong aria-hidden="true">2.</strong> Install archiveview</a></li><li class="chapter-item expanded "><a href="../how-to/connect.html"><strong aria-hidden="true">3.</strong> Connect to an archiver and IOCs</a></li><li class="chapter-item expanded "><a href="../how-to/search.html"><strong aria-hidden="true">4.</strong> Find and add PVs</a></li><li class="chapter-item expanded "><a href="../how-to/navigate.html"><strong aria-hidden="true">5.</strong> Navigate the plot</a></li><li class="chapter-item expanded "><a href="../how-to/views.html"><strong aria-hidden="true">6.</strong> Save and load views</a></li><li class="chapter-item expanded "><a href="../how-to/software-rendering.html"><strong aria-hidden="true">7.</strong> Run over ssh</a></li><li class="chapter-item expanded "><a href="../how-to/snapshots.html"><strong aria-hidden="true">8.</strong> Take snapshots</a></li><li class="chapter-item expanded "><a href="../how-to/embed.html" class="active"><strong aria-hidden="true">9.</strong> Embed the plot in an egui app</a></li><li class="chapter-item expanded "><a href="../how-to/build.html"><strong aria-hidden="true">10.</strong> Build from source</a></li><li class="chapter-item expanded "><a href="../how-to/release.html"><strong aria-hidden="true">11.</strong> Make a release</a></li><li class="chapter-item expanded affix "><li class="part-title">Explanations</li><li class="chapter-item expanded "><a href="../explanations/scope.html"><strong aria-hidden="true">12.</strong> Scope, and how it differs from the Data Browser</a></li><li class="chapter-item expanded "><a href="../explanations/architecture.html"><strong aria-hidden="true">13.</strong> Architecture</a></li><li class="chapter-item expanded affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="../reference/cli.html"><strong aria-hidden="true">14.</strong> Command line</a></li><li class="chapter-item expanded "><a href="../reference/controls.html"><strong aria-hidden="true">15.</strong> Gestures and keys</a></li><li class="chapter-item expanded "><a href="../reference/environment.html"><strong aria-hidden="true">16.</strong> Environment variables</a></li><li class="chapter-item expanded "><a href="../reference/config.html"><strong aria-hidden="true">17.</strong> Config files and the view format</a></li><li class="chapter-item expanded "><a href="../reference/archiver-api.html"><strong aria-hidden="true">18.</strong> The archiver URL and API</a></li><li class="chapter-item expanded "><a href="../reference/mockarchiver.html"><strong aria-hidden="true">19.</strong> Mock archiver</a></li><li class="chapter-item expanded "><a href="../reference/api.html"><strong aria-hidden="true">20.</strong> Rust API</a></li><li class="chapter-item expanded "><a href="../reference/licences.html"><strong aria-hidden="true">21.</strong> Licences</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">archiveview</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/gilesknap/archiveview" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/gilesknap/archiveview/edit/main/docs/src/how-to/embed.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="embed-the-plot-in-an-egui-app"><a class="header" href="#embed-the-plot-in-an-egui-app">Embed the plot in an egui app</a></h1>
+<p>The plot is a library widget, <code>archiveview::Plot</code>, and the <code>archiveview</code>
+program is a thin window around it. Any egui 0.36 app can show one, and as
+many as it likes; bobview is meant to use it for its trend windows.</p>
+<pre><code class="language-toml">[dependencies]
+# default-features = false: just the widget, without the standalone app's
+# eframe, png and clap
+archiveview = { git = "https://github.com/gilesknap/archiveview", default-features = false }
+pv = { package = "bobview-pv", version = "1.8" }
+egui = "0.36.2"
+</code></pre>
+<p>The host must use the <strong>same <code>pv</code> crate</strong> as archiveview, the <code>bobview-pv</code>
+package: Cargo treats two packages with different names as different
+crates, even from the same source, so a <code>PvManager</code> from a path dependency
+on a package called <code>pv</code> cannot be passed to <code>Plot::new</code>. bobview itself
+therefore names its in-tree crate's package <code>bobview-pv</code> (keeping <code>pv</code> as
+the name it is imported by) and points the published one at it:</p>
+<pre><code class="language-toml"># bobview's workspace Cargo.toml
+[patch.crates-io]
+bobview-pv = { path = "crates/pv" }
+</code></pre>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use archiveview::{ArchiverClient, Plot};
+
+// once, in the app's constructor; share the app's own PvManager
+let pvs = pv::PvManager::new();
+let archiver = ArchiverClient::new("http://archiver:17668").ok();
+let mut plot = Plot::new(&amp;pvs, archiver);
+plot.add_pvs(&amp;["SR-DI-DCCT-01:SIGNAL".to_string()]);
+
+// each frame, e.g. inside an egui::Window: give it a size, as the plot
+// fills whatever space it is offered (at least 360 x 200)
+egui::Window::new(plot.title())
+    .id(egui::Id::new("trend-1"))
+    .default_size([720.0, 420.0])
+    .resizable(true)
+    .show(ctx, |ui| plot.ui(ui));
+<span class="boring">}</span></code></pre></pre>
+<p>What the widget does, and doesn't, assume:</p>
+<ul>
+<li><strong>It uses the host's PV context.</strong> <code>Plot::new</code> takes the host's
+<code>pv::PvManager</code>, subscribes through it, and runs archive requests on that
+manager's tokio runtime. It starts no runtime or threads of its own.</li>
+<li><strong>No archiver is fine.</strong> With <code>None</code> it plots live values only, like
+bobview's trend window. <code>set_archiver</code> changes it later.</li>
+<li><strong>No globals.</strong> Every plot keeps its own state and egui ids, so several can
+be open at once. <code>Plot::new</code> salts its ids with a running count;
+<code>Plot::with_id_salt(&amp;pvs, archiver, "trend-1")</code> uses the host's own salt,
+which keeps them stable when the host rebuilds its plots.</li>
+<li><strong>The host owns the look.</strong> The plot follows <code>ui.visuals()</code> (light or dark)
+and the host's fonts; it never sets the theme or installs fonts.</li>
+<li><strong>It repaints itself</strong> when archive data arrives (in the viewport it was
+last drawn in, so a plot in its own native window is repainted, not the
+root one) and, while following now, at the pace the time axis scrolls.</li>
+</ul>
+<p>To save a plot in the host's own layout files, store <code>plot.view()</code> (it is
+<code>serde</code>-serialisable) and restore it with <code>plot.set_view(&amp;view)</code>.
+<code>plot.is_loading()</code> is true while archive requests are in flight.</p>
+<p>See the <a href="../reference/api.html">Rust API</a> for the full interface.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../how-to/snapshots.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../how-to/build.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../how-to/snapshots.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../how-to/build.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/switcher.js"></script>
+
+
+    </div>
+    </body>
+</html>
