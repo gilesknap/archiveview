@@ -436,7 +436,7 @@ pub fn paint(plot: &Plot, ui: &egui::Ui, chips: &Chips, _data: &[Vec<Pt>], dark:
                 })
                 .collect();
             painter.add(egui::Shape::line(pts, Stroke::new(2.0, color)));
-            ui.ctx().request_repaint();
+            plot.repaint_after(ui.ctx(), std::time::Duration::ZERO);
         } else if t.visible {
             painter.circle_filled(dot, DOT / 2.0, color);
         } else {

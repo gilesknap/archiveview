@@ -568,8 +568,9 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         plot.fetcher
             .search(&plot.pvs, client, search, s.asked, plot.repaint.clone());
     } else if !text.is_empty() && text != s.searched && plot.archiver.is_some() {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(60));
+        // (`s` borrows the plot: its minimum by hand.)
+        let after = std::time::Duration::from_millis(60).max(plot.min_repaint);
+        ui.ctx().request_repaint_after(after);
     }
 
     // Enter picks the highlighted row. The box keeps the focus, the text
@@ -1359,8 +1360,7 @@ fn archiver_pill(plot: &mut Plot, ui: &mut egui::Ui, compact: bool, now: f64) {
                 pts,
                 Stroke::new(1.5, v.weak_text_color()),
             ));
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(50));
+            plot.repaint_after(ui.ctx(), std::time::Duration::from_millis(50));
         }
         ArchiverState::Reachable => {
             ui.painter()
