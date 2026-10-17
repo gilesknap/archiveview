@@ -337,6 +337,9 @@ fn search_box(plot: &mut Plot, ui: &mut egui::Ui, width: f32, now: f64) {
         } else {
             let all = CCursorRange::two(CCursor::new(0), CCursor::new(s.text.chars().count()));
             set_cursor(ui.ctx(), edit_id, all);
+            // Not a selection of the user's: the primary selection keeps
+            // theirs, to middle-click into the box.
+            plot.paste.selected = s.text.clone();
             s.select_all = ui.input(|i| i.pointer.any_down());
         }
     }

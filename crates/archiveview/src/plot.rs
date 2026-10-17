@@ -441,11 +441,15 @@ impl Plot {
     /// as [`Plot::take_pasted`] does after.
     pub fn paste_pvs(&mut self, text: &str) -> Pasted {
         let mut pasted = Pasted::default();
-        let keys: Vec<String> = self.traces.iter().map(|t| t.pv.name().key()).collect();
+        let plotted: Vec<String> = self.traces.iter().map(|t| t.pv.name().key()).collect();
+        let mut adding = Vec::new();
         for name in pv_names(text) {
-            if keys.contains(&pv::PvName::parse(&name).key()) {
+            let key = pv::PvName::parse(&name).key();
+            if plotted.contains(&key) {
                 pasted.present.push(name);
-            } else {
+            } else if !adding.contains(&key) {
+                // Once, however it is spelt (`A:B`, `ca://A:B`).
+                adding.push(key);
                 pasted.added.push(name);
             }
         }
@@ -3308,7 +3312,7 @@ mod tests {
         let pvs = PvManager::new();
         let mut p = Plot::new(&pvs, None);
         p.add_pvs(&names(&["A:B"]));
-        let pasted = p.paste_pvs("A:B, C:D\nhello pva://E:F");
+        let pasted = p.paste_pvs("A:B, C:D\nhello pva://E:F ca://C:D");
         assert_eq!(pasted.added, ["C:D", "pva://E:F"]);
         assert_eq!(pasted.present, ["A:B"]);
         assert_eq!(p.take_pasted(), Some(pasted));
@@ -3383,6 +3387,19 @@ mod tests {
         h.plot.paste_into_search("Y");
         h.frame(vec![]);
         assert_eq!(h.plot.search.text(), "SR-DI-DCCT-01:SIGNALXY");
+        // A primary click into the box selects all of it, but that is
+        // not the user's selection: the primary selection keeps theirs.
+        click_by(&mut h, egui::PointerButton::Primary, MIDDLE, &[]);
+        h.plot.take_search_selection();
+        click_by(
+            &mut h,
+            egui::PointerButton::Primary,
+            Pos2::new(80.0, 12.0),
+            &[],
+        );
+        h.frame(vec![]);
+        assert!(h.ctx.memory(|m| m.has_focus(h.plot.id.with("search"))));
+        assert_eq!(h.plot.take_search_selection(), None);
     }
 
     #[test]
